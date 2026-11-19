@@ -31,10 +31,15 @@ class Star:
         self.context = ctx
 mock_star_module.Star = Star
 
+mock_web_module = MagicMock()
+mock_web_module.json_response = lambda data, status_code=200, headers=None: {"data": data, "status_code": status_code}
+mock_web_module.error_response = lambda msg, status_code=400: {"error": msg, "status_code": status_code}
+
 sys.modules["astrbot"] = mock_astrbot
 sys.modules["astrbot.api"] = mock_api
 sys.modules["astrbot.api.event"] = mock_event
 sys.modules["astrbot.api.star"] = mock_star_module
+sys.modules["astrbot.api.web"] = mock_web_module
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import main
@@ -124,6 +129,102 @@ class TestPluginMain(unittest.TestCase):
         run_coro(plugin.on_llm_request(event, req))
         self.assertEqual(req.system_prompt, "ORIGINAL_PROMPT")
         self.assertIn("admin_999", plugin.security_manager.admin_uids)
+
+    def test_metadata_views_declared(self):
+        meta_path = Path("metadata.yaml")
+        self.assertTrue(meta_path.exists())
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = yaml.safe_load(f)
+        self.assertIn("views", meta)
+        views = meta["views"]
+        self.assertIsInstance(views, list)
+        self.assertGreaterEqual(len(views), 1)
+        audit_view = next((v for v in views if v.get("name") == "audit"), None)
+        self.assertIsNotNone(audit_view)
+        self.assertEqual(audit_view["target"], "plugin_page")
+        self.assertEqual(audit_view["title"], "网页工具审计")
+
+    def test_web_api_routes_registered(self):
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / "web_api_test.db")
+        mock_ctx = MagicMock()
+        mock_ctx.register_web_api = MagicMock()
+
+        plugin = main.PlaywrightToolPlugin(mock_ctx, config={
+            "audit_db_path": db_file,
+        })
+
+        self.assertEqual(mock_ctx.register_web_api.call_count, 4)
+        registered_calls = [c[0] for c in mock_ctx.register_web_api.call_args_list]
+        routes_map = {call[0]: call[2] for call in registered_calls}
+
+        self.assertIn("/astrbot_plugin_playwright_tools/audit/logs", routes_map)
+        self.assertEqual(routes_map["/astrbot_plugin_playwright_tools/audit/logs"], ["GET"])
+
+        self.assertIn("/astrbot_plugin_playwright_tools/audit/stats", routes_map)
+        self.assertEqual(routes_map["/astrbot_plugin_playwright_tools/audit/stats"], ["GET"])
+
+        self.assertIn("/astrbot_plugin_playwright_tools/audit/export", routes_map)
+        self.assertEqual(routes_map["/astrbot_plugin_playwright_tools/audit/export"], ["GET"])
+
+        self.assertIn("/astrbot_plugin_playwright_tools/audit/clear", routes_map)
+        self.assertEqual(routes_map["/astrbot_plugin_playwright_tools/audit/clear"], ["POST"])
+
+    def test_web_api_handlers_call(self):
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / "handlers_call_test.db")
+        if os.path.exists(db_file):
+            os.remove(db_file)
+        mock_ctx = MagicMock()
+        mock_ctx.register_web_api = MagicMock()
+
+        # 配置 mock request
+        mock_req = MagicMock()
+        mock_req.query.get.side_effect = lambda k, default=None, **kw: default
+        main.request = mock_req
+
+        plugin = main.PlaywrightToolPlugin(mock_ctx, config={
+            "audit_db_path": db_file,
+        })
+
+        # 写入一条审计记录
+        run_coro(plugin.audit_logger.log_action(
+            session_id="s1", context_key="c1", sender_id="u1",
+            tool_name="click", is_permitted=True, session_name="群1", sender_name="用户1"
+        ))
+
+        # 1. 验证 api_audit_logs
+        res_logs = run_coro(plugin.api_audit_logs())
+        self.assertEqual(res_logs["data"]["code"], 0)
+        self.assertEqual(res_logs["data"]["data"]["total"], 1)
+
+        # 2. 验证 api_audit_stats
+        res_stats = run_coro(plugin.api_audit_stats())
+        self.assertEqual(res_stats["data"]["code"], 0)
+        self.assertEqual(res_stats["data"]["data"]["total"], 1)
+
+        # 3. 验证 api_audit_export
+        res_export = run_coro(plugin.api_audit_export())
+        self.assertEqual(res_export["data"]["code"], 0)
+        self.assertIn("用户1", res_export["data"]["data"])
+
+        # 4. 验证 api_audit_clear 拒绝未确认
+        res_clear_reject = run_coro(plugin.api_audit_clear())
+        self.assertEqual(res_clear_reject["data"]["code"], -1)
+
+        # 模拟确认清空
+        async def mock_json(default={}):
+            return {"confirm": True}
+        main.request = MagicMock()
+        main.request.json = mock_json
+
+        res_clear = run_coro(plugin.api_audit_clear())
+        self.assertEqual(res_clear["data"]["code"], 0)
+        self.assertEqual(res_clear["data"]["data"]["cleared"], 1)
+
+        # 再次获取 stats 验证已被清空
+        res_stats_after = run_coro(plugin.api_audit_stats())
+        self.assertEqual(res_stats_after["data"]["data"]["total"], 0)
 
 if __name__ == "__main__":
     unittest.main()
