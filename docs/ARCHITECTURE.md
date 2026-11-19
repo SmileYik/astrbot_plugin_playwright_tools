@@ -14,7 +14,14 @@ flowchart TD
     PluginEntry[Plugin Entry: main.py]
     PromptHook["Prompt Hook: @filter.on_llm_request"]
     Cmds["User Commands: /browser"]
+    WebUI["AstrBot WebUI / Dashboard"]
+    AuditView["Plugin View: views/audit/ (Vite + React)"]
+    Bridge["AstrBotPluginView Bridge SDK"]
     
+    subgraph ViewLayer [Visualization & Web API Layer]
+        WebAPI["Web APIs: /audit/logs, /stats, /export, /clear"]
+    end
+
     subgraph FacadeLayer [Facade & Dispatch Layer]
         PwPage[PwPageTool: pw_page]
         PwInteract[PwInteractTool: pw_interact]
@@ -43,10 +50,16 @@ flowchart TD
     PluginEntry --> PromptHook
     PluginEntry --> Cmds
     PluginEntry --> FacadeLayer
+    PluginEntry --> ViewLayer
     FacadeLayer --> TimeoutWrapper
     TimeoutWrapper --> HandlerLayer
     HandlerLayer --> CoreLayer
     CoreLayer --> AdaptLayer
+
+    WebUI --> AuditView
+    AuditView --> Bridge
+    Bridge --> WebAPI
+    WebAPI --> AuditLog
 ```
 
 ### 1.1 适配器层 (`adapts/`)
@@ -67,6 +80,11 @@ flowchart TD
 - **`PwPageTool` / `PwInteractTool` / `PwMediaTool`**: 继承 `FunctionTool[AstrAgentContext]` 的类型化工具门面，面向大模型暴露 `pw_page`, `pw_interact`, `pw_media` 三大工具。
 - 每个工具在初始化时维护 `_actions` 字典映射，彻底移除 `if-elif-else` 分支；`call()` 统一设计为异步生成器（AsyncGenerator），并通过 `_execute_with_timeout` 施加全局单工具超时保护。
 - 在发送聊天截图时，使用 `yield event.image_result(path)` 直接交付，随后立即终止退出，避免后续文本消息覆盖聊天界面图片。
+
+### 1.5 可视化视图与 Web API 层 (`views/audit/`, `web-src/`, `main.py`)
+- **独立页面声明 (`metadata.yaml`)**：注册 `target: plugin_page` 视图 `audit`，由 WebUI 宿主统一加载展示。
+- **轻量 MD3 前端架构 (`web-src/`)**：基于 Vite + React 18 + TypeScript 构建，自适应宿主深浅色主题，遵循 Material Design 3 大圆角（16-24px）与表面色规范。列表卡片展示两行截断预览，点击触发右侧平滑滑出的大圆角 Side Sheet 抽屉，检视全量 JSON 入参、DOM 快照与报错原因。
+- **后端原生 Web API (`main.py`)**：通过 `context.register_web_api` 注册 `/{PLUGIN_NAME}/audit/logs`（多维条件检索与分页）、`/stats`（调用指标统计）、`/export`（RFC 4180 CSV / JSON 文件导出）与 `/clear`（二次确认清空）。所有接口天然复用 AstrBot WebUI 原生登录鉴权。
 
 ---
 

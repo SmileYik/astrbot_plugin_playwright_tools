@@ -31,7 +31,7 @@ from tools.tools import PwPageTool, PwInteractTool, PwMediaTool
     "PlaywrightTool",
     "SmileYik",
     "基于 Playwright 的大模型网页自动化工具插件，支持多租户隔离与权限白名单。",
-    "v2.0.1"
+    "v2.1.0"
 )
 class PlaywrightToolPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
