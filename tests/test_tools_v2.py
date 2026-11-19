@@ -5,7 +5,10 @@ import asyncio
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from tools.tools import PwPageTool, PwInteractTool, PwMediaTool
+from tools.tools import PwPageTool, PwInteractTool, PwMediaTool, _extract_event_and_metadata
+from tools.handlers.page_handler import PageHandler
+from tools.handlers.interact_handler import InteractHandler
+from tools.handlers.media_handler import MediaHandler
 
 def run_coro(coro):
     result = None
@@ -245,6 +248,94 @@ class TestToolsV2(unittest.TestCase):
         with patch("asyncio.wait_for", fake_wait_for):
             items = run_gen(self.media_tool.call(ctx_without_img_res, action="screenshot_viewport", target="chat"))
         self.assertEqual(items, ["[IMAGE_PATH:/tmp/test.png]"])
+
+    def test_extract_event_and_metadata_group_chat(self):
+        ctx = MagicMock()
+        event = MagicMock()
+        event.session_id = "s_group_1"
+        event.get_sender_id.return_value = "u_100"
+        event.get_sender_name.return_value = "测试昵称"
+        event.message_obj.group.group_name = "开发交流群"
+        ctx.event = event
+
+        ev, s_id, u_id, session_name, sender_name = _extract_event_and_metadata(ctx)
+        self.assertEqual(s_id, "s_group_1")
+        self.assertEqual(u_id, "u_100")
+        self.assertEqual(session_name, "开发交流群")
+        self.assertEqual(sender_name, "测试昵称")
+
+    def test_extract_event_and_metadata_private_chat(self):
+        ctx = MagicMock()
+        event = MagicMock()
+        event.session_id = "s_priv_1"
+        event.get_sender_id.return_value = "u_200"
+        event.get_sender_name.return_value = "Bob"
+        event.message_obj.group = None
+        ctx.event = event
+
+        ev, s_id, u_id, session_name, sender_name = _extract_event_and_metadata(ctx)
+        self.assertEqual(session_name, "私聊: Bob")
+        self.assertEqual(sender_name, "Bob")
+
+    def test_extract_event_and_metadata_fallback(self):
+        ctx = MagicMock(spec=["event"])
+        event = MagicMock(spec=["session_id", "get_sender_id"])
+        event.session_id = "s_raw"
+        event.get_sender_id.return_value = "u_raw"
+        ctx.event = event
+
+        ev, s_id, u_id, session_name, sender_name = _extract_event_and_metadata(ctx)
+        self.assertEqual(session_name, "s_raw")
+        self.assertEqual(sender_name, "u_raw")
+
+    def test_tool_chain_forwards_metadata_to_handlers(self):
+        ctx = MagicMock()
+        event = MagicMock()
+        event.session_id = "s_chain"
+        event.get_sender_id.return_value = "u_chain"
+        event.get_sender_name.return_value = "ChainUser"
+        event.message_obj.group.group_name = "ChainGroup"
+        ctx.event = event
+
+        captured = {}
+        async def mock_open(s_id, u_id, session_name="", sender_name="", **kwargs):
+            captured["page"] = (s_id, u_id, session_name, sender_name)
+            return "ok"
+        self.mock_page_handler.open_url = mock_open
+
+        with patch("asyncio.wait_for", fake_wait_for):
+            run_gen(self.page_tool.call(ctx, action="open", url="https://example.com"))
+
+        self.assertEqual(captured["page"], ("s_chain", "u_chain", "ChainGroup", "ChainUser"))
+
+    def test_handlers_forward_metadata_to_audit_logger(self):
+        mock_ctx_mgr = MagicMock()
+        mock_sec_mgr = MagicMock()
+        mock_audit = MagicMock()
+        mock_audit.log_action = unittest.mock.AsyncMock()
+        mock_extractor = MagicMock()
+
+        # 模拟上下文与页面
+        mock_page = MagicMock()
+        mock_page.url = "https://example.com"
+        mock_user_ctx = MagicMock()
+        mock_user_ctx.owner_id = "u_audit"
+        mock_user_ctx.current_page = mock_page
+        mock_ctx_mgr.resolve_context.return_value = (mock_user_ctx, "")
+
+        mock_sec_mgr.is_url_allowed_navigation.return_value = (False, "黑名单域名")
+        mock_sec_mgr.check_permission.return_value = (False, "权限不足")
+
+        handler = PageHandler(mock_ctx_mgr, mock_sec_mgr, mock_audit, mock_extractor)
+        run_coro(handler.open_url(
+            session_id="s_test", sender_id="u_test", url="https://blocked.com",
+            session_name="测试群", sender_name="测试者"
+        ))
+
+        mock_audit.log_action.assert_called_once()
+        _, kwargs = mock_audit.log_action.call_args
+        self.assertEqual(kwargs.get("session_name"), "测试群")
+        self.assertEqual(kwargs.get("sender_name"), "测试者")
 
 if __name__ == "__main__":
     unittest.main()

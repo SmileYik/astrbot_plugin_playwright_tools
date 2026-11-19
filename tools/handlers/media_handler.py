@@ -42,7 +42,12 @@ class MediaHandler:
         return res
 
     async def screenshot_viewport(
-        self, session_id: str, sender_id: str, target: str = "chat"
+        self,
+        session_id: str,
+        sender_id: str,
+        target: str = "chat",
+        session_name: str = "",
+        sender_name: str = "",
     ) -> str:
         """截取当前视口屏幕。"""
         ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
@@ -55,7 +60,8 @@ class MediaHandler:
         if not allowed:
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "screenshot_viewport", url, {"target": target}, reason, is_permitted=False, deny_reason=reason
+                "screenshot_viewport", url, {"target": target}, reason, is_permitted=False, deny_reason=reason,
+                session_name=session_name, sender_name=sender_name
             )
             return f"截图失败: {reason}"
 
@@ -63,7 +69,8 @@ class MediaHandler:
             deny_msg = "拒绝操作：管理员配置中未开启将截图发送给大模型（allow_screenshot_to_ai=False）。如需向用户展示，请使用 target='chat'。"
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "screenshot_viewport", url, {"target": target}, deny_msg, is_permitted=False, deny_reason=deny_msg
+                "screenshot_viewport", url, {"target": target}, deny_msg, is_permitted=False, deny_reason=deny_msg,
+                session_name=session_name, sender_name=sender_name
             )
             return deny_msg
 
@@ -72,7 +79,8 @@ class MediaHandler:
             res = self._save_or_encode(image_bytes, target)
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "screenshot_viewport", url, {"target": target}, "视口截图生成成功", is_permitted=True
+                "screenshot_viewport", url, {"target": target}, "视口截图生成成功", is_permitted=True,
+                session_name=session_name, sender_name=sender_name
             )
             return res
         except Exception as e:
@@ -85,6 +93,8 @@ class MediaHandler:
         target: str = "chat",
         max_height_px: int = 8000,
         timeout_sec: int = 15,
+        session_name: str = "",
+        sender_name: str = "",
     ) -> str:
         """截取长截图，支持最大像素与超时双重熔断截断。"""
         ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
@@ -97,7 +107,8 @@ class MediaHandler:
         if not allowed:
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "screenshot_full", url, {"target": target}, reason, is_permitted=False, deny_reason=reason
+                "screenshot_full", url, {"target": target}, reason, is_permitted=False, deny_reason=reason,
+                session_name=session_name, sender_name=sender_name
             )
             return f"长截图失败: {reason}"
 
@@ -105,7 +116,8 @@ class MediaHandler:
             deny_msg = "拒绝操作：管理员配置中未开启将截图发送给大模型（allow_screenshot_to_ai=False）。"
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "screenshot_full", url, {"target": target}, deny_msg, is_permitted=False, deny_reason=deny_msg
+                "screenshot_full", url, {"target": target}, deny_msg, is_permitted=False, deny_reason=deny_msg,
+                session_name=session_name, sender_name=sender_name
             )
             return deny_msg
 
@@ -159,11 +171,19 @@ class MediaHandler:
         res = self._save_or_encode(image_bytes, target, note)
         await self.audit_logger.log_action(
             session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-            "screenshot_full", url, {"target": target, "max_height_px": max_height_px}, "长截图生成成功", is_permitted=True
+            "screenshot_full", url, {"target": target, "max_height_px": max_height_px}, "长截图生成成功", is_permitted=True,
+            session_name=session_name, sender_name=sender_name
         )
         return res
 
-    async def download_file(self, session_id: str, sender_id: str, ref: int) -> str:
+    async def download_file(
+        self,
+        session_id: str,
+        sender_id: str,
+        ref: int,
+        session_name: str = "",
+        sender_name: str = "",
+    ) -> str:
         """点击指定链接/按钮触发文件下载。"""
         ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
         if ctx is None:
@@ -196,7 +216,8 @@ class MediaHandler:
             res = f"[FILE_PATH:{target_file_path}]\n已成功下载文件: {download.suggested_filename}"
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "download_file", url, {"ref": ref}, res, is_permitted=True
+                "download_file", url, {"ref": ref}, res, is_permitted=True,
+                session_name=session_name, sender_name=sender_name
             )
             return res
         except Exception as e:
