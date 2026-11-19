@@ -1,6 +1,7 @@
 import json
 import asyncio
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
+from typing import Any
+from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
 
@@ -9,20 +10,22 @@ from core.security_manager import SecurityManager
 from core.page_extractor import PageExtractor
 from core.context_manager import ContextManager
 from adapts.camoufox_adapter import CamoufoxAdapter
-from tools.browse_tools import BrowseTools
-from tools.action_tools import ActionTools
-from tools.media_tools import MediaTools
-from tools.dialog_tools import DialogTools
+
+from tools.handlers.page_handler import PageHandler
+from tools.handlers.interact_handler import InteractHandler
+from tools.handlers.media_handler import MediaHandler
+from tools.tools import PwPageTool, PwInteractTool, PwMediaTool
 
 @register(
     "PlaywrightTool",
     "SmileYik",
     "基于 Playwright 的大模型网页自动化工具插件，支持多租户隔离与权限白名单。",
-    "v1.0.0"
+    "v2.0.0"
 )
 class PlaywrightToolPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
+        self.context = context
         self.config = config or {}
 
         # 1. 解析配置
@@ -40,13 +43,20 @@ class PlaywrightToolPlugin(Star):
             whitelist_rules = list(raw_rules)
 
         allow_screenshot_to_ai = bool(self.config.get("allow_screenshot_to_ai", False))
+        enable_close_tool = bool(self.config.get("enable_close_tool", True))
         context_mode = str(self.config.get("context_mode", "personal"))
         idle_timeout = int(self.config.get("idle_timeout_minutes", 10))
         storage_state_path = str(self.config.get("storage_state_path", ""))
         retention_days = int(self.config.get("audit_retention_days", 30))
 
+        tool_timeout = int(self.config.get("tool_execution_timeout_seconds", 30))
+        screenshot_max_height = int(self.config.get("screenshot_max_height_px", 8000))
+        screenshot_timeout = int(self.config.get("screenshot_timeout_seconds", 15))
+        self.system_prompt_injection = str(self.config.get("system_prompt_injection", "")).strip()
+
         # 2. 初始化核心服务
-        self.audit_logger = AuditLogger("data/audit.db")
+        audit_db_path = str(self.config.get("audit_db_path", "data/audit.db"))
+        self.audit_logger = AuditLogger(audit_db_path)
         self.security_manager = SecurityManager(
             admin_only=admin_only,
             admin_uids=extra_admins,
@@ -63,20 +73,37 @@ class PlaywrightToolPlugin(Star):
             storage_state_path=storage_state_path,
         )
 
-        # 3. 初始化工具集
-        self.browse_tools = BrowseTools(
-            self.context_manager, self.security_manager, self.audit_logger, self.page_extractor
+        # 3. 初始化模块化 Handlers 与复合 FunctionTool
+        self.page_handler = PageHandler(
+            self.context_manager,
+            self.security_manager,
+            self.audit_logger,
+            self.page_extractor,
+            enable_close_tool=enable_close_tool,
         )
-        self.action_tools = ActionTools(
+        self.interact_handler = InteractHandler(
             self.context_manager, self.security_manager, self.audit_logger
         )
-        self.media_tools = MediaTools(
-            self.context_manager, self.security_manager, self.audit_logger,
-            allow_screenshot_to_ai=allow_screenshot_to_ai, download_dir="data/downloads"
+        self.media_handler = MediaHandler(
+            self.context_manager,
+            self.security_manager,
+            self.audit_logger,
+            allow_screenshot_to_ai=allow_screenshot_to_ai,
+            download_dir="data/downloads",
         )
-        self.dialog_tools = DialogTools(
-            self.context_manager, self.security_manager, self.audit_logger
+
+        self.pw_page_tool = PwPageTool(page_handler=self.page_handler, timeout_seconds=tool_timeout)
+        self.pw_interact_tool = PwInteractTool(interact_handler=self.interact_handler, timeout_seconds=tool_timeout)
+        self.pw_media_tool = PwMediaTool(
+            media_handler=self.media_handler,
+            timeout_seconds=tool_timeout,
+            screenshot_max_height_px=screenshot_max_height,
+            screenshot_timeout_seconds=screenshot_timeout,
         )
+
+        # 4. 面向对象注册 FunctionTool
+        if hasattr(self.context, "add_llm_tools"):
+            self.context.add_llm_tools(self.pw_page_tool, self.pw_interact_tool, self.pw_media_tool)
 
         self._retention_days = retention_days
         self._cleanup_task: asyncio.Task | None = None
@@ -105,7 +132,6 @@ class PlaywrightToolPlugin(Star):
         except Exception as e:
             logger.warning(f"[PlaywrightTool] 审计日志清理失败: {e}")
 
-        # 启动周期性空闲资源与过期日志清理后台任务
         self._cleanup_task = asyncio.create_task(self._periodic_cleanup_loop())
 
     async def _periodic_cleanup_loop(self):
@@ -122,7 +148,7 @@ class PlaywrightToolPlugin(Star):
             except Exception as e:
                 logger.warning(f"[PlaywrightTool] 周期清理轮询异常: {e}")
 
-    # ==================== 用户指令 ====================
+    # ==================== 用户管理指令 ====================
 
     @filter.command("browser")
     async def browser_cmd(self, event: AstrMessageEvent, sub_cmd: str = "", arg: str = ""):
@@ -176,151 +202,19 @@ class PlaywrightToolPlugin(Star):
                 "- /browser status : 查看当前浏览器状态"
             )
 
-    # ==================== 大模型工具 (LLM Tools) ====================
+    # ==================== 大模型请求系统提示词注入 ====================
 
-    @filter.llm_tool(name="open_url")
-    async def open_url(self, event: AstrMessageEvent, url: str) -> MessageEventResult:
-        """打开目标网页并返回提取后的页面元素快照与 Ref ID 编号。
-
-        Args:
-            url(string): 目标网页 URL (包含 http:// 或 https://)
-        """
+    @filter.on_llm_request()
+    async def on_llm_request(self, event: AstrMessageEvent, req: Any):
+        """在向大模型发起请求前同步管理员标识，并在配置了系统提示词时进行动态追加注入。"""
         self._sync_event_admin(event)
-        res = await self.browse_tools.open_url(event.session_id, str(event.get_sender_id()), url)
-        yield event.plain_result(res)
-
-    @filter.llm_tool(name="read_page")
-    async def read_page(self, event: AstrMessageEvent, page: int = 1) -> MessageEventResult:
-        """读取当前页面的内容快照，支持指定分页查看长页面后续内容。
-
-        Args:
-            page(number): 页码编号 (从 1 开始)
-        """
-        self._sync_event_admin(event)
-        res = await self.browse_tools.read_page(event.session_id, str(event.get_sender_id()), int(page))
-        yield event.plain_result(res)
-
-    @filter.llm_tool(name="click")
-    async def click(self, event: AstrMessageEvent, ref: int) -> MessageEventResult:
-        """点击页面快照中带 Ref ID 编号的交互元素。
-
-        Args:
-            ref(number): 目标元素编号 Ref ID (如 1, 2)
-        """
-        self._sync_event_admin(event)
-        res = await self.action_tools.click(event.session_id, str(event.get_sender_id()), int(ref))
-        yield event.plain_result(res)
-
-    @filter.llm_tool(name="fill_form")
-    async def fill_form(self, event: AstrMessageEvent, ref: int, text: str) -> MessageEventResult:
-        """在页面快照中的输入框填入文本内容。
-
-        Args:
-            ref(number): 输入框编号 Ref ID
-            text(string): 需要输入的文本内容
-        """
-        self._sync_event_admin(event)
-        res = await self.action_tools.fill_form(event.session_id, str(event.get_sender_id()), int(ref), str(text))
-        yield event.plain_result(res)
-
-    @filter.llm_tool(name="select_option")
-    async def select_option(self, event: AstrMessageEvent, ref: int, value: str) -> MessageEventResult:
-        """在下拉选择框中选取指定的值。
-
-        Args:
-            ref(number): 下拉框编号 Ref ID
-            value(string): 需要选取的选项值或选项文本
-        """
-        self._sync_event_admin(event)
-        res = await self.action_tools.select_option(event.session_id, str(event.get_sender_id()), int(ref), str(value))
-        yield event.plain_result(res)
-
-    @filter.llm_tool(name="scroll")
-    async def scroll(self, event: AstrMessageEvent, direction: str = "down", amount: int = 500) -> MessageEventResult:
-        """垂直滚动当前页面。
-
-        Args:
-            direction(string): 滚动方向 ('down' 向下, 'up' 向上)
-            amount(number): 滚动像素距离 (默认 500)
-        """
-        self._sync_event_admin(event)
-        res = await self.action_tools.scroll(event.session_id, str(event.get_sender_id()), str(direction), int(amount))
-        yield event.plain_result(res)
-
-    @filter.llm_tool(name="switch_tab")
-    async def switch_tab(self, event: AstrMessageEvent, tab_index: int) -> MessageEventResult:
-        """切换至指定的浏览器标签页。
-
-        Args:
-            tab_index(number): 标签页序号 (从 1 开始)
-        """
-        self._sync_event_admin(event)
-        res = await self.browse_tools.switch_tab(event.session_id, str(event.get_sender_id()), int(tab_index))
-        yield event.plain_result(res)
-
-    @filter.llm_tool(name="take_screenshot")
-    async def take_screenshot(self, event: AstrMessageEvent, target: str = "chat") -> MessageEventResult:
-        """截取当前网页屏幕。
-
-        Args:
-            target(string): 交付目标 ('chat' 发送到聊天会话，'ai' 返回 base64 给模型分析)
-        """
-        self._sync_event_admin(event)
-        res = await self.media_tools.take_screenshot(event.session_id, str(event.get_sender_id()), str(target))
-        if res.startswith("[IMAGE_PATH:") and res.endswith("]"):
-            path = res[len("[IMAGE_PATH:"):-1]
-            try:
-                from astrbot.api.message_components import Image
-                yield event.chain_result([Image.fromFileSystem(path)])
-                return
-            except Exception:
-                yield event.plain_result(f"截图保存成功: {path}")
-                return
-        yield event.plain_result(res)
-
-    @filter.llm_tool(name="download_file")
-    async def download_file(self, event: AstrMessageEvent, ref: int) -> MessageEventResult:
-        """点击指定下载链接下载文件。
-
-        Args:
-            ref(number): 下载链接或按钮编号 Ref ID
-        """
-        self._sync_event_admin(event)
-        res = await self.media_tools.download_file(event.session_id, str(event.get_sender_id()), int(ref))
-        if res.startswith("[FILE_PATH:") and "\n" in res:
-            parts = res.split("\n", 1)
-            fpath = parts[0][len("[FILE_PATH:"):-1]
-            try:
-                from astrbot.api.message_components import File
-                yield event.chain_result([File.fromFileSystem(fpath)])
-                return
-            except Exception:
-                yield event.plain_result(res)
-                return
-        yield event.plain_result(res)
-
-    @filter.llm_tool(name="handle_dialog")
-    async def handle_dialog(self, event: AstrMessageEvent, action: str = "accept", prompt_text: str = "") -> MessageEventResult:
-        """预设下一次浏览器原生弹窗 (alert/confirm/prompt) 的应答策略。
-
-        Args:
-            action(string): 响应策略 ('accept' 确认, 'dismiss' 取消)
-            prompt_text(string): 若为 prompt 弹窗，需要输入的字符串 (可选)
-        """
-        self._sync_event_admin(event)
-        p_text = prompt_text if prompt_text else None
-        res = await self.dialog_tools.handle_dialog(event.session_id, str(event.get_sender_id()), str(action), p_text)
-        yield event.plain_result(res)
-
-    @filter.llm_tool(name="close_browser")
-    async def close_browser(self, event: AstrMessageEvent) -> MessageEventResult:
-        """主动关闭并释放当前浏览器上下文以释放系统资源。"""
-        self._sync_event_admin(event)
-        if not self.config.get("enable_close_tool", True):
-            yield event.plain_result("管理员未启用 AI 主动关闭浏览器的功能。")
+        if not self.system_prompt_injection:
             return
-        res = await self.browse_tools.close_browser(event.session_id, str(event.get_sender_id()))
-        yield event.plain_result(res)
+        if hasattr(req, "system_prompt"):
+            if req.system_prompt:
+                req.system_prompt = f"{req.system_prompt}\n\n{self.system_prompt_injection}"
+            else:
+                req.system_prompt = self.system_prompt_injection
 
     async def terminate(self):
         """插件销毁释放所有浏览器资源及取消轮询清理任务。"""

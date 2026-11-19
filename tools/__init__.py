@@ -1,6 +1,13 @@
-from .browse_tools import BrowseTools
-from .action_tools import ActionTools
-from .media_tools import MediaTools
-from .dialog_tools import DialogTools
+from .tools import PwPageTool, PwInteractTool, PwMediaTool
+from .handlers.page_handler import PageHandler
+from .handlers.interact_handler import InteractHandler
+from .handlers.media_handler import MediaHandler
 
-__all__ = ["BrowseTools", "ActionTools", "MediaTools", "DialogTools"]
+__all__ = [
+    "PwPageTool",
+    "PwInteractTool",
+    "PwMediaTool",
+    "PageHandler",
+    "InteractHandler",
+    "MediaHandler",
+]

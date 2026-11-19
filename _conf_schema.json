@@ -19,10 +19,30 @@
     "description": "空闲自动销毁时间 (分钟)",
     "default": 10
   },
+  "tool_execution_timeout_seconds": {
+    "type": "int",
+    "description": "单个工具执行超时时间 (秒)",
+    "default": 30
+  },
+  "screenshot_max_height_px": {
+    "type": "int",
+    "description": "长截图最大高度限制 (像素)，超出自动截断",
+    "default": 8000
+  },
+  "screenshot_timeout_seconds": {
+    "type": "int",
+    "description": "长截图执行超时时间 (秒)，超时降级为视口截图",
+    "default": 15
+  },
   "allow_screenshot_to_ai": {
     "type": "bool",
     "description": "是否允许将网页截图发送给大模型进行视觉分析",
     "default": false
+  },
+  "system_prompt_injection": {
+    "type": "text",
+    "description": "自定义注入大模型的系统提示词 (为空串则不进行注入)",
+    "default": ""
   },
   "storage_state_path": {
     "type": "string",

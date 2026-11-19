@@ -106,10 +106,31 @@ class PageExtractor:
         if page_index < total_pages:
             remain = total_pages - page_index
             result_parts.append(
-                f"--- [提示: 本页未完，剩余 {remain} 页，可调用 read_page(page={page_index + 1}) 查看后续] ---"
+                f"--- [提示: 本页未完，剩余 {remain} 页，可调用 pw_page(action='read', page={page_index + 1}) 查看后续] ---"
             )
 
         return "\n".join(result_parts)
+
+    def search_snapshot(self, snapshot_text: str, keyword: str) -> str:
+        """在页面快照中快速检索匹配关键词的行并高亮返回匹配上下文。"""
+        kw = keyword.strip()
+        if not kw:
+            return "检索失败: 请提供有效的检索关键词"
+
+        kw_lower = kw.lower()
+        lines = snapshot_text.splitlines()
+        matched_lines: list[str] = []
+
+        for line in lines:
+            if kw_lower in line.lower():
+                matched_lines.append(line)
+
+        if not matched_lines:
+            return f"=== 页面关键词检索结果: '{kw}' ===\n未找到匹配 '{kw}' 的文本或可操作元素。建议调用 pw_page(action='read') 浏览页面。"
+
+        header = f"=== 页面关键词检索结果: '{kw}' (找到 {len(matched_lines)} 处匹配) ==="
+        body = "\n".join(matched_lines)
+        return f"{header}\n{body}"
 
     def get_js_extractor_script(self) -> str:
         """返回注入至浏览器执行的 JavaScript 提取脚本。"""
