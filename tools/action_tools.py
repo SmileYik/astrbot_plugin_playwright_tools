@@ -1,6 +1,6 @@
-from core.context_manager import ContextManager
-from core.security_manager import SecurityManager
-from core.audit_logger import AuditLogger
+from ..core.context_manager import ContextManager
+from ..core.security_manager import SecurityManager
+from ..core.audit_logger import AuditLogger
 
 class ActionTools:
     """页面动作交互工具集 (点击、输入、选择、滚动)。"""

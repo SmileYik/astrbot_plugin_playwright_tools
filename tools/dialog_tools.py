@@ -1,6 +1,6 @@
-from core.context_manager import ContextManager
-from core.security_manager import SecurityManager
-from core.audit_logger import AuditLogger
+from ..core.context_manager import ContextManager
+from ..core.security_manager import SecurityManager
+from ..core.audit_logger import AuditLogger
 
 class DialogTools:
     """浏览器弹窗控制工具。"""

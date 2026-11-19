@@ -16,16 +16,16 @@ except ImportError:
 
 PLUGIN_NAME = "astrbot_plugin_playwright_tools"
 
-from core.audit_logger import AuditLogger
-from core.security_manager import SecurityManager
-from core.page_extractor import PageExtractor
-from core.context_manager import ContextManager
-from adapts.camoufox_adapter import CamoufoxAdapter
+from .core.audit_logger import AuditLogger
+from .core.security_manager import SecurityManager
+from .core.page_extractor import PageExtractor
+from .core.context_manager import ContextManager
+from .adapts.camoufox_adapter import CamoufoxAdapter
 
-from tools.handlers.page_handler import PageHandler
-from tools.handlers.interact_handler import InteractHandler
-from tools.handlers.media_handler import MediaHandler
-from tools.tools import PwPageTool, PwInteractTool, PwMediaTool
+from .tools.handlers.page_handler import PageHandler
+from .tools.handlers.interact_handler import InteractHandler
+from .tools.handlers.media_handler import MediaHandler
+from .tools.tools import PwPageTool, PwInteractTool, PwMediaTool
 
 @register(
     "PlaywrightTool",

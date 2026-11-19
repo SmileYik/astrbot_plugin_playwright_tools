@@ -1,8 +1,8 @@
 from typing import Any
-from core.context_manager import ContextManager
-from core.security_manager import SecurityManager
-from core.audit_logger import AuditLogger
-from core.page_extractor import PageExtractor
+from ..core.context_manager import ContextManager
+from ..core.security_manager import SecurityManager
+from ..core.audit_logger import AuditLogger
+from ..core.page_extractor import PageExtractor
 
 class BrowseTools:
     """页面导航与标签页管理工具集。"""

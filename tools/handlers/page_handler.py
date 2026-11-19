@@ -1,7 +1,7 @@
-from core.context_manager import ContextManager
-from core.security_manager import SecurityManager
-from core.audit_logger import AuditLogger
-from core.page_extractor import PageExtractor
+from ...core.context_manager import ContextManager
+from ...core.security_manager import SecurityManager
+from ...core.audit_logger import AuditLogger
+from ...core.page_extractor import PageExtractor
 
 class PageHandler:
     """页面导航、内容读取、快速检索与标签页/弹窗管理。"""

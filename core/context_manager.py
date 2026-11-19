@@ -1,7 +1,7 @@
 import time
 from dataclasses import dataclass, field
 from typing import Any
-from adapts.base import BrowserAdapterBase
+from ..adapts.base import BrowserAdapterBase
 from .security_manager import SecurityManager
 
 @dataclass

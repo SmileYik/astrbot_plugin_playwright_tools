@@ -21,10 +21,10 @@ except (ImportError, AttributeError):
         class AstrAgentContext:
             pass
 
-from tools.schemas import PW_PAGE_SCHEMA, PW_INTERACT_SCHEMA, PW_MEDIA_SCHEMA
-from tools.handlers.page_handler import PageHandler
-from tools.handlers.interact_handler import InteractHandler
-from tools.handlers.media_handler import MediaHandler
+from .schemas import PW_PAGE_SCHEMA, PW_INTERACT_SCHEMA, PW_MEDIA_SCHEMA
+from .handlers.page_handler import PageHandler
+from .handlers.interact_handler import InteractHandler
+from .handlers.media_handler import MediaHandler
 
 
 def _extract_event_and_metadata(context: Any) -> tuple[Any, str, str, str, str]:

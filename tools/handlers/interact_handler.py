@@ -1,6 +1,6 @@
-from core.context_manager import ContextManager
-from core.security_manager import SecurityManager
-from core.audit_logger import AuditLogger
+from ...core.context_manager import ContextManager
+from ...core.security_manager import SecurityManager
+from ...core.audit_logger import AuditLogger
 
 class InteractHandler:
     """页面动作交互处理器 (点击、输入、选择、悬停、聚焦/失焦、拖拽、按键、滚动)。"""
