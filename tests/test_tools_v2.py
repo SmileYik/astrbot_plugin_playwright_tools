@@ -132,23 +132,69 @@ class TestToolsV2(unittest.TestCase):
             res = run_gen(self.interact_tool.call(self.mock_context_wrapper, action="click"))[0]
         self.assertIn("参数错误", res)
 
-    def test_media_tool_dispatch_viewport(self):
+    def test_media_tool_actions_map_exists(self):
+        self.assertTrue(hasattr(self.media_tool, "_actions"))
+        for act in ["screenshot_viewport", "screenshot_full", "download"]:
+            self.assertIn(act, self.media_tool._actions)
+
+    def test_media_tool_call_is_async_generator(self):
+        gen = self.media_tool.call(self.mock_context_wrapper, action="unknown_action")
+        self.assertTrue(hasattr(gen, "__aiter__"))
+        with patch("asyncio.wait_for", fake_wait_for):
+            items = run_gen(gen)
+        self.assertEqual(len(items), 1)
+        self.assertIn("未知的动作", items[0])
+
+    def test_media_tool_chat_yields_image_result_and_stops(self):
+        self.mock_context_wrapper.event.image_result = MagicMock(return_value="MOCK_IMAGE_CHAIN")
         async def mock_vp(s_id, u_id, target):
-            return f"[IMAGE_PATH:vp.png]"
+            return "[IMAGE_PATH:/tmp/vp.png]\n视口截图已截取"
         self.mock_media_handler.screenshot_viewport = mock_vp
 
         with patch("asyncio.wait_for", fake_wait_for):
-            res = run_coro(self.media_tool.call(self.mock_context_wrapper, action="screenshot_viewport", target="chat"))
-        self.assertEqual(res, "[IMAGE_PATH:vp.png]")
+            items = run_gen(self.media_tool.call(self.mock_context_wrapper, action="screenshot_viewport", target="chat"))
+        self.assertEqual(items, ["MOCK_IMAGE_CHAIN"])
+        self.assertEqual(len(items), 1)
+        self.mock_context_wrapper.event.image_result.assert_called_once_with("/tmp/vp.png")
 
-    def test_media_tool_dispatch_full(self):
+    def test_media_tool_chat_full_screenshot_yields_image_result_and_stops(self):
+        self.mock_context_wrapper.event.image_result = MagicMock(return_value="MOCK_FULL_IMAGE_CHAIN")
         async def mock_full(s_id, u_id, target, max_height_px, timeout_sec):
-            return f"[IMAGE_PATH:full.png]"
+            return "[IMAGE_PATH:/tmp/full.png]"
         self.mock_media_handler.screenshot_full = mock_full
 
         with patch("asyncio.wait_for", fake_wait_for):
-            res = run_coro(self.media_tool.call(self.mock_context_wrapper, action="screenshot_full", target="chat"))
-        self.assertEqual(res, "[IMAGE_PATH:full.png]")
+            items = run_gen(self.media_tool.call(self.mock_context_wrapper, action="screenshot_full", target="chat"))
+        self.assertEqual(items, ["MOCK_FULL_IMAGE_CHAIN"])
+        self.assertEqual(len(items), 1)
+        self.mock_context_wrapper.event.image_result.assert_called_once_with("/tmp/full.png")
+
+    def test_media_tool_ai_target_yields_text(self):
+        async def mock_vp(s_id, u_id, target):
+            return "data:image/png;base64,abc123xyz"
+        self.mock_media_handler.screenshot_viewport = mock_vp
+
+        with patch("asyncio.wait_for", fake_wait_for):
+            items = run_gen(self.media_tool.call(self.mock_context_wrapper, action="screenshot_viewport", target="ai"))
+        self.assertEqual(items, ["data:image/png;base64,abc123xyz"])
+
+    def test_media_tool_chat_failure_yields_error_text(self):
+        async def mock_vp(s_id, u_id, target):
+            return "截图失败: 权限不足"
+        self.mock_media_handler.screenshot_viewport = mock_vp
+
+        with patch("asyncio.wait_for", fake_wait_for):
+            items = run_gen(self.media_tool.call(self.mock_context_wrapper, action="screenshot_viewport", target="chat"))
+        self.assertEqual(items, ["截图失败: 权限不足"])
+
+    def test_media_tool_download_dispatch(self):
+        async def mock_dl(s_id, u_id, ref):
+            return "[FILE_PATH:/tmp/down.pdf]\n下载成功"
+        self.mock_media_handler.download_file = mock_dl
+
+        with patch("asyncio.wait_for", fake_wait_for):
+            items = run_gen(self.media_tool.call(self.mock_context_wrapper, action="download", ref=1))
+        self.assertEqual(items, ["[FILE_PATH:/tmp/down.pdf]\n下载成功"])
 
     def test_tool_handler_attribute_is_none(self):
         self.assertIsNone(self.page_tool.handler)
@@ -176,30 +222,19 @@ class TestToolsV2(unittest.TestCase):
         self.assertEqual(captured.get("session_id"), "nested_s1")
         self.assertEqual(captured.get("sender_id"), "nested_u1")
 
-    def test_media_tool_chat_delivery_with_send(self):
-        sent_messages = []
-        async def mock_send(chain):
-            sent_messages.append(chain)
-
-        ctx_with_send = MagicMock(spec=["event"])
-        ctx_with_send.event = MagicMock()
-        ctx_with_send.event.session_id = "s1"
-        ctx_with_send.event.get_sender_id.return_value = "u1"
-        ctx_with_send.event.send = mock_send
+    def test_media_tool_chat_fallback_when_no_image_result(self):
+        ctx_without_img_res = MagicMock(spec=["event"])
+        ctx_without_img_res.event = MagicMock(spec=["session_id", "get_sender_id"])
+        ctx_without_img_res.event.session_id = "s1"
+        ctx_without_img_res.event.get_sender_id.return_value = "u1"
 
         async def mock_vp(s_id, u_id, target):
-            return "[IMAGE_PATH:test.png]"
+            return "[IMAGE_PATH:/tmp/test.png]"
         self.mock_media_handler.screenshot_viewport = mock_vp
 
-        # mock astrbot.api.message_components
-        with patch.dict("sys.modules", {
-            "astrbot.api.message_components": MagicMock(),
-            "astrbot.api.event": MagicMock(),
-        }):
-            with patch("asyncio.wait_for", fake_wait_for):
-                res = run_coro(self.media_tool.call(ctx_with_send, action="screenshot_viewport", target="chat"))
-        self.assertIn("发送至聊天", res)
-        self.assertEqual(len(sent_messages), 1)
+        with patch("asyncio.wait_for", fake_wait_for):
+            items = run_gen(self.media_tool.call(ctx_without_img_res, action="screenshot_viewport", target="chat"))
+        self.assertEqual(items, ["[IMAGE_PATH:/tmp/test.png]"])
 
 if __name__ == "__main__":
     unittest.main()

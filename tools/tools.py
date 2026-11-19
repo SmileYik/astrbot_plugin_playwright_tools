@@ -246,80 +246,47 @@ class PwMediaTool(FunctionTool[AstrAgentContext]):
             super().__init__(name=self.name, description=self.description, parameters=self.parameters)
         except Exception:
             pass
+        self._actions = {
+            "screenshot_viewport": self._action_screenshot_viewport,
+            "screenshot_full": self._action_screenshot_full,
+            "download": self._action_download,
+        }
 
-    async def call(self, context: AstrAgentContext, **kwargs) -> str:
-        async def _dispatch():
-            event, session_id, sender_id = _extract_event_and_ids(context)
-            action = kwargs.get("action")
+    async def _action_screenshot_viewport(self, session_id: str, sender_id: str, **kwargs) -> str:
+        target = kwargs.get("target", "chat")
+        return await self.media_handler.screenshot_viewport(session_id, sender_id, target=str(target))
 
-            if action == "screenshot_viewport":
-                target = kwargs.get("target", "chat")
-                res = await self.media_handler.screenshot_viewport(session_id, sender_id, target=str(target))
-                if target.lower() == "chat" and res.startswith("[IMAGE_PATH:"):
-                    lines = res.split("\n", 1)
-                    img_path = lines[0][len("[IMAGE_PATH:"):-1]
-                    note = f"\n{lines[1]}" if len(lines) > 1 else ""
-                    try:
-                        from astrbot.api.message_components import Image
-                        from astrbot.api.event import MessageChain
-                        chain = None
-                        if hasattr(Image, "fromFileSystem"):
-                            chain = MessageChain([Image.fromFileSystem(img_path)])
-                        if chain and hasattr(event, "send") and callable(event.send):
-                            await event.send(chain)
-                            return f"视口截图已生成并发送至聊天。{note}".strip()
-                    except Exception:
-                        pass
-                return res
+    async def _action_screenshot_full(self, session_id: str, sender_id: str, **kwargs) -> str:
+        target = kwargs.get("target", "chat")
+        return await self.media_handler.screenshot_full(
+            session_id,
+            sender_id,
+            target=str(target),
+            max_height_px=self.screenshot_max_height_px,
+            timeout_sec=self.screenshot_timeout_seconds,
+        )
 
-            elif action == "screenshot_full":
-                target = kwargs.get("target", "chat")
-                res = await self.media_handler.screenshot_full(
-                    session_id,
-                    sender_id,
-                    target=str(target),
-                    max_height_px=self.screenshot_max_height_px,
-                    timeout_sec=self.screenshot_timeout_seconds,
-                )
-                if target.lower() == "chat" and res.startswith("[IMAGE_PATH:"):
-                    lines = res.split("\n", 1)
-                    img_path = lines[0][len("[IMAGE_PATH:"):-1]
-                    note = f"\n{lines[1]}" if len(lines) > 1 else ""
-                    try:
-                        from astrbot.api.message_components import Image
-                        from astrbot.api.event import MessageChain
-                        chain = None
-                        if hasattr(Image, "fromFileSystem"):
-                            chain = MessageChain([Image.fromFileSystem(img_path)])
-                        if chain and hasattr(event, "send") and callable(event.send):
-                            await event.send(chain)
-                            return f"长截图已生成并发送至聊天。{note}".strip()
-                    except Exception:
-                        pass
-                return res
+    async def _action_download(self, session_id: str, sender_id: str, **kwargs) -> str:
+        ref = kwargs.get("ref")
+        if ref is None:
+            return "参数错误: action='download' 时必须提供 ref 参数"
+        return await self.media_handler.download_file(session_id, sender_id, ref=int(ref))
 
-            elif action == "download":
-                ref = kwargs.get("ref")
-                if ref is None:
-                    return "参数错误: action='download' 时必须提供 ref 参数"
-                res = await self.media_handler.download_file(session_id, sender_id, ref=int(ref))
-                if res.startswith("[FILE_PATH:"):
-                    lines = res.split("\n", 1)
-                    fpath = lines[0][len("[FILE_PATH:"):-1]
-                    try:
-                        from astrbot.api.message_components import File
-                        from astrbot.api.event import MessageChain
-                        chain = None
-                        if hasattr(File, "fromFileSystem"):
-                            chain = MessageChain([File.fromFileSystem(fpath)])
-                        if chain and hasattr(event, "send") and callable(event.send):
-                            await event.send(chain)
-                            return f"文件已下载并发送至聊天: {os.path.basename(fpath)}"
-                    except Exception:
-                        pass
-                return res
+    async def call(self, context: AstrAgentContext, **kwargs):
+        event, session_id, sender_id = _extract_event_and_ids(context)
+        action = kwargs.get("action")
+        handler = self._actions.get(action)
+        if not handler:
+            yield f"未知的动作: {action}。支持的动作包括: screenshot_viewport, screenshot_full, download"
+            return
 
-            else:
-                return f"未知的动作: {action}。支持的动作包括: screenshot_viewport, screenshot_full, download"
+        res = await _execute_with_timeout(handler(session_id, sender_id, **kwargs), self.timeout_seconds)
 
-        return await _execute_with_timeout(_dispatch(), self.timeout_seconds)
+        target = str(kwargs.get("target", "chat")).lower()
+        if action in ("screenshot_viewport", "screenshot_full") and target == "chat" and res.startswith("[IMAGE_PATH:"):
+            img_path = res.split("\n", 1)[0][len("[IMAGE_PATH:"):-1]
+            if hasattr(event, "image_result") and callable(event.image_result):
+                yield event.image_result(img_path)
+                return
+
+        yield res
