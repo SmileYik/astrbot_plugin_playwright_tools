@@ -65,7 +65,8 @@ flowchart TD
 
 ### 1.4 门面分发层 (`tools/tools.py`, `tools/schemas.py`)
 - **`PwPageTool` / `PwInteractTool` / `PwMediaTool`**: 继承 `FunctionTool[AstrAgentContext]` 的类型化工具门面，面向大模型暴露 `pw_page`, `pw_interact`, `pw_media` 三大工具。
-- 每个工具在 `call()` 内部均使用 `asyncio.wait_for` 施加全局单工具超时熔断保护。
+- 每个工具在初始化时维护 `_actions` 字典映射，彻底移除 `if-elif-else` 分支；`call()` 统一设计为异步生成器（AsyncGenerator），并通过 `_execute_with_timeout` 施加全局单工具超时保护。
+- 在发送聊天截图时，使用 `yield event.image_result(path)` 直接交付，随后立即终止退出，避免后续文本消息覆盖聊天界面图片。
 
 ---
 
@@ -99,5 +100,5 @@ Session S1 ──> All Users share Context (Owner: S1)
 若需为现有工具扩展动作（Action）或新增复合工具：
 1. **Schema 扩展**：在 `tools/schemas.py` 中更新对应工具的 `action` 枚举及字段定义。
 2. **Handler 实现**：在 `tools/handlers/` 相应模块中编写底层逻辑，并在执行前后记录 `audit_logger.log_action`。
-3. **门面转发**：在 `tools/tools.py` 的对应 `FunctionTool.call()` 中增加分支转发。
+3. **门面转发**：在 `tools/tools.py` 对应工具中实现私有动作方法，并注册进 `self._actions` 映射表中。
 4. **单测覆盖**：在 `tests/` 中编写针对新动作的单元测试。
