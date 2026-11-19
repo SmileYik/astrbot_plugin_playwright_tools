@@ -16,6 +16,27 @@ def run_coro(coro):
     except StopIteration as e:
         return e.value
 
+import unittest
+import os
+import sys
+import tempfile
+import json
+import csv
+import io
+from pathlib import Path
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from core.audit_logger import AuditLogger
+
+TEMP_DIR = Path(tempfile.gettempdir()) / "astrbot_test_audit"
+
+def run_coro(coro):
+    """在无网络沙箱环境下无开销执行普通协程，规避 socket.socketpair 挂起问题。"""
+    try:
+        coro.send(None)
+    except StopIteration as e:
+        return e.value
+
 class TestAuditLogger(unittest.TestCase):
     def setUp(self):
         TEMP_DIR.mkdir(parents=True, exist_ok=True)
@@ -36,10 +57,170 @@ class TestAuditLogger(unittest.TestCase):
             session_id="s1", context_key="c1", sender_id="u1",
             tool_name="click", url="https://example.com",
             input_args={"ref": 1}, output_result="ok",
-            is_permitted=True
+            is_permitted=True, session_name="群聊A", sender_name="用户甲"
         ))
         count = run_coro(self.logger.get_count())
         self.assertEqual(count, 1)
+
+        items, total = run_coro(self.logger.query_logs(page=1, page_size=10))
+        self.assertEqual(total, 1)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["session_name"], "群聊A")
+        self.assertEqual(items[0]["sender_name"], "用户甲")
+        self.assertEqual(items[0]["tool_name"], "click")
+
+    def test_query_logs_pagination_and_filters(self):
+        # 插入 4 条不同状态与字段的测试数据
+        run_coro(self.logger.log_action(
+            session_id="s1", context_key="c1", sender_id="u1",
+            tool_name="pw_page:open_url", url="https://github.com",
+            input_args={"url": "https://github.com"}, output_result="ok",
+            is_permitted=True, is_error=False,
+            session_name="开发群", sender_name="Alice"
+        ))
+        run_coro(self.logger.log_action(
+            session_id="s2", context_key="c2", sender_id="u2",
+            tool_name="pw_interact:click", url="https://example.com",
+            input_args={"ref": 42}, output_result="",
+            is_permitted=False, deny_reason="Domain blocked",
+            session_name="私聊: Bob", sender_name="Bob"
+        ))
+        run_coro(self.logger.log_action(
+            session_id="s3", context_key="c3", sender_id="u3",
+            tool_name="pw_page:open_url", url="https://bad-site.org",
+            input_args={}, output_result="",
+            is_permitted=True, is_error=True, error_message="NetError: timed out",
+            session_name="测试群", sender_name="Charlie"
+        ))
+        run_coro(self.logger.log_action(
+            session_id="s4", context_key="c4", sender_id="u4",
+            tool_name="pw_media:screenshot", url="https://github.com/profile",
+            input_args={"target": "chat"}, output_result="screenshot_bytes",
+            is_permitted=True, is_error=False,
+            session_name="开发群", sender_name="Dave"
+        ))
+
+        # 1. 验证分页与总数
+        items, total = run_coro(self.logger.query_logs(page=1, page_size=2))
+        self.assertEqual(total, 4)
+        self.assertEqual(len(items), 2)
+
+        items_p2, total_p2 = run_coro(self.logger.query_logs(page=2, page_size=2))
+        self.assertEqual(total_p2, 4)
+        self.assertEqual(len(items_p2), 2)
+        self.assertNotEqual(items[0]["id"], items_p2[0]["id"])
+
+        # 2. 状态筛选: allowed (permitted & not error)
+        allowed_items, allowed_total = run_coro(self.logger.query_logs(status="allowed"))
+        self.assertEqual(allowed_total, 2)
+        for it in allowed_items:
+            self.assertTrue(it["is_permitted"])
+            self.assertFalse(it["is_error"])
+
+        # 状态筛选: denied
+        denied_items, denied_total = run_coro(self.logger.query_logs(status="denied"))
+        self.assertEqual(denied_total, 1)
+        self.assertEqual(denied_items[0]["sender_name"], "Bob")
+
+        # 状态筛选: error
+        error_items, error_total = run_coro(self.logger.query_logs(status="error"))
+        self.assertEqual(error_total, 1)
+        self.assertEqual(error_items[0]["sender_name"], "Charlie")
+
+        # 3. 工具名筛选
+        page_items, page_total = run_coro(self.logger.query_logs(tool_name="pw_page:open_url"))
+        self.assertEqual(page_total, 2)
+
+        # 4. 关键词搜索: url 模糊匹配
+        kw_items, kw_total = run_coro(self.logger.query_logs(keyword="github"))
+        self.assertEqual(kw_total, 2)
+
+        # 关键词搜索: session_name
+        kw_s_items, kw_s_total = run_coro(self.logger.query_logs(keyword="私聊"))
+        self.assertEqual(kw_s_total, 1)
+        self.assertEqual(kw_s_items[0]["session_id"], "s2")
+
+        # 关键词搜索: error_message
+        kw_e_items, kw_e_total = run_coro(self.logger.query_logs(keyword="timed out"))
+        self.assertEqual(kw_e_total, 1)
+
+    def test_get_stats(self):
+        # 插入 1 条历史数据与 2 条今日数据
+        run_coro(self.logger.log_action(
+            session_id="s1", context_key="c1", sender_id="u1",
+            tool_name="click", url="https://example.com",
+            is_permitted=True, is_error=False,
+            custom_timestamp="2020-01-01 12:00:00"
+        ))
+        run_coro(self.logger.log_action(
+            session_id="s2", context_key="c2", sender_id="u2",
+            tool_name="click", url="https://example.com",
+            is_permitted=False, deny_reason="blocked",
+            # 今日默认时间戳
+        ))
+        run_coro(self.logger.log_action(
+            session_id="s3", context_key="c3", sender_id="u3",
+            tool_name="click", url="https://example.com",
+            is_permitted=True, is_error=True, error_message="fail",
+            # 今日默认时间戳
+        ))
+
+        stats = run_coro(self.logger.get_stats())
+        self.assertEqual(stats["total"], 3)
+        self.assertEqual(stats["allowed"], 1)
+        self.assertEqual(stats["denied"], 1)
+        self.assertEqual(stats["error"], 1)
+        self.assertEqual(stats["today_count"], 2)
+
+    def test_export_logs_json_and_csv(self):
+        # 包含换行、双引号与逗号的文本测试 RFC 4180 CSV 转义
+        special_output = 'Line 1, "quoted text"\nLine 2 with comma, and end.'
+        run_coro(self.logger.log_action(
+            session_id="s1", context_key="c1", sender_id="u1",
+            tool_name="pw_page:open_url", url="https://example.com",
+            input_args={"cmd": 'echo "hello, world"'},
+            output_result=special_output,
+            is_permitted=True, session_name="群聊,带逗号", sender_name='用户"带引号'
+        ))
+
+        # 1. 导出 JSON
+        json_str = run_coro(self.logger.export_logs(fmt="json"))
+        data = json.loads(json_str)
+        self.assertIsInstance(data, list)
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["output_result"], special_output)
+
+        # 2. 导出 CSV
+        csv_str = run_coro(self.logger.export_logs(fmt="csv"))
+        reader = csv.reader(io.StringIO(csv_str))
+        rows = list(reader)
+        # 第一行为 header
+        self.assertGreaterEqual(len(rows), 2)
+        header = rows[0]
+        self.assertIn("session_name", header)
+        self.assertIn("sender_name", header)
+        self.assertIn("output_result", header)
+
+        # 验证包含换行和特殊字符的数据正确解析回原始字符串
+        out_idx = header.index("output_result")
+        session_idx = header.index("session_name")
+        self.assertEqual(rows[1][out_idx], special_output)
+        self.assertEqual(rows[1][session_idx], "群聊,带逗号")
+
+    def test_clear_logs(self):
+        run_coro(self.logger.log_action(
+            session_id="s1", context_key="c1", sender_id="u1",
+            tool_name="click", is_permitted=True
+        ))
+        run_coro(self.logger.log_action(
+            session_id="s2", context_key="c2", sender_id="u2",
+            tool_name="click", is_permitted=True
+        ))
+        self.assertEqual(run_coro(self.logger.get_count()), 2)
+
+        cleared = run_coro(self.logger.clear_logs())
+        self.assertEqual(cleared, 2)
+        self.assertEqual(run_coro(self.logger.get_count()), 0)
 
     def test_cleanup_expired(self):
         run_coro(self.logger.log_action(
@@ -55,3 +236,4 @@ class TestAuditLogger(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
