@@ -145,77 +145,89 @@ class PwInteractTool(FunctionTool[AstrAgentContext]):
             super().__init__(name=self.name, description=self.description, parameters=self.parameters)
         except Exception:
             pass
+        self._actions = {
+            "click": self._action_click,
+            "fill": self._action_fill,
+            "select": self._action_select,
+            "hover": self._action_hover,
+            "focus": self._action_focus,
+            "blur": self._action_blur,
+            "drag": self._action_drag,
+            "press_key": self._action_press_key,
+            "scroll": self._action_scroll,
+        }
 
-    async def call(self, context: AstrAgentContext, **kwargs) -> str:
-        async def _dispatch():
-            event, session_id, sender_id = _extract_event_and_ids(context)
-            action = kwargs.get("action")
+    async def _action_click(self, session_id: str, sender_id: str, **kwargs) -> str:
+        ref = kwargs.get("ref")
+        if ref is None:
+            return "参数错误: action='click' 时必须提供 ref 参数"
+        return await self.interact_handler.click(session_id, sender_id, ref=int(ref))
 
-            if action == "click":
-                ref = kwargs.get("ref")
-                if ref is None:
-                    return "参数错误: action='click' 时必须提供 ref 参数"
-                return await self.interact_handler.click(session_id, sender_id, ref=int(ref))
+    async def _action_fill(self, session_id: str, sender_id: str, **kwargs) -> str:
+        ref = kwargs.get("ref")
+        text = kwargs.get("text", "")
+        if ref is None:
+            return "参数错误: action='fill' 时必须提供 ref 参数"
+        return await self.interact_handler.fill_form(session_id, sender_id, ref=int(ref), text=str(text))
 
-            elif action == "fill":
-                ref = kwargs.get("ref")
-                text = kwargs.get("text", "")
-                if ref is None:
-                    return "参数错误: action='fill' 时必须提供 ref 参数"
-                return await self.interact_handler.fill_form(session_id, sender_id, ref=int(ref), text=str(text))
+    async def _action_select(self, session_id: str, sender_id: str, **kwargs) -> str:
+        ref = kwargs.get("ref")
+        value = kwargs.get("value", "")
+        if ref is None:
+            return "参数错误: action='select' 时必须提供 ref 参数"
+        return await self.interact_handler.select_option(session_id, sender_id, ref=int(ref), value=str(value))
 
-            elif action == "select":
-                ref = kwargs.get("ref")
-                value = kwargs.get("value", "")
-                if ref is None:
-                    return "参数错误: action='select' 时必须提供 ref 参数"
-                return await self.interact_handler.select_option(session_id, sender_id, ref=int(ref), value=str(value))
+    async def _action_hover(self, session_id: str, sender_id: str, **kwargs) -> str:
+        ref = kwargs.get("ref")
+        if ref is None:
+            return "参数错误: action='hover' 时必须提供 ref 参数"
+        return await self.interact_handler.hover(session_id, sender_id, ref=int(ref))
 
-            elif action == "hover":
-                ref = kwargs.get("ref")
-                if ref is None:
-                    return "参数错误: action='hover' 时必须提供 ref 参数"
-                return await self.interact_handler.hover(session_id, sender_id, ref=int(ref))
+    async def _action_focus(self, session_id: str, sender_id: str, **kwargs) -> str:
+        ref = kwargs.get("ref")
+        if ref is None:
+            return "参数错误: action='focus' 时必须提供 ref 参数"
+        return await self.interact_handler.focus(session_id, sender_id, ref=int(ref))
 
-            elif action == "focus":
-                ref = kwargs.get("ref")
-                if ref is None:
-                    return "参数错误: action='focus' 时必须提供 ref 参数"
-                return await self.interact_handler.focus(session_id, sender_id, ref=int(ref))
+    async def _action_blur(self, session_id: str, sender_id: str, **kwargs) -> str:
+        ref = kwargs.get("ref")
+        if ref is None:
+            return "参数错误: action='blur' 时必须提供 ref 参数"
+        return await self.interact_handler.blur(session_id, sender_id, ref=int(ref))
 
-            elif action == "blur":
-                ref = kwargs.get("ref")
-                if ref is None:
-                    return "参数错误: action='blur' 时必须提供 ref 参数"
-                return await self.interact_handler.blur(session_id, sender_id, ref=int(ref))
+    async def _action_drag(self, session_id: str, sender_id: str, **kwargs) -> str:
+        ref = kwargs.get("ref")
+        target_ref = kwargs.get("target_ref")
+        if ref is None or target_ref is None:
+            return "参数错误: action='drag' 时必须提供 ref 与 target_ref 参数"
+        return await self.interact_handler.drag(session_id, sender_id, ref=int(ref), target_ref=int(target_ref))
 
-            elif action == "drag":
-                ref = kwargs.get("ref")
-                target_ref = kwargs.get("target_ref")
-                if ref is None or target_ref is None:
-                    return "参数错误: action='drag' 时必须提供 ref 与 target_ref 参数"
-                return await self.interact_handler.drag(session_id, sender_id, ref=int(ref), target_ref=int(target_ref))
+    async def _action_press_key(self, session_id: str, sender_id: str, **kwargs) -> str:
+        key = kwargs.get("key")
+        if not key:
+            return "参数错误: action='press_key' 时必须提供 key 参数"
+        return await self.interact_handler.press_key(session_id, sender_id, key=str(key))
 
-            elif action == "press_key":
-                key = kwargs.get("key")
-                if not key:
-                    return "参数错误: action='press_key' 时必须提供 key 参数"
-                return await self.interact_handler.press_key(session_id, sender_id, key=str(key))
+    async def _action_scroll(self, session_id: str, sender_id: str, **kwargs) -> str:
+        direction = kwargs.get("direction", "down")
+        amount = kwargs.get("amount", 500)
+        return await self.interact_handler.scroll(
+            session_id, sender_id, direction=str(direction), amount=int(amount or 500)
+        )
 
-            elif action == "scroll":
-                direction = kwargs.get("direction", "down")
-                amount = kwargs.get("amount", 500)
-                return await self.interact_handler.scroll(
-                    session_id, sender_id, direction=str(direction), amount=int(amount or 500)
-                )
+    async def call(self, context: AstrAgentContext, **kwargs):
+        event, session_id, sender_id = _extract_event_and_ids(context)
+        action = kwargs.get("action")
+        handler = self._actions.get(action)
+        if not handler:
+            yield (
+                f"未知的动作: {action}。支持的动作包括: click, fill, select, "
+                "hover, focus, blur, drag, press_key, scroll"
+            )
+            return
 
-            else:
-                return (
-                    f"未知的动作: {action}。支持的动作包括: click, fill, select, "
-                    "hover, focus, blur, drag, press_key, scroll"
-                )
-
-        return await _execute_with_timeout(_dispatch(), self.timeout_seconds)
+        res = await _execute_with_timeout(handler(session_id, sender_id, **kwargs), self.timeout_seconds)
+        yield res
 
 
 @dataclass

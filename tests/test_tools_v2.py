@@ -105,18 +105,31 @@ class TestToolsV2(unittest.TestCase):
         self.assertIn("操作超时", res)
         self.assertIn("5", res)
 
+    def test_interact_tool_actions_map_exists(self):
+        self.assertTrue(hasattr(self.interact_tool, "_actions"))
+        for act in ["click", "fill", "select", "hover", "focus", "blur", "drag", "press_key", "scroll"]:
+            self.assertIn(act, self.interact_tool._actions)
+
+    def test_interact_tool_call_is_async_generator(self):
+        gen = self.interact_tool.call(self.mock_context_wrapper, action="unknown_action")
+        self.assertTrue(hasattr(gen, "__aiter__"))
+        with patch("asyncio.wait_for", fake_wait_for):
+            items = run_gen(gen)
+        self.assertEqual(len(items), 1)
+        self.assertIn("未知的动作", items[0])
+
     def test_interact_tool_dispatch_click(self):
         async def mock_click(s_id, u_id, ref):
             return f"点击元素成功: {ref}"
         self.mock_interact_handler.click = mock_click
 
         with patch("asyncio.wait_for", fake_wait_for):
-            res = run_coro(self.interact_tool.call(self.mock_context_wrapper, action="click", ref=3))
+            res = run_gen(self.interact_tool.call(self.mock_context_wrapper, action="click", ref=3))[0]
         self.assertEqual(res, "点击元素成功: 3")
 
     def test_interact_tool_missing_ref(self):
         with patch("asyncio.wait_for", fake_wait_for):
-            res = run_coro(self.interact_tool.call(self.mock_context_wrapper, action="click"))
+            res = run_gen(self.interact_tool.call(self.mock_context_wrapper, action="click"))[0]
         self.assertIn("参数错误", res)
 
     def test_media_tool_dispatch_viewport(self):
