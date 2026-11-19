@@ -27,6 +27,18 @@ def run_coro(coro):
                 result = e.value
     return result
 
+def run_gen(gen):
+    async def _drain():
+        items = []
+        async for item in gen:
+            items.append(item)
+        return items
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_drain())
+    finally:
+        loop.close()
+
 async def fake_wait_for(fut, timeout):
     return await fut
 
@@ -47,9 +59,22 @@ class TestToolsV2(unittest.TestCase):
         self.interact_tool = PwInteractTool(self.mock_interact_handler, timeout_seconds=5)
         self.media_tool = PwMediaTool(self.mock_media_handler, timeout_seconds=5)
 
+    def test_page_tool_actions_map_exists(self):
+        self.assertTrue(hasattr(self.page_tool, "_actions"))
+        for act in ["open", "read", "search", "switch_tab", "dialog", "close"]:
+            self.assertIn(act, self.page_tool._actions)
+
+    def test_page_tool_call_is_async_generator(self):
+        gen = self.page_tool.call(self.mock_context_wrapper, action="unknown_action")
+        self.assertTrue(hasattr(gen, "__aiter__"))
+        with patch("asyncio.wait_for", fake_wait_for):
+            items = run_gen(gen)
+        self.assertEqual(len(items), 1)
+        self.assertIn("未知的动作", items[0])
+
     def test_page_tool_invalid_action(self):
         with patch("asyncio.wait_for", fake_wait_for):
-            res = run_coro(self.page_tool.call(self.mock_context_wrapper, action="unknown_action"))
+            res = run_gen(self.page_tool.call(self.mock_context_wrapper, action="unknown_action"))[0]
         self.assertIn("未知的动作", res)
 
     def test_page_tool_dispatch_open(self):
@@ -58,7 +83,7 @@ class TestToolsV2(unittest.TestCase):
         self.mock_page_handler.open_url = mock_open
 
         with patch("asyncio.wait_for", fake_wait_for):
-            res = run_coro(self.page_tool.call(self.mock_context_wrapper, action="open", url="https://example.com"))
+            res = run_gen(self.page_tool.call(self.mock_context_wrapper, action="open", url="https://example.com"))[0]
         self.assertEqual(res, "打开成功: https://example.com")
 
     def test_page_tool_dispatch_search(self):
@@ -67,7 +92,7 @@ class TestToolsV2(unittest.TestCase):
         self.mock_page_handler.search_page = mock_search
 
         with patch("asyncio.wait_for", fake_wait_for):
-            res = run_coro(self.page_tool.call(self.mock_context_wrapper, action="search", keyword="关键词"))
+            res = run_gen(self.page_tool.call(self.mock_context_wrapper, action="search", keyword="关键词"))[0]
         self.assertEqual(res, "搜索结果: 关键词")
 
     def test_page_tool_timeout(self):
@@ -76,7 +101,7 @@ class TestToolsV2(unittest.TestCase):
         self.mock_page_handler.open_url = mock_open
 
         with patch("asyncio.wait_for", timeout_wait_for):
-            res = run_coro(self.page_tool.call(self.mock_context_wrapper, action="open", url="https://example.com"))
+            res = run_gen(self.page_tool.call(self.mock_context_wrapper, action="open", url="https://example.com"))[0]
         self.assertIn("操作超时", res)
         self.assertIn("5", res)
 
@@ -133,7 +158,7 @@ class TestToolsV2(unittest.TestCase):
         self.mock_page_handler.open_url = mock_open
 
         with patch("asyncio.wait_for", fake_wait_for):
-            run_coro(self.page_tool.call(nested_wrapper, action="open", url="https://example.com"))
+            run_gen(self.page_tool.call(nested_wrapper, action="open", url="https://example.com"))
 
         self.assertEqual(captured.get("session_id"), "nested_s1")
         self.assertEqual(captured.get("sender_id"), "nested_u1")

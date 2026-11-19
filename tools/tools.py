@@ -80,46 +80,55 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
             super().__init__(name=self.name, description=self.description, parameters=self.parameters)
         except Exception:
             pass
+        self._actions = {
+            "open": self._action_open,
+            "read": self._action_read,
+            "search": self._action_search,
+            "switch_tab": self._action_switch_tab,
+            "dialog": self._action_dialog,
+            "close": self._action_close,
+        }
 
-    async def call(self, context: AstrAgentContext, **kwargs) -> str:
-        async def _dispatch():
-            event, session_id, sender_id = _extract_event_and_ids(context)
-            action = kwargs.get("action")
+    async def _action_open(self, session_id: str, sender_id: str, **kwargs) -> str:
+        url = kwargs.get("url")
+        if not url:
+            return "参数错误: action='open' 时必须提供 url 参数"
+        return await self.page_handler.open_url(session_id, sender_id, url=str(url))
 
-            if action == "open":
-                url = kwargs.get("url")
-                if not url:
-                    return "参数错误: action='open' 时必须提供 url 参数"
-                return await self.page_handler.open_url(session_id, sender_id, url=str(url))
+    async def _action_read(self, session_id: str, sender_id: str, **kwargs) -> str:
+        page = kwargs.get("page", 1)
+        return await self.page_handler.read_page(session_id, sender_id, page=int(page or 1))
 
-            elif action == "read":
-                page = kwargs.get("page", 1)
-                return await self.page_handler.read_page(session_id, sender_id, page=int(page or 1))
+    async def _action_search(self, session_id: str, sender_id: str, **kwargs) -> str:
+        keyword = kwargs.get("keyword")
+        if not keyword:
+            return "参数错误: action='search' 时必须提供 keyword 参数"
+        return await self.page_handler.search_page(session_id, sender_id, keyword=str(keyword))
 
-            elif action == "search":
-                keyword = kwargs.get("keyword")
-                if not keyword:
-                    return "参数错误: action='search' 时必须提供 keyword 参数"
-                return await self.page_handler.search_page(session_id, sender_id, keyword=str(keyword))
+    async def _action_switch_tab(self, session_id: str, sender_id: str, **kwargs) -> str:
+        tab_index = kwargs.get("tab_index", 0)
+        return await self.page_handler.switch_tab(session_id, sender_id, tab_index=int(tab_index or 0))
 
-            elif action == "switch_tab":
-                tab_index = kwargs.get("tab_index", 0)
-                return await self.page_handler.switch_tab(session_id, sender_id, tab_index=int(tab_index or 0))
+    async def _action_dialog(self, session_id: str, sender_id: str, **kwargs) -> str:
+        dialog_action = kwargs.get("dialog_action", "accept")
+        prompt_text = kwargs.get("prompt_text")
+        return await self.page_handler.handle_dialog(
+            session_id, sender_id, action=str(dialog_action), prompt_text=prompt_text
+        )
 
-            elif action == "dialog":
-                dialog_action = kwargs.get("dialog_action", "accept")
-                prompt_text = kwargs.get("prompt_text")
-                return await self.page_handler.handle_dialog(
-                    session_id, sender_id, action=str(dialog_action), prompt_text=prompt_text
-                )
+    async def _action_close(self, session_id: str, sender_id: str, **kwargs) -> str:
+        return await self.page_handler.close_browser(session_id, sender_id)
 
-            elif action == "close":
-                return await self.page_handler.close_browser(session_id, sender_id)
+    async def call(self, context: AstrAgentContext, **kwargs):
+        event, session_id, sender_id = _extract_event_and_ids(context)
+        action = kwargs.get("action")
+        handler = self._actions.get(action)
+        if not handler:
+            yield f"未知的动作: {action}。支持的动作包括: open, read, search, switch_tab, dialog, close"
+            return
 
-            else:
-                return f"未知的动作: {action}。支持的动作包括: open, read, search, switch_tab, dialog, close"
-
-        return await _execute_with_timeout(_dispatch(), self.timeout_seconds)
+        res = await _execute_with_timeout(handler(session_id, sender_id, **kwargs), self.timeout_seconds)
+        yield res
 
 
 @dataclass
