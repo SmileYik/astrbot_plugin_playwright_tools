@@ -284,9 +284,12 @@ class PwMediaTool(FunctionTool[AstrAgentContext]):
 
         target = str(kwargs.get("target", "chat")).lower()
         if action in ("screenshot_viewport", "screenshot_full") and target == "chat" and res.startswith("[IMAGE_PATH:"):
-            img_path = res.split("\n", 1)[0][len("[IMAGE_PATH:"):-1]
+            img_path = res.split("\n", 1)[0].strip()[len("[IMAGE_PATH:"):].rstrip("]")
             if hasattr(event, "image_result") and callable(event.image_result):
-                yield event.image_result(img_path)
-                return
+                try:
+                    yield event.image_result(img_path)
+                    return
+                except Exception:
+                    pass
 
         yield res

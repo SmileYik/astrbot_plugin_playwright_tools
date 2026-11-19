@@ -222,6 +222,16 @@ class TestToolsV2(unittest.TestCase):
         self.assertEqual(captured.get("session_id"), "nested_s1")
         self.assertEqual(captured.get("sender_id"), "nested_u1")
 
+    def test_media_tool_chat_fallback_when_image_result_raises(self):
+        self.mock_context_wrapper.event.image_result = MagicMock(side_effect=RuntimeError("image build error"))
+        async def mock_vp(s_id, u_id, target):
+            return "[IMAGE_PATH:/tmp/err.png]"
+        self.mock_media_handler.screenshot_viewport = mock_vp
+
+        with patch("asyncio.wait_for", fake_wait_for):
+            items = run_gen(self.media_tool.call(self.mock_context_wrapper, action="screenshot_viewport", target="chat"))
+        self.assertEqual(items, ["[IMAGE_PATH:/tmp/err.png]"])
+
     def test_media_tool_chat_fallback_when_no_image_result(self):
         ctx_without_img_res = MagicMock(spec=["event"])
         ctx_without_img_res.event = MagicMock(spec=["session_id", "get_sender_id"])
