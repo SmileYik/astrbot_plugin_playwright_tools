@@ -130,7 +130,7 @@ async def _execute_with_timeout(coro, timeout_seconds: int) -> str:
 
 @dataclass
 class PwPageTool(FunctionTool[AstrAgentContext]):
-    page_handler: PageHandler
+    page_handler: PageHandler | None = None
     timeout_seconds: int = 30
     handler: Any = None
     name: str = "pw_page"
@@ -138,6 +138,8 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
     parameters: dict = field(default_factory=lambda: PW_PAGE_SCHEMA)
 
     def __post_init__(self):
+        if self.page_handler is None:
+            raise ValueError("PwPageTool 初始化必须传入 page_handler")
         try:
             super().__init__(name=self.name, description=self.description, parameters=self.parameters)
         except Exception:
@@ -220,7 +222,7 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
 
 @dataclass
 class PwInteractTool(FunctionTool[AstrAgentContext]):
-    interact_handler: InteractHandler
+    interact_handler: InteractHandler | None = None
     timeout_seconds: int = 30
     handler: Any = None
     name: str = "pw_interact"
@@ -228,6 +230,8 @@ class PwInteractTool(FunctionTool[AstrAgentContext]):
     parameters: dict = field(default_factory=lambda: PW_INTERACT_SCHEMA)
 
     def __post_init__(self):
+        if self.interact_handler is None:
+            raise ValueError("PwInteractTool 初始化必须传入 interact_handler")
         try:
             super().__init__(name=self.name, description=self.description, parameters=self.parameters)
         except Exception:
@@ -356,7 +360,7 @@ class PwInteractTool(FunctionTool[AstrAgentContext]):
 
 @dataclass
 class PwMediaTool(FunctionTool[AstrAgentContext]):
-    media_handler: MediaHandler
+    media_handler: MediaHandler | None = None
     timeout_seconds: int = 30
     screenshot_max_height_px: int = 8000
     screenshot_timeout_seconds: int = 15
@@ -366,6 +370,8 @@ class PwMediaTool(FunctionTool[AstrAgentContext]):
     parameters: dict = field(default_factory=lambda: PW_MEDIA_SCHEMA)
 
     def __post_init__(self):
+        if self.media_handler is None:
+            raise ValueError("PwMediaTool 初始化必须传入 media_handler")
         try:
             super().__init__(name=self.name, description=self.description, parameters=self.parameters)
         except Exception:
