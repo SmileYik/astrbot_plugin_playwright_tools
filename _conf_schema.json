@@ -1,0 +1,47 @@
+{
+  "admin_only": {
+    "type": "bool",
+    "description": "仅允许管理员使用本插件",
+    "default": false
+  },
+  "extra_admin_uids": {
+    "type": "string",
+    "description": "额外管理员 UID 列表 (多个以逗号分隔)",
+    "default": ""
+  },
+  "context_mode": {
+    "type": "string",
+    "description": "上下文隔离模式 (personal: 个人模式, session: 会话模式)",
+    "default": "personal"
+  },
+  "idle_timeout_minutes": {
+    "type": "int",
+    "description": "空闲自动销毁时间 (分钟)",
+    "default": 10
+  },
+  "allow_screenshot_to_ai": {
+    "type": "bool",
+    "description": "是否允许将网页截图发送给大模型进行视觉分析",
+    "default": false
+  },
+  "storage_state_path": {
+    "type": "string",
+    "description": "管理员 Cookie / StorageState JSON 文件路径 (仅对管理员创建的上下文生效)",
+    "default": ""
+  },
+  "whitelist_rules": {
+    "type": "text",
+    "description": "网站白名单与权限集合配置 (JSON 数组字符串，如 [{\"domain\": \"*.github.com\", \"allowed_actions\": [\"read\", \"click\", \"scroll\"]}])",
+    "default": "[]"
+  },
+  "audit_retention_days": {
+    "type": "int",
+    "description": "审计记录保存天数",
+    "default": 30
+  },
+  "enable_close_tool": {
+    "type": "bool",
+    "description": "是否向 AI 注册主动关闭浏览器上下文的工具",
+    "default": true
+  }
+}
