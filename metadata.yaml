@@ -1,0 +1,6 @@
+name: astrbot_plugin_playwright_tools 
+display_name: PlaywrightTool 
+desc: AstrBot 插件示例。
+version: v1.0.0
+author: SmileYik
+repo: https://github.com/SmileYik/astrbot_plugin_playwright_tools
