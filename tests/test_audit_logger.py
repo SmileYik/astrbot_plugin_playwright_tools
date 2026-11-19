@@ -127,9 +127,34 @@ class TestAuditLogger(unittest.TestCase):
         self.assertEqual(error_total, 1)
         self.assertEqual(error_items[0]["sender_name"], "Charlie")
 
-        # 3. 工具名筛选
+        # 3. 工具名筛选与工具分组匹配
+        # 3.1 兼容前缀匹配
         page_items, page_total = run_coro(self.logger.query_logs(tool_name="pw_page:open_url"))
         self.assertEqual(page_total, 2)
+
+        # 3.2 记录一条原生原子动作 open_url 与 click
+        run_coro(self.logger.log_action(
+            session_id="s5", context_key="c5", sender_id="u5",
+            tool_name="open_url", url="https://example.com/atomic",
+            is_permitted=True, session_name="群5", sender_name="Eva"
+        ))
+        run_coro(self.logger.log_action(
+            session_id="s6", context_key="c6", sender_id="u6",
+            tool_name="click", url="https://example.com/atomic",
+            is_permitted=True, session_name="群6", sender_name="Frank"
+        ))
+
+        # 通过 pw_page 组名检索，应匹配 pw_page:open_url 及 open_url
+        group_items, group_total = run_coro(self.logger.query_logs(tool_name="pw_page"))
+        self.assertEqual(group_total, 3)
+
+        # 通过 pw_interact 组名检索，应匹配 pw_interact:click 及 click
+        interact_items, interact_total = run_coro(self.logger.query_logs(tool_name="pw_interact"))
+        self.assertEqual(interact_total, 2)
+
+        # 验证 page_size 上限保护
+        items_large, _ = run_coro(self.logger.query_logs(page_size=500))
+        self.assertLessEqual(len(items_large), 100)
 
         # 4. 关键词搜索: url 模糊匹配
         kw_items, kw_total = run_coro(self.logger.query_logs(keyword="github"))
@@ -173,14 +198,15 @@ class TestAuditLogger(unittest.TestCase):
         self.assertEqual(stats["today_count"], 2)
 
     def test_export_logs_json_and_csv(self):
-        # 包含换行、双引号与逗号的文本测试 RFC 4180 CSV 转义
+        # 包含换行、双引号与逗号的文本测试 RFC 4180 CSV 转义，以及敏感符号测试公式注入防御
         special_output = 'Line 1, "quoted text"\nLine 2 with comma, and end.'
+        formula_text = "=cmd|' /C calc'!A0"
         run_coro(self.logger.log_action(
             session_id="s1", context_key="c1", sender_id="u1",
             tool_name="pw_page:open_url", url="https://example.com",
             input_args={"cmd": 'echo "hello, world"'},
             output_result=special_output,
-            is_permitted=True, session_name="群聊,带逗号", sender_name='用户"带引号'
+            is_permitted=True, session_name="群聊,带逗号", sender_name=formula_text
         ))
 
         # 1. 导出 JSON
@@ -204,8 +230,11 @@ class TestAuditLogger(unittest.TestCase):
         # 验证包含换行和特殊字符的数据正确解析回原始字符串
         out_idx = header.index("output_result")
         session_idx = header.index("session_name")
+        sender_idx = header.index("sender_name")
         self.assertEqual(rows[1][out_idx], special_output)
         self.assertEqual(rows[1][session_idx], "群聊,带逗号")
+        # 验证公式注入前缀防御转义为 '=cmd...
+        self.assertTrue(rows[1][sender_idx].startswith("'="))
 
     def test_clear_logs(self):
         run_coro(self.logger.log_action(

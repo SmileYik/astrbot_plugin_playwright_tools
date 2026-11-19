@@ -270,7 +270,7 @@ class PlaywrightToolPlugin(Star):
             except (ValueError, TypeError):
                 page = 1
             try:
-                page_size = int(request.query.get("page_size", 20))
+                page_size = min(max(1, int(request.query.get("page_size", 20))), 100)
             except (ValueError, TypeError):
                 page_size = 20
             keyword = str(request.query.get("keyword", "") or "").strip()

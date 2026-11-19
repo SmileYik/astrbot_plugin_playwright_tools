@@ -117,5 +117,18 @@ class TestMediaHandler(unittest.TestCase):
         res = run_coro(self.handler.download_file("s1", "u1", ref=99))
         self.assertIn("无效的元素引用", res)
 
+    def test_download_file_denied_logs_audit(self):
+        self.mock_sec.check_permission.return_value = (False, "黑名单拦截下载")
+        mock_log = unittest.mock.AsyncMock()
+        self.mock_audit.log_action = mock_log
+        res = run_coro(self.handler.download_file("s1", "u1", ref=1, session_name="群1", sender_name="用户1"))
+        self.assertIn("下载失败: 黑名单拦截下载", res)
+        mock_log.assert_called_once()
+        _, kwargs = mock_log.call_args
+        self.assertEqual(kwargs.get("is_permitted"), False)
+        self.assertEqual(kwargs.get("deny_reason"), "黑名单拦截下载")
+        self.assertEqual(kwargs.get("session_name"), "群1")
+        self.assertEqual(kwargs.get("sender_name"), "用户1")
+
 if __name__ == "__main__":
     unittest.main()

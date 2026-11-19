@@ -193,6 +193,12 @@ class MediaHandler:
         url = getattr(page, "url", "")
         allowed, reason = self.security_mgr.check_permission(ctx.owner_id, url, "download")
         if not allowed:
+            await self.audit_logger.log_action(
+                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
+                "download_file", url, {"ref": ref}, reason,
+                is_permitted=False, deny_reason=reason,
+                session_name=session_name, sender_name=sender_name
+            )
             return f"下载失败: {reason}"
 
         if ref not in ctx.ref_map:

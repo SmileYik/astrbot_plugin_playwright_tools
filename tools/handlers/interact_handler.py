@@ -376,6 +376,12 @@ class InteractHandler:
         url = getattr(page, "url", "")
         allowed, reason = self.security_mgr.check_permission(ctx.owner_id, url, "click")
         if not allowed:
+            await self.audit_logger.log_action(
+                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
+                "drag", url, {"ref": ref, "target_ref": target_ref}, reason,
+                is_permitted=False, deny_reason=reason,
+                session_name=session_name, sender_name=sender_name
+            )
             return f"拖拽失败: {reason}"
 
         if ref not in ctx.ref_map:

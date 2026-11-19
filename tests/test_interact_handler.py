@@ -60,6 +60,19 @@ class TestInteractHandler(unittest.TestCase):
         res = run_coro(self.handler.drag("s1", "u1", ref=1, target_ref=99))
         self.assertIn("无效的拖拽目标", res)
 
+    def test_drag_denied_logs_audit(self):
+        self.mock_sec.check_permission.return_value = (False, "没有点击权限")
+        mock_log = unittest.mock.AsyncMock()
+        self.mock_audit.log_action = mock_log
+        res = run_coro(self.handler.drag("s1", "u1", ref=1, target_ref=2, session_name="群1", sender_name="用户1"))
+        self.assertIn("拖拽失败: 没有点击权限", res)
+        mock_log.assert_called_once()
+        _, kwargs = mock_log.call_args
+        self.assertEqual(kwargs.get("is_permitted"), False)
+        self.assertEqual(kwargs.get("deny_reason"), "没有点击权限")
+        self.assertEqual(kwargs.get("session_name"), "群1")
+        self.assertEqual(kwargs.get("sender_name"), "用户1")
+
     def test_drag_element_success(self):
         async def mock_eval(*args, **kwargs):
             return True

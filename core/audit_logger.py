@@ -6,6 +6,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+TOOL_GROUPS: dict[str, list[str]] = {
+    "pw_page": ["open_url", "read_page", "search_page", "switch_tab", "handle_dialog", "close_browser"],
+    "pw_interact": ["click", "fill_form", "select_option", "hover", "focus", "blur", "drag", "press_key", "scroll"],
+    "pw_media": ["screenshot_viewport", "screenshot_full", "download_file"],
+}
+
 class AuditLogger:
     """SQLite 审计记录器，负责记录所有大模型工具调用并在启动或定时任务中清理过期数据。"""
 
@@ -106,8 +112,15 @@ class AuditLogger:
             conditions.append("is_error = 1")
 
         if tool_name and tool_name.strip():
-            conditions.append("tool_name = ?")
-            params.append(tool_name.strip())
+            tn = tool_name.strip()
+            if tn in TOOL_GROUPS:
+                actions = TOOL_GROUPS[tn]
+                placeholders = ", ".join(["?"] * len(actions))
+                conditions.append(f"(tool_name = ? OR tool_name LIKE ? OR tool_name IN ({placeholders}))")
+                params.extend([tn, f"{tn}:%"] + actions)
+            else:
+                conditions.append("(tool_name = ? OR tool_name LIKE ?)")
+                params.extend([tn, f"{tn}:%"])
 
         where_sql = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         return where_sql, params
@@ -128,7 +141,7 @@ class AuditLogger:
     ) -> tuple[list[dict[str, Any]], int]:
         """多条件模糊查询与分页获取审计记录。"""
         page = max(1, page)
-        page_size = max(1, page_size)
+        page_size = min(max(1, page_size), 100)
         offset = (page - 1) * page_size
 
         where_sql, params = self._build_where_clause(keyword=keyword, status=status, tool_name=tool_name)
@@ -205,7 +218,13 @@ class AuditLogger:
                 writer = csv.DictWriter(output, fieldnames=fieldnames, quoting=csv.QUOTE_MINIMAL)
                 writer.writeheader()
                 for item in items:
-                    writer.writerow(item)
+                    safe_item = {}
+                    for k, v in item.items():
+                        if isinstance(v, str) and v and v[0] in ("=", "+", "-", "@", "\t", "\r"):
+                            safe_item[k] = f"'{v}"
+                        else:
+                            safe_item[k] = v
+                    writer.writerow(safe_item)
                 return output.getvalue()
 
             return json.dumps(items, ensure_ascii=False, indent=2)
