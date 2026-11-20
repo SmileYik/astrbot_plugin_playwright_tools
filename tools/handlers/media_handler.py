@@ -27,6 +27,10 @@ class MediaHandler:
         download_dir: str = "data/downloads",
         audit_save_screenshots: bool = True,
         audit_screenshots_dir: str = "data/audit_screenshots",
+        screenshot_format: str = "png",
+        screenshot_quality: int = 80,
+        screenshot_dir: str = "data/screenshots",
+        file_retention_days: int = 7,
     ):
         self.context_mgr = context_mgr
         self.security_mgr = security_mgr
@@ -35,8 +39,23 @@ class MediaHandler:
         self.download_dir = download_dir
         self.audit_save_screenshots = audit_save_screenshots
         self.audit_screenshots_dir = audit_screenshots_dir
+        self.screenshot_format = str(screenshot_format or "png").strip().lower()
+        try:
+            self.screenshot_quality = max(1, min(100, int(screenshot_quality)))
+        except (ValueError, TypeError):
+            self.screenshot_quality = 80
+        self.screenshot_dir = screenshot_dir
+        try:
+            self.file_retention_days = int(file_retention_days)
+        except (ValueError, TypeError):
+            self.file_retention_days = 7
+
         try:
             Path(self.download_dir).mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        try:
+            Path(self.screenshot_dir).mkdir(parents=True, exist_ok=True)
         except OSError:
             pass
         try:
@@ -44,18 +63,74 @@ class MediaHandler:
         except OSError:
             pass
 
+    def _is_jpeg(self) -> bool:
+        return self.screenshot_format in ("jpeg", "jpg")
+
+    def _get_screenshot_options(self) -> dict:
+        if self._is_jpeg():
+            return {
+                "type": "jpeg",
+                "quality": self.screenshot_quality,
+            }
+        return {"type": "png"}
+
     def _save_or_encode(self, image_bytes: bytes, target: str, note: str = "") -> str:
+        is_jpeg = self._is_jpeg()
         if target.lower() == "ai":
+            mime = "image/jpeg" if is_jpeg else "image/png"
             b64_str = base64.b64encode(image_bytes).decode("utf-8")
-            return f"data:image/png;base64,{b64_str}"
-        file_name = f"screenshot_{int(time.time() * 1000)}.png"
-        save_path = os.path.join(self.download_dir, file_name)
+            return f"data:{mime};base64,{b64_str}"
+        ext = ".jpg" if is_jpeg else ".png"
+        file_name = f"screenshot_{int(time.time() * 1000)}{ext}"
+        save_path = os.path.join(self.screenshot_dir, file_name)
         with open(save_path, "wb") as f:
             f.write(image_bytes)
         res = f"[IMAGE_PATH:{save_path}]"
         if note:
             res = f"{res}\n{note}"
         return res
+
+    async def cleanup_expired_files(self) -> int:
+        """被动清理过期文件（保留天数超过 file_retention_days 的下载与截图）。"""
+        if self.file_retention_days <= 0:
+            return 0
+
+        now = time.time()
+        cutoff = now - float(self.file_retention_days) * 86400.0
+        deleted_count = 0
+
+        target_dirs = []
+        seen_dirs = set()
+        for d in (self.download_dir, self.screenshot_dir, self.audit_screenshots_dir):
+            if d:
+                try:
+                    abs_d = os.path.abspath(d)
+                except Exception:
+                    abs_d = d
+                if abs_d not in seen_dirs:
+                    seen_dirs.add(abs_d)
+                    target_dirs.append(abs_d)
+
+        for dir_path in target_dirs:
+            if not os.path.exists(dir_path):
+                continue
+            try:
+                with os.scandir(dir_path) as entries:
+                    for entry in entries:
+                        try:
+                            if entry.is_file():
+                                if entry.stat().st_mtime < cutoff:
+                                    try:
+                                        os.remove(entry.path)
+                                        deleted_count += 1
+                                    except OSError as rem_err:
+                                        logger.warning(f"[PlaywrightTool] 删除过期文件失败 {entry.path}: {rem_err}")
+                        except OSError:
+                            pass
+            except OSError as dir_err:
+                logger.warning(f"[PlaywrightTool] 扫描目录失败 {dir_path}: {dir_err}")
+
+        return deleted_count
 
     async def screenshot_viewport(
         self,
@@ -66,6 +141,11 @@ class MediaHandler:
         sender_name: str = "",
     ) -> str:
         """截取当前视口屏幕。"""
+        try:
+            await self.cleanup_expired_files()
+        except Exception as clean_err:
+            logger.warning(f"[PlaywrightTool] 被动清理过期文件失败: {clean_err}")
+
         ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
         if ctx is None:
             return "截图失败: 无法获取浏览器上下文"
@@ -91,14 +171,16 @@ class MediaHandler:
             return deny_msg
 
         try:
-            image_bytes = await page.screenshot(full_page=False)
+            shot_opts = self._get_screenshot_options()
+            image_bytes = await page.screenshot(full_page=False, **shot_opts)
             res = self._save_or_encode(image_bytes, target)
             screenshot_path = ""
             if self.audit_save_screenshots:
                 try:
                     audit_dir = Path(self.audit_screenshots_dir)
                     audit_dir.mkdir(parents=True, exist_ok=True)
-                    shot_name = f"shot_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}.png"
+                    ext = ".jpg" if self._is_jpeg() else ".png"
+                    shot_name = f"shot_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}{ext}"
                     shot_file = audit_dir / shot_name
                     with open(shot_file, "wb") as f:
                         f.write(image_bytes)
@@ -127,6 +209,11 @@ class MediaHandler:
         sender_name: str = "",
     ) -> str:
         """截取长截图，支持最大像素与超时双重熔断截断。"""
+        try:
+            await self.cleanup_expired_files()
+        except Exception as clean_err:
+            logger.warning(f"[PlaywrightTool] 被动清理过期文件失败: {clean_err}")
+
         ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
         if ctx is None:
             return "长截图失败: 无法获取浏览器上下文"
@@ -170,11 +257,12 @@ class MediaHandler:
             clip_dict = {"x": 0, "y": 0, "width": viewport_width, "height": max_height_px}
             note = f"（页面高度 {scroll_height}px 超过最大限制 {max_height_px}px，已自动截断）"
 
+        shot_opts = self._get_screenshot_options()
         try:
             async def do_screenshot():
                 if is_clipped:
-                    return await page.screenshot(clip=clip_dict, full_page=False)
-                return await page.screenshot(full_page=True)
+                    return await page.screenshot(clip=clip_dict, full_page=False, **shot_opts)
+                return await page.screenshot(full_page=True, **shot_opts)
 
             shot_coro = do_screenshot()
             if timeout_sec and timeout_sec > 0:
@@ -187,7 +275,7 @@ class MediaHandler:
             except Exception:
                 pass
             try:
-                image_bytes = await page.screenshot(full_page=False)
+                image_bytes = await page.screenshot(full_page=False, **shot_opts)
                 note = f"（长截图耗时超过 {timeout_sec} 秒，已自动截断并降级为当前视口截图）"
             except Exception as fb_err:
                 return f"长截图超时且降级失败: {str(fb_err)}"
@@ -205,7 +293,8 @@ class MediaHandler:
             try:
                 audit_dir = Path(self.audit_screenshots_dir)
                 audit_dir.mkdir(parents=True, exist_ok=True)
-                shot_name = f"shot_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}.png"
+                ext = ".jpg" if self._is_jpeg() else ".png"
+                shot_name = f"shot_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}{ext}"
                 shot_file = audit_dir / shot_name
                 with open(shot_file, "wb") as f:
                     f.write(image_bytes)
@@ -229,6 +318,11 @@ class MediaHandler:
         sender_name: str = "",
     ) -> str:
         """点击指定链接/按钮触发文件下载。"""
+        try:
+            await self.cleanup_expired_files()
+        except Exception as clean_err:
+            logger.warning(f"[PlaywrightTool] 被动清理过期文件失败: {clean_err}")
+
         ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
         if ctx is None:
             return "下载失败: 无法获取浏览器上下文"
