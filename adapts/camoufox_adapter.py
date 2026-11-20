@@ -20,8 +20,20 @@ except ImportError:
 class CamoufoxAdapter(BrowserAdapterBase):
     """基于 Camoufox 的异步浏览器适配器。"""
 
-    def __init__(self, headless: bool = True, geoip: bool = False):
-        self.headless = headless
+    def __init__(
+        self,
+        headless: bool = True,
+        geoip: bool = False,
+        user_agent: str = "",
+        window_width: int = 1280,
+        window_height: int = 720,
+    ):
+        super().__init__(
+            headless=headless,
+            user_agent=user_agent,
+            window_width=window_width,
+            window_height=window_height,
+        )
         self.geoip = geoip
         self._camoufox_cm = None
         self._browser = None
@@ -59,6 +71,10 @@ class CamoufoxAdapter(BrowserAdapterBase):
             await self.start()
 
         kwargs = {}
+        if self.window_width and self.window_height:
+            kwargs["viewport"] = {"width": self.window_width, "height": self.window_height}
+        if self.user_agent:
+            kwargs["user_agent"] = self.user_agent
         if storage_state_path and os.path.exists(storage_state_path):
             kwargs["storage_state"] = storage_state_path
 

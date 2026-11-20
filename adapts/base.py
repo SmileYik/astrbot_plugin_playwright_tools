@@ -13,6 +13,18 @@ else:
 class BrowserAdapterBase(ABC):
     """浏览器适配器基类，解耦上层工具逻辑与底层浏览器生命周期。"""
 
+    def __init__(
+        self,
+        headless: bool = True,
+        user_agent: str = "",
+        window_width: int = 1280,
+        window_height: int = 720,
+    ):
+        self.headless = headless
+        self.user_agent = user_agent
+        self.window_width = window_width
+        self.window_height = window_height
+
     @property
     @abstractmethod
     def browser(self) -> "Browser | None":
