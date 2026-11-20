@@ -50,6 +50,19 @@ class AuditLogger:
                     conn.execute("ALTER TABLE tool_audit_logs ADD COLUMN screenshot_path TEXT DEFAULT ''")
                 except sqlite3.OperationalError:
                     pass
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS context_lifecycle_logs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp TEXT NOT NULL,
+                        event_type TEXT NOT NULL,
+                        session_id TEXT NOT NULL,
+                        session_name TEXT DEFAULT '',
+                        context_key TEXT NOT NULL,
+                        owner_id TEXT NOT NULL,
+                        operator_id TEXT NOT NULL,
+                        details TEXT DEFAULT '{}'
+                    )
+                """)
         finally:
             conn.close()
 
@@ -280,4 +293,94 @@ class AuditLogger:
                 return cur.rowcount
         finally:
             conn.close()
+
+    async def log_lifecycle(
+        self,
+        session_id: str,
+        context_key: str,
+        owner_id: str,
+        event_type: str,
+        operator_id: str,
+        session_name: str = "",
+        details: dict | list | str | None = None,
+        custom_timestamp: str | None = None,
+    ) -> None:
+        """记录单条上下文生命周期事件。"""
+        ts = custom_timestamp or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        if details is None:
+            details_str = "{}"
+        elif isinstance(details, (dict, list)):
+            details_str = json.dumps(details, ensure_ascii=False)
+        else:
+            details_str = str(details)
+
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO context_lifecycle_logs (
+                        timestamp, event_type, session_id, session_name,
+                        context_key, owner_id, operator_id, details
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        ts, event_type, session_id, session_name,
+                        context_key, owner_id, operator_id, details_str
+                    )
+                )
+        finally:
+            conn.close()
+
+    async def query_lifecycle_logs(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        session_id: str = "",
+        event_type: str = "",
+        keyword: str = "",
+    ) -> tuple[list[dict[str, Any]], int]:
+        """多条件查询与分页获取生命周期记录。"""
+        page = max(1, page)
+        page_size = min(max(1, page_size), 100)
+        offset = (page - 1) * page_size
+
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        if session_id and session_id.strip():
+            conditions.append("session_id = ?")
+            params.append(session_id.strip())
+
+        if event_type and event_type.strip():
+            conditions.append("event_type = ?")
+            params.append(event_type.strip())
+
+        if keyword and keyword.strip():
+            kw = f"%{keyword.strip()}%"
+            conditions.append(
+                "(session_id LIKE ? OR session_name LIKE ? OR context_key LIKE ? OR owner_id LIKE ? OR operator_id LIKE ? OR details LIKE ?)"
+            )
+            params.extend([kw] * 6)
+
+        where_sql = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        conn.row_factory = sqlite3.Row
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT COUNT(*) FROM context_lifecycle_logs {where_sql}", params)
+            count_row = cur.fetchone()
+            total = count_row[0] if count_row else 0
+
+            cur.execute(
+                f"SELECT * FROM context_lifecycle_logs {where_sql} ORDER BY id DESC LIMIT ? OFFSET ?",
+                params + [page_size, offset],
+            )
+            rows = cur.fetchall()
+            items = [dict(r) for r in rows]
+            return items, total
+        finally:
+            conn.close()
+
 

@@ -2,35 +2,21 @@ import unittest
 import os
 import sys
 import tempfile
-from pathlib import Path
-
-parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
-from astrbot_plugin_playwright_tools.core.audit_logger import AuditLogger
-
-TEMP_DIR = Path(tempfile.gettempdir()) / "astrbot_test_audit"
-
-def run_coro(coro):
-    """在无网络沙箱环境下无开销执行普通协程，规避 socket.socketpair 挂起问题。"""
-    try:
-        coro.send(None)
-    except StopIteration as e:
-        return e.value
-
-import unittest
-import os
-import sys
-import tempfile
 import json
 import csv
 import io
 from pathlib import Path
 
+root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
-from astrbot_plugin_playwright_tools.core.audit_logger import AuditLogger
+try:
+    from core.audit_logger import AuditLogger
+except ImportError:
+    from astrbot_plugin_playwright_tools.core.audit_logger import AuditLogger
 
 TEMP_DIR = Path(tempfile.gettempdir()) / "astrbot_test_audit"
 
@@ -286,6 +272,87 @@ class TestAuditLogger(unittest.TestCase):
         ))
         items, _ = run_coro(self.logger.query_logs(page=1, page_size=1))
         self.assertEqual(items[0]["screenshot_path"], "data/audit_screenshots/shot_123.png")
+
+    def test_lifecycle_logs_crud(self):
+        # 记录生命周期事件
+        run_coro(self.logger.log_lifecycle(
+            session_id="sess_100",
+            context_key="sess_100:user_1",
+            owner_id="user_1",
+            event_type="create",
+            operator_id="user_1",
+            session_name="测试群",
+            details={"adapter": "camoufox", "tab_count": 1}
+        ))
+        run_coro(self.logger.log_lifecycle(
+            session_id="sess_101",
+            context_key="sess_101:user_2",
+            owner_id="user_2",
+            event_type="close",
+            operator_id="user_2",
+            session_name="开发群",
+            details=None
+        ))
+        run_coro(self.logger.log_lifecycle(
+            session_id="sess_100",
+            context_key="sess_100:user_1",
+            owner_id="user_1",
+            event_type="timeout",
+            operator_id="system",
+            session_name="测试群",
+            details="timed out after 300s"
+        ))
+
+        # 1. 过滤 event_type
+        items, total = run_coro(self.logger.query_lifecycle_logs(page=1, page_size=10, event_type="create"))
+        self.assertEqual(total, 1)
+        self.assertEqual(items[0]["event_type"], "create")
+        self.assertEqual(items[0]["owner_id"], "user_1")
+        self.assertIn("camoufox", items[0]["details"])
+
+        # 2. 过滤 session_id
+        items_sess, total_sess = run_coro(self.logger.query_lifecycle_logs(session_id="sess_100"))
+        self.assertEqual(total_sess, 2)
+        self.assertEqual(len(items_sess), 2)
+
+        # 3. 关键词过滤
+        items_kw, total_kw = run_coro(self.logger.query_lifecycle_logs(keyword="开发群"))
+        self.assertEqual(total_kw, 1)
+        self.assertEqual(items_kw[0]["session_name"], "开发群")
+        self.assertEqual(items_kw[0]["details"], "{}")
+
+        # 4. 分页
+        items_p1, total_p = run_coro(self.logger.query_lifecycle_logs(page=1, page_size=2))
+        self.assertEqual(total_p, 3)
+        self.assertEqual(len(items_p1), 2)
+        items_p2, _ = run_coro(self.logger.query_lifecycle_logs(page=2, page_size=2))
+        self.assertEqual(len(items_p2), 1)
+        self.assertNotEqual(items_p1[0]["id"], items_p2[0]["id"])
+
+try:
+    import pytest
+except ImportError:
+    pytest = None
+
+if pytest is not None:
+    @pytest.mark.asyncio
+    async def test_lifecycle_logs_crud(tmp_path):
+        db_file = str(tmp_path / "test_lifecycle.db")
+        logger = AuditLogger(db_path=db_file)
+        await logger.log_lifecycle(
+            session_id="sess_100",
+            context_key="sess_100:user_1",
+            owner_id="user_1",
+            event_type="create",
+            operator_id="user_1",
+            session_name="测试群",
+            details={"adapter": "camoufox", "tab_count": 1}
+        )
+        items, total = await logger.query_lifecycle_logs(page=1, page_size=10, event_type="create")
+        assert total == 1
+        assert items[0]["event_type"] == "create"
+        assert items[0]["owner_id"] == "user_1"
+        assert "camoufox" in items[0]["details"]
 
 if __name__ == "__main__":
     unittest.main()
