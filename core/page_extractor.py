@@ -38,19 +38,51 @@ class PageExtractor:
         else:
             md_clean = str(markdown_text or "").strip()
 
-        # 2. 整理控件列表
+        # 规范化多余换行与列表紧凑排布
+        if md_clean:
+            # 折叠 3 个及以上连续换行为双换行
+            md_clean = re.sub(r'\n{3,}', '\n\n', md_clean)
+            # 消除列表项之间多余的空行
+            while re.search(r'(^|\n)([-*]\s[^\n]+)\n\n+(?=[-*]\s)', md_clean):
+                md_clean = re.sub(r'(^|\n)([-*]\s[^\n]+)\n\n+(?=[-*]\s)', r'\1\2\n', md_clean)
+            while re.search(r'(^|\n)(\d+\.\s[^\n]+)\n\n+(?=\d+\.\s)', md_clean):
+                md_clean = re.sub(r'(^|\n)(\d+\.\s[^\n]+)\n\n+(?=\d+\.\s)', r'\1\2\n', md_clean)
+
+        # 2. 整理控件列表（过滤无效空链接/按钮，去重连续相同控件）
         el_lines: list[str] = []
         if raw_elements:
-            el_lines.append("【可操作元素】")
-            for idx, el in enumerate(raw_elements, start=1):
-                ref_id = idx
-                ref_map[ref_id] = el
+            ref_idx = 1
+            prev_interactive_key = None
+            for el in raw_elements:
                 tag = el.get("tag", "").lower()
                 el_type = el.get("type", "").lower()
+                role = el.get("role", "").lower()
                 name = el.get("name", "")
                 placeholder = el.get("placeholder", "").strip()
                 value = el.get("value", "").strip()
-                text = self._normalize_multiline(el.get("text", ""))
+                raw_text = el.get("text", "")
+                aria_label = el.get("aria-label", "").strip()
+                title = el.get("title", "").strip()
+
+                text = self._normalize_multiline(raw_text)
+
+                # 过滤空链接与空按钮（无 text、aria-label、title、value）
+                if tag in ("a", "button") or el_type == "button" or role in ("button", "link"):
+                    if not text:
+                        text = aria_label or title or value
+                    if not text:
+                        continue
+                    # 连续重复项去重
+                    current_key = (tag, role, text)
+                    if current_key == prev_interactive_key:
+                        continue
+                    prev_interactive_key = current_key
+                else:
+                    prev_interactive_key = None
+
+                ref_id = ref_idx
+                ref_map[ref_id] = el
+                ref_idx += 1
 
                 if tag in ("input", "textarea"):
                     details = []
@@ -62,10 +94,10 @@ class PageExtractor:
                         details.append(f'value="{value}"')
                     detail_str = f" ({', '.join(details)})" if details else ""
                     el_lines.append(f"[{ref_id}] [输入框]{detail_str}")
-                elif tag == "button" or el_type == "button" or el.get("role") == "button":
+                elif tag == "button" or el_type == "button" or role == "button":
                     btn_label = f' "{text}"' if text else ""
                     el_lines.append(f"[{ref_id}] [按钮]{btn_label}")
-                elif tag == "a":
+                elif tag == "a" or role == "link":
                     link_label = f' "{text}"' if text else ""
                     el_lines.append(f"[{ref_id}] [链接]{link_label}")
                 elif tag == "select":
@@ -75,6 +107,9 @@ class PageExtractor:
                 else:
                     label = f' "{text}"' if text else ""
                     el_lines.append(f"[{ref_id}] [{tag.upper()}]{label}")
+
+            if len(el_lines) > 0:
+                el_lines.insert(0, "【可操作元素】")
 
         elements_text = "\n".join(el_lines)
 
@@ -256,92 +291,236 @@ class PageExtractor:
         return f"{header}\n{body}\n--- [提示: 如需交互可查看匹配到的 Ref 编号并调用 pw_interact 执行点击/输入] ---"
 
     def get_js_extractor_script(self) -> str:
-        """返回注入至浏览器执行的 JavaScript 提取脚本，支持结构化 Markdown 正文提炼。"""
+        """返回注入至浏览器执行的 JavaScript 提取脚本，支持结构化 Markdown 正文提炼与噪声剔除。"""
         return """
         (() => {
             const isVisible = (el) => {
                 if (!el) return false;
-                const style = window.getComputedStyle(el);
-                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
-                const rect = el.getBoundingClientRect();
-                return rect.width > 0 && rect.height > 0;
+                const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+                if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;
+                if (el.getBoundingClientRect) {
+                    const rect = el.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                }
+                return true;
             };
 
+            const noiseSelector = 'script, style, noscript, nav, header, footer, aside, .sidebar, .login-tip, .login-box';
+            const isNoise = (el) => {
+                if (!el) return false;
+                if (el.closest) return !!el.closest(noiseSelector);
+                if (el.matches && el.matches(noiseSelector)) return true;
+                return false;
+            };
+
+            const getNodeTextWithBr = (el) => {
+                if (!el) return '';
+                if (el.querySelector && el.querySelector('br') && el.cloneNode) {
+                    try {
+                        const clone = el.cloneNode(true);
+                        const brs = clone.querySelectorAll('br');
+                        for (const br of brs) {
+                            if (br.replaceWith) {
+                                br.replaceWith('\\n');
+                            } else if (br.parentNode) {
+                                br.parentNode.removeChild(br);
+                            }
+                        }
+                        const cloneText = (clone.textContent || '').trim();
+                        if (cloneText) return cloneText;
+                    } catch (e) {}
+                }
+                let text = el.innerText || el.textContent || '';
+                return text.trim();
+            };
+
+            // 1. 提取可交互元素（过滤空控件与连续重复项）
             const interactiveSelectors = 'button, a, input, select, textarea, [role="button"], [role="link"], [onclick]';
             const rawElements = [];
-            const nodes = document.querySelectorAll(interactiveSelectors);
+            const interactiveNodes = document.querySelectorAll(interactiveSelectors);
 
             let idx = 1;
-            for (const node of nodes) {
+            let prevInteractiveKey = null;
+
+            for (const node of interactiveNodes) {
                 if (!isVisible(node)) continue;
-                let text = node.innerText || node.textContent || '';
+                const tag = (node.tagName || '').toLowerCase();
+                const type = (node.getAttribute && node.getAttribute('type')) || '';
+                const role = (node.getAttribute && node.getAttribute('role') || '').toLowerCase();
+                const name = (node.getAttribute && node.getAttribute('name')) || '';
+                const placeholder = (node.getAttribute && node.getAttribute('placeholder')) || '';
+                const value = node.value || (node.getAttribute && node.getAttribute('value')) || '';
+                const ariaLabel = (node.getAttribute && node.getAttribute('aria-label') || '').trim();
+                const title = (node.getAttribute && node.getAttribute('title') || '').trim();
+                let text = (node.innerText || node.textContent || '').trim();
+
+                // 过滤空链接与空按钮（无 text、aria-label、title、value）
+                if (tag === 'a' || tag === 'button' || role === 'button' || role === 'link') {
+                    if (!text) {
+                        text = ariaLabel || title || value;
+                    }
+                    if (!text) continue;
+
+                    // 连续重复项去重
+                    const currentKey = tag + ':' + role + ':' + text;
+                    if (currentKey === prevInteractiveKey) continue;
+                    prevInteractiveKey = currentKey;
+                } else {
+                    prevInteractiveKey = null;
+                }
+
                 if (text.length > 80) text = text.substring(0, 80) + '...';
-                
-                node.setAttribute('data-astr-ref', idx.toString());
+
+                if (node.setAttribute) {
+                    node.setAttribute('data-astr-ref', idx.toString());
+                }
                 rawElements.push({
-                    tag: node.tagName.toLowerCase(),
-                    type: node.getAttribute('type') || '',
-                    name: node.getAttribute('name') || '',
-                    placeholder: node.getAttribute('placeholder') || '',
-                    value: node.value || '',
-                    text: text.trim(),
-                    role: node.getAttribute('role') || '',
-                    options: node.tagName.toLowerCase() === 'select' ? Array.from(node.options).map(o => o.text) : []
+                    tag: tag,
+                    type: type,
+                    name: name,
+                    placeholder: placeholder,
+                    value: value,
+                    text: text,
+                    role: role,
+                    options: tag === 'select' && node.options ? Array.from(node.options).map(o => o.text) : []
                 });
                 idx++;
             }
 
-            // 结构化正文提炼：查找主要内容容器
-            const mainContainer = document.querySelector('article, main, [role="main"], .mw-parser-output, .markdown-body, #content') || document.body;
+            // 2. 结构化正文提炼与容器识别
+            // 候选专用正文容器
+            const explicitMain = document.querySelector('article, main, [role="main"], .mw-parser-output, .markdown-body, #content');
+            let mainContainer = (explicitMain && !isNoise(explicitMain)) ? explicitMain : null;
+
+            if (!mainContainer) {
+                // 文本密度与标点密度打分查找最佳正文容器
+                const candidates = Array.from(document.querySelectorAll('div, section, article, main')).filter(el => !isNoise(el) && isVisible(el));
+                let bestScore = -1;
+                let bestEl = null;
+
+                for (const el of candidates) {
+                    const text = (el.innerText || el.textContent || '').trim();
+                    if (text.length < 50) continue;
+
+                    const punctMatches = text.match(/[,.?!;:，。？！；：\\n]/g);
+                    const punctCount = punctMatches ? punctMatches.length : 0;
+
+                    let linkLen = 0;
+                    if (el.querySelectorAll) {
+                        const links = el.querySelectorAll('a');
+                        for (const a of links) {
+                            linkLen += (a.innerText || a.textContent || '').trim().length;
+                        }
+                    }
+
+                    const nonLinkLen = Math.max(0, text.length - linkLen);
+                    // 标点密度加权
+                    const score = nonLinkLen * (1 + (punctCount / (text.length + 1)));
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestEl = el;
+                    }
+                }
+                mainContainer = bestEl || document.body;
+            }
+
             const mdLines = [];
             const visited = new Set();
 
-            const textNodes = mainContainer.querySelectorAll('h1, h2, h3, h4, h5, h6, p, ul, ol, blockquote, pre, table');
+            const markVisited = (el) => {
+                visited.add(el);
+                if (el.querySelectorAll) {
+                    const children = el.querySelectorAll('*');
+                    for (const child of children) {
+                        visited.add(child);
+                    }
+                }
+            };
+
+            const querySelectorTarget = 'h1, h2, h3, h4, h5, h6, p, ul, ol, blockquote, pre, table, .d_post_content, .post-content, div';
+            const textNodes = (mainContainer && mainContainer.querySelectorAll) ? mainContainer.querySelectorAll(querySelectorTarget) : [];
+
             for (const node of textNodes) {
-                if (!isVisible(node) || visited.has(node)) continue;
-                visited.add(node);
-                const tag = node.tagName.toLowerCase();
-                const text = (node.innerText || '').trim();
-                if (!text || text.length < 2) continue;
+                if (!isVisible(node) || isNoise(node) || visited.has(node)) continue;
+
+                const tag = (node.tagName || '').toLowerCase();
+                const isPostContent = (node.matches && (node.matches('.d_post_content, .post-content, .entry-content'))) ||
+                                      (node.className && typeof node.className === 'string' && (node.className.includes('post_content') || node.className.includes('post-content')));
 
                 if (tag === 'h1') {
-                    mdLines.push('# ' + text);
+                    const text = (node.innerText || node.textContent || '').trim();
+                    if (text) mdLines.push('# ' + text);
+                    markVisited(node);
                 } else if (tag === 'h2') {
-                    mdLines.push('## ' + text);
+                    const text = (node.innerText || node.textContent || '').trim();
+                    if (text) mdLines.push('## ' + text);
+                    markVisited(node);
                 } else if (tag === 'h3') {
-                    mdLines.push('### ' + text);
+                    const text = (node.innerText || node.textContent || '').trim();
+                    if (text) mdLines.push('### ' + text);
+                    markVisited(node);
                 } else if (tag === 'h4' || tag === 'h5' || tag === 'h6') {
-                    mdLines.push('#### ' + text);
+                    const text = (node.innerText || node.textContent || '').trim();
+                    if (text) mdLines.push('#### ' + text);
+                    markVisited(node);
                 } else if (tag === 'p') {
-                    mdLines.push(text);
+                    const text = (node.innerText || node.textContent || '').trim();
+                    if (text && text.length >= 2) mdLines.push(text);
+                    markVisited(node);
                 } else if (tag === 'ul' || tag === 'ol') {
-                    const lis = Array.from(node.querySelectorAll('li')).slice(0, 20);
+                    markVisited(node);
+                    const lis = Array.from(node.querySelectorAll ? node.querySelectorAll('li') : []).slice(0, 30);
+                    const listItems = [];
                     for (const li of lis) {
                         visited.add(li);
-                        const liText = (li.innerText || '').trim();
-                        if (liText) mdLines.push('- ' + liText);
+                        const liText = (li.innerText || li.textContent || '').trim();
+                        if (liText) listItems.push('- ' + liText);
+                    }
+                    if (listItems.length > 0) {
+                        mdLines.push(listItems.join('\\n'));
                     }
                 } else if (tag === 'blockquote') {
-                    mdLines.push('> ' + text);
+                    const text = (node.innerText || node.textContent || '').trim();
+                    if (text) mdLines.push('> ' + text);
+                    markVisited(node);
                 } else if (tag === 'pre') {
-                    mdLines.push('```\\n' + text.substring(0, 500) + '\\n```');
+                    const text = (node.innerText || node.textContent || '').trim();
+                    if (text) mdLines.push('```\\n' + text.substring(0, 500) + '\\n```');
+                    markVisited(node);
                 } else if (tag === 'table') {
-                    const rows = Array.from(node.querySelectorAll('tr')).slice(0, 10);
+                    markVisited(node);
+                    const rows = Array.from(node.querySelectorAll ? node.querySelectorAll('tr') : []).slice(0, 10);
                     for (const row of rows) {
                         visited.add(row);
-                        const cells = Array.from(row.querySelectorAll('th, td')).map(c => (c.innerText || '').trim());
+                        const cells = Array.from(row.querySelectorAll ? row.querySelectorAll('th, td') : []).map(c => (c.innerText || c.textContent || '').trim());
                         if (cells.length > 0) {
                             mdLines.push('| ' + cells.join(' | ') + ' |');
                         }
                     }
+                } else if (isPostContent) {
+                    const text = getNodeTextWithBr(node);
+                    if (text && text.length >= 2) {
+                        mdLines.push(text);
+                    }
+                    markVisited(node);
+                } else if (tag === 'div') {
+                    // 对于普通 div：仅当不包含其他待查询块级元素时作为文本块提取
+                    const hasInnerBlock = node.querySelector && !!node.querySelector('div, p, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote, pre');
+                    if (!hasInnerBlock) {
+                        const text = getNodeTextWithBr(node);
+                        if (text && text.length >= 2) {
+                            mdLines.push(text);
+                        }
+                        markVisited(node);
+                    }
                 }
             }
 
-            const markdownText = mdLines.join('\\n\\n');
+            let markdownText = mdLines.join('\\n\\n');
 
             return {
-                title: document.title,
-                url: window.location.href,
+                title: document.title || '',
+                url: (window.location && window.location.href) || '',
                 elements: rawElements,
                 markdownText: markdownText
             };
