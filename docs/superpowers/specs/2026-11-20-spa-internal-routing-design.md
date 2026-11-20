@@ -62,7 +62,8 @@
 ### 3.2 前端内存路由与持久化实现 (`web-src/src/App.tsx`)
 1. **路由状态初始化**：
    ```typescript
-   const TAB_STORAGE_KEY = "astrbot_pw_tab";
+   // 必须使用本插件名作为 localStorage 键名前缀，确保同源下绝无命名冲突
+   const TAB_STORAGE_KEY = "astrbot_plugin_playwright_tools:active_tab";
 
    const [activeTab, setActiveTab] = useState<NavTabType>(() => {
      try {
