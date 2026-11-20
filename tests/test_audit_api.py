@@ -1,6 +1,7 @@
 import unittest
 import os
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock
 
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -141,6 +142,70 @@ class TestAuditApi(unittest.TestCase):
     def test_screenshot_route_blocks_directory_traversal(self):
         res = run_coro(self.handler.api_audit_screenshot(path="../../etc/passwd"))
         self.assertEqual(res["status_code"], 403)
+
+    def test_screenshot_route_missing_path(self):
+        audit_api_module.request = None
+        res = run_coro(self.handler.api_audit_screenshot(path=""))
+        self.assertEqual(res["status_code"], 400)
+
+    def test_screenshot_route_file_not_found(self):
+        audit_api_module.request = None
+        res = run_coro(self.handler.api_audit_screenshot(path="data/audit_screenshots/non_existent.png"))
+        self.assertEqual(res["status_code"], 404)
+
+    def test_screenshot_route_png_streaming(self):
+        import tempfile
+        base_dir = Path(tempfile.gettempdir()) / "astrbot_test_audit_data"
+        base_dir.mkdir(parents=True, exist_ok=True)
+        self.handler.base_dir = base_dir
+
+        test_png = base_dir / "test_out.png"
+        fake_png_data = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDRtest_stream"
+        with open(test_png, "wb") as f:
+            f.write(fake_png_data)
+
+        try:
+            audit_api_module.request = None
+            res = run_coro(self.handler.api_audit_screenshot(path=str(test_png)))
+            if isinstance(res, dict):
+                self.assertEqual(res.get("status_code", 200), 200)
+                self.assertEqual(res.get("media_type"), "image/png")
+                self.assertEqual(res.get("data"), fake_png_data)
+            else:
+                self.assertEqual(getattr(res, "status_code", 200), 200)
+                self.assertEqual(getattr(res, "media_type", ""), "image/png")
+                if hasattr(res, "body"):
+                    self.assertEqual(res.body, fake_png_data)
+        finally:
+            if test_png.exists():
+                test_png.unlink()
+
+    def test_screenshot_route_jpeg_streaming(self):
+        import tempfile
+        base_dir = Path(tempfile.gettempdir()) / "astrbot_test_audit_data"
+        base_dir.mkdir(parents=True, exist_ok=True)
+        self.handler.base_dir = base_dir
+
+        test_jpg = base_dir / "test_out.jpg"
+        fake_jpg_data = b"\xff\xd8\xff\xe0\x00\x10JFIFtest_stream"
+        with open(test_jpg, "wb") as f:
+            f.write(fake_jpg_data)
+
+        try:
+            audit_api_module.request = None
+            res = run_coro(self.handler.api_audit_screenshot(path=str(test_jpg)))
+            if isinstance(res, dict):
+                self.assertEqual(res.get("status_code", 200), 200)
+                self.assertEqual(res.get("media_type"), "image/jpeg")
+                self.assertEqual(res.get("data"), fake_jpg_data)
+            else:
+                self.assertEqual(getattr(res, "status_code", 200), 200)
+                self.assertEqual(getattr(res, "media_type", ""), "image/jpeg")
+                if hasattr(res, "body"):
+                    self.assertEqual(res.body, fake_jpg_data)
+        finally:
+            if test_jpg.exists():
+                test_jpg.unlink()
 
 
 if __name__ == "__main__":

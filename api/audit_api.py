@@ -65,8 +65,9 @@ def extract_query_param(req: Any, key: str, default: Any = None, type_conv: Any 
 class AuditApiHandler:
     """审计日志 Web API 处理模块，负责向 AstrBot Dashboard 提供日志查询、指标、导出、清空与截图预览接口。"""
 
-    def __init__(self, audit_logger: Any):
+    def __init__(self, audit_logger: Any, base_dir: str = "data"):
         self.audit_logger = audit_logger
+        self.base_dir = Path(base_dir).resolve()
 
     def register_routes(self, context: Any, plugin_name: str) -> None:
         """向 AstrBot 上下文注册 Web API 路由。"""
@@ -163,15 +164,20 @@ class AuditApiHandler:
         return json_response({"code": 0, "data": {"cleared": cleared}})
 
     async def api_audit_screenshot(self, path: str = ""):
-        """获取本地截图预览，带目录越界防护。"""
+        """获取本地截图预览，带目录越界防护并直出二进制图片流。"""
         req = request
         if not path:
             path = extract_query_param(req, "path", "")
         if not path:
             return error_response("缺少 path 参数", status_code=400)
 
-        # 目录越界防护：只允许访问 data/ 目录下的截图
-        base_dir = Path("data").resolve()
+        # 目录越界防护：只允许访问 base_dir (默认 data/) 目录下的截图
+        base_dir = getattr(self, "base_dir", None)
+        if base_dir is None:
+            base_dir = Path("data").resolve()
+        else:
+            base_dir = Path(base_dir).resolve()
+
         try:
             p = Path(path)
             target_path = p.resolve() if p.is_absolute() else (Path.cwd() / p).resolve()
@@ -185,14 +191,24 @@ class AuditApiHandler:
         if not target_path.exists() or not target_path.is_file():
             return error_response("截图文件不存在", status_code=404)
 
+        ext = target_path.suffix.lower()
+        mime_map = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+            ".gif": "image/gif",
+        }
+        media_type = mime_map.get(ext, "image/png")
+
         try:
             from starlette.responses import FileResponse
-            return FileResponse(str(target_path), media_type="image/png")
+            return FileResponse(str(target_path), media_type=media_type)
         except ImportError:
             try:
                 from starlette.responses import Response
                 with open(target_path, "rb") as f:
-                    return Response(content=f.read(), media_type="image/png")
+                    return Response(content=f.read(), media_type=media_type)
             except ImportError:
                 with open(target_path, "rb") as f:
-                    return {"data": f.read(), "media_type": "image/png", "status_code": 200}
+                    return {"data": f.read(), "media_type": media_type, "status_code": 200}
