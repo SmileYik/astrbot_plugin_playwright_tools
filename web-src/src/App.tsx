@@ -4,22 +4,17 @@ import { Navbar, NavTabType } from "./components/Navbar";
 import { AuditView } from "./views/AuditView";
 import { LifecycleView } from "./views/LifecycleView";
 
+const TAB_STORAGE_KEY = "astrbot_plugin_playwright_tools:active_tab";
+
 export function App() {
-  // 根据 URL、Hash 或查询参数确定初始 Tab
   const [activeTab, setActiveTab] = useState<NavTabType>(() => {
-    if (typeof window !== "undefined") {
-      const url = window.location.href;
-      if (url.includes("lifecycle") || window.location.hash.includes("lifecycle")) {
-        return "lifecycle";
+    try {
+      const saved = localStorage.getItem(TAB_STORAGE_KEY);
+      if (saved === "lifecycle" || saved === "audit") {
+        return saved;
       }
-      try {
-        const params = new URLSearchParams(window.location.search);
-        if (params.get("view") === "lifecycle") {
-          return "lifecycle";
-        }
-      } catch {
-        // ignore
-      }
+    } catch {
+      // ignore
     }
     return "audit";
   });
@@ -32,6 +27,15 @@ export function App() {
     setTimeout(() => setBannerMsg(null), 3000);
   }, []);
 
+  const handleTabChange = useCallback((tab: NavTabType) => {
+    setActiveTab(tab);
+    try {
+      localStorage.setItem(TAB_STORAGE_KEY, tab);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   // 初始化 Bridge 连接
   useEffect(() => {
     const initBridge = async () => {
@@ -41,11 +45,6 @@ export function App() {
           const ctx = await bridge.ready();
           if (ctx?.isDark) {
             document.documentElement.setAttribute("data-theme", "dark");
-          }
-          if (ctx?.viewName === "lifecycle") {
-            setActiveTab("lifecycle");
-          } else if (ctx?.viewName === "audit") {
-            setActiveTab("audit");
           }
           setIsBridgeReady(true);
         } catch {
@@ -92,7 +91,7 @@ export function App() {
       {/* 顶部统一导航栏 */}
       <Navbar
         activeTab={activeTab}
-        onTabChange={(tab) => setActiveTab(tab)}
+        onTabChange={handleTabChange}
         isBridgeReady={isBridgeReady}
       />
 
