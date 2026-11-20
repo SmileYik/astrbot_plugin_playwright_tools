@@ -1,8 +1,23 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from playwright.async_api import Browser, BrowserContext
+else:
+    try:
+        from playwright.async_api import Browser, BrowserContext
+    except ImportError:
+        Browser = None
+        BrowserContext = None
 
 class BrowserAdapterBase(ABC):
     """浏览器适配器基类，解耦上层工具逻辑与底层浏览器生命周期。"""
+
+    @property
+    @abstractmethod
+    def browser(self) -> "Browser | None":
+        """获取当前活跃的 Playwright Browser 实例。"""
+        pass
 
     @abstractmethod
     async def start(self) -> None:
@@ -15,6 +30,6 @@ class BrowserAdapterBase(ABC):
         pass
 
     @abstractmethod
-    async def create_context(self, storage_state_path: str | None = None) -> Any:
+    async def create_context(self, storage_state_path: str | None = None) -> "BrowserContext":
         """创建全新隔离的浏览器上下文（BrowserContext），可选注入登录态凭证。"""
         pass

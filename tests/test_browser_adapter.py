@@ -19,6 +19,7 @@ class TestBrowserAdapter(unittest.TestCase):
     def test_adapter_interface(self):
         adapter = CamoufoxAdapter(headless=True)
         self.assertIsInstance(adapter, BrowserAdapterBase)
+        self.assertIsNone(adapter.browser)
 
     @patch("astrbot_plugin_playwright_tools.adapts.camoufox_adapter.AsyncCamoufox")
     def test_start_and_create_context(self, mock_camoufox):
@@ -26,7 +27,7 @@ class TestBrowserAdapter(unittest.TestCase):
         mock_browser = AsyncMock()
         mock_context = AsyncMock()
         mock_browser.new_context.return_value = mock_context
-        
+
         # mock async context manager (__aenter__)
         async def mock_aenter(*args, **kwargs):
             return mock_browser
@@ -37,10 +38,16 @@ class TestBrowserAdapter(unittest.TestCase):
         mock_camoufox.return_value = mock_instance
 
         adapter = CamoufoxAdapter(headless=True)
+        self.assertIsNone(adapter.browser)
         run_coro(adapter.start())
+        self.assertEqual(adapter.browser, mock_browser)
+
         ctx = run_coro(adapter.create_context(storage_state_path="test_state.json"))
         self.assertIsNotNone(ctx)
+        self.assertEqual(ctx, mock_context)
+
         run_coro(adapter.stop())
+        self.assertIsNone(adapter.browser)
 
 if __name__ == "__main__":
     unittest.main()
