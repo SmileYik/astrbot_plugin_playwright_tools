@@ -8,12 +8,13 @@ from astrbot.api import logger, AstrBotConfig
 PLUGIN_NAME = "astrbot_plugin_playwright_tools"
 
 from .api.audit_api import AuditApiHandler
+from .api.lifecycle_api import LifecycleApiHandler
 
 from .core.audit_logger import AuditLogger
 from .core.security_manager import SecurityManager
 from .core.page_extractor import PageExtractor
 from .core.context_manager import ContextManager
-from .adapts.camoufox_adapter import CamoufoxAdapter
+from .adapts.factory import AdapterFactory
 
 from .tools.handlers.page_handler import PageHandler
 from .tools.handlers.interact_handler import InteractHandler
@@ -61,6 +62,12 @@ class PlaywrightToolPlugin(Star):
         screenshot_timeout = int(self.config.get("screenshot_timeout_seconds", 15))
         self.system_prompt_injection = str(self.config.get("system_prompt_injection", "")).strip()
 
+        screenshot_format = str(self.config.get("screenshot_format", "png")).lower()
+        screenshot_quality = int(self.config.get("screenshot_quality", 80))
+        download_save_path = str(self.config.get("download_save_path", "data/downloads"))
+        screenshot_save_path = str(self.config.get("screenshot_save_path", "data/screenshots"))
+        file_retention_days = int(self.config.get("file_retention_days", 7))
+
         # 2. 初始化核心服务
         audit_db_path = str(self.config.get("audit_db_path", "data/audit.db"))
         self.audit_logger = AuditLogger(audit_db_path, max_output_chars=audit_max_output_chars)
@@ -74,13 +81,14 @@ class PlaywrightToolPlugin(Star):
             max_page_char_length=2500,
             multiline_separator=element_multiline_separator,
         )
-        self.adapter = CamoufoxAdapter(headless=True)
+        self.adapter = AdapterFactory.create(self.config)
         self.context_manager = ContextManager(
             adapter=self.adapter,
             security=self.security_manager,
             mode=context_mode,
             idle_timeout_minutes=idle_timeout,
             storage_state_path=storage_state_path,
+            audit_logger=self.audit_logger,
         )
 
         # 3. 初始化模块化 Handlers 与复合 FunctionTool
@@ -99,8 +107,12 @@ class PlaywrightToolPlugin(Star):
             self.security_manager,
             self.audit_logger,
             allow_screenshot_to_ai=allow_screenshot_to_ai,
-            download_dir="data/downloads",
+            download_dir=download_save_path,
             audit_save_screenshots=audit_save_screenshots,
+            screenshot_format=screenshot_format,
+            screenshot_quality=screenshot_quality,
+            screenshot_dir=screenshot_save_path,
+            file_retention_days=file_retention_days,
         )
 
         self.pw_page_tool = PwPageTool(page_handler=self.page_handler, timeout_seconds=tool_timeout)
@@ -119,6 +131,11 @@ class PlaywrightToolPlugin(Star):
         # 5. 初始化并注册 Web API 模块
         self.audit_api = AuditApiHandler(self.audit_logger)
         self.audit_api.register_routes(self.context, PLUGIN_NAME)
+
+        self.lifecycle_api = LifecycleApiHandler(
+            self.context_manager, self.audit_logger, self.media_handler
+        )
+        self.lifecycle_api.register_routes(self.context, PLUGIN_NAME)
 
         # 兼容委托供历史引用使用
         self.api_audit_logs = self.audit_api.api_audit_logs
@@ -173,7 +190,7 @@ class PlaywrightToolPlugin(Star):
 
     @filter.command("browser")
     async def browser_cmd(self, event: AstrMessageEvent, sub_cmd: str = "", arg: str = ""):
-        """浏览器插件指令管理。用法: /browser <invite|use|close|status> [参数]"""
+        """浏览器插件指令管理。用法: /browser <invite|use|close|status|list|list-all|kill> [参数]"""
         self._sync_event_admin(event)
         session_id = event.session_id
         sender_id = str(event.get_sender_id())
@@ -214,13 +231,63 @@ class PlaywrightToolPlugin(Star):
                 )
             else:
                 yield event.plain_result("当前未创建活跃的浏览器上下文。如需开启，请让大模型执行浏览操作。")
+
+        elif sub_cmd == "list":
+            contexts = await self.context_manager.get_active_contexts_detail()
+            filtered = [c for c in contexts if c.get("session_id") == session_id]
+            if not filtered:
+                yield event.plain_result("当前会话暂无活跃的浏览器上下文。")
+                return
+            lines = [f"【当前会话活跃浏览器】\n共 {len(filtered)} 个活跃上下文:"]
+            for idx, c in enumerate(filtered, 1):
+                key = c.get("context_key", "")
+                owner = c.get("owner_id", "")
+                allowed = ", ".join(str(u) for u in c.get("allowed_users", []))
+                tab_cnt = c.get("tab_count", 0)
+                cur_url = c.get("active_tab_url", "") or "空白页"
+                lines.append(f"{idx}. Key: {key} | 所有者: {owner} | 协作者: {allowed} | 标签页数: {tab_cnt} | 当前: {cur_url}")
+            yield event.plain_result("\n".join(lines))
+
+        elif sub_cmd == "list-all":
+            if not self.security_manager.is_admin(sender_id):
+                yield event.plain_result("无权限：仅管理员可查看全部会话的活跃上下文。")
+                return
+            contexts = await self.context_manager.get_active_contexts_detail()
+            if not contexts:
+                yield event.plain_result("全平台暂无活跃的浏览器上下文。")
+                return
+            lines = [f"【全平台活跃浏览器】\n共 {len(contexts)} 个活跃上下文:"]
+            for idx, c in enumerate(contexts, 1):
+                key = c.get("context_key", "")
+                sess = c.get("session_id", "")
+                owner = c.get("owner_id", "")
+                allowed = ", ".join(str(u) for u in c.get("allowed_users", []))
+                tab_cnt = c.get("tab_count", 0)
+                cur_url = c.get("active_tab_url", "") or "空白页"
+                lines.append(f"{idx}. Key: {key} (会话: {sess}) | 所有者: {owner} | 协作者: {allowed} | 标签页数: {tab_cnt} | 当前: {cur_url}")
+            yield event.plain_result("\n".join(lines))
+
+        elif sub_cmd == "kill":
+            if not self.security_manager.is_admin(sender_id):
+                yield event.plain_result("无权限：仅管理员可强行关闭上下文。")
+                return
+            target_key = arg.strip()
+            if not target_key:
+                yield event.plain_result("请提供要关闭的 context_key，例如: /browser kill default:123456:admin")
+                return
+            ok, msg = await self.context_manager.force_kill_context(target_key, operator_id=sender_id)
+            yield event.plain_result(msg)
+
         else:
             yield event.plain_result(
                 "浏览器指令帮助:\n"
                 "- /browser invite <UID/@用户> : 邀请用户协作当前浏览器\n"
                 "- /browser use <UID/@用户> : 切换当前操作的浏览器目标\n"
                 "- /browser close : 关闭释放自己开启的浏览器\n"
-                "- /browser status : 查看当前浏览器状态"
+                "- /browser status : 查看当前浏览器状态\n"
+                "- /browser list : 查看当前会话活跃的浏览器列表\n"
+                "- /browser list-all : 查看全平台活跃的浏览器列表(仅管理员)\n"
+                "- /browser kill <context_key> : 强行关闭指定浏览器上下文(仅管理员)"
             )
 
     # ==================== 大模型请求系统提示词注入 ====================

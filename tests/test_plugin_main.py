@@ -5,7 +5,7 @@ import sys
 import tempfile
 import yaml
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock
 
 TEMP_DIR = Path(tempfile.gettempdir()) / "astrbot_test_plugin_main"
 
@@ -48,10 +48,34 @@ import astrbot_plugin_playwright_tools.main as main
 import astrbot_plugin_playwright_tools.api.audit_api as audit_api_module
 
 def run_coro(coro):
+    result = None
+    stack = [coro]
+    while stack:
+        try:
+            val = stack[-1].send(None)
+            if hasattr(val, "send"):
+                stack.append(val)
+        except StopIteration as e:
+            stack.pop()
+            if stack:
+                try:
+                    stack[-1].send(e.value)
+                except StopIteration as e2:
+                    stack.pop()
+                    result = e2.value
+            else:
+                result = e.value
+    return result
+
+def collect_async_gen(agen):
+    results = []
     try:
-        coro.send(None)
-    except StopIteration as e:
-        return e.value
+        while True:
+            val = run_coro(agen.asend(None))
+            results.append(val)
+    except StopAsyncIteration:
+        pass
+    return results
 
 class TestPluginMain(unittest.TestCase):
     def test_conf_schema_valid_json(self):
@@ -157,7 +181,7 @@ class TestPluginMain(unittest.TestCase):
             "audit_db_path": db_file,
         })
 
-        self.assertEqual(mock_ctx.register_web_api.call_count, 5)
+        self.assertEqual(mock_ctx.register_web_api.call_count, 9)
         registered_calls = [c[0] for c in mock_ctx.register_web_api.call_args_list]
         routes_map = {call[0]: call[2] for call in registered_calls}
 
@@ -175,6 +199,18 @@ class TestPluginMain(unittest.TestCase):
 
         self.assertIn("/astrbot_plugin_playwright_tools/audit/screenshot", routes_map)
         self.assertEqual(routes_map["/astrbot_plugin_playwright_tools/audit/screenshot"], ["GET"])
+
+        self.assertIn("/astrbot_plugin_playwright_tools/lifecycle/active", routes_map)
+        self.assertEqual(routes_map["/astrbot_plugin_playwright_tools/lifecycle/active"], ["GET"])
+
+        self.assertIn("/astrbot_plugin_playwright_tools/lifecycle/logs", routes_map)
+        self.assertEqual(routes_map["/astrbot_plugin_playwright_tools/lifecycle/logs"], ["GET"])
+
+        self.assertIn("/astrbot_plugin_playwright_tools/lifecycle/screenshot", routes_map)
+        self.assertEqual(routes_map["/astrbot_plugin_playwright_tools/lifecycle/screenshot"], ["POST"])
+
+        self.assertIn("/astrbot_plugin_playwright_tools/lifecycle/kill", routes_map)
+        self.assertEqual(routes_map["/astrbot_plugin_playwright_tools/lifecycle/kill"], ["POST"])
 
     def test_web_api_handlers_call(self):
         TEMP_DIR.mkdir(parents=True, exist_ok=True)
@@ -250,6 +286,217 @@ class TestPluginMain(unittest.TestCase):
         self.assertEqual(plugin.page_extractor.multiline_separator, " / ")
         self.assertEqual(plugin.audit_logger.max_output_chars, 5000)
         self.assertFalse(plugin.media_handler.audit_save_screenshots)
+
+    def test_plugin_wiring_adapter_and_handlers(self):
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / "wiring_test.db")
+        mock_ctx = MagicMock()
+        mock_ctx.add_llm_tools = MagicMock()
+        mock_ctx.register_web_api = MagicMock()
+
+        cfg = {
+            "audit_db_path": db_file,
+            "browser_adapter": "playwright",
+            "playwright_browser_type": "firefox",
+            "browser_headless": True,
+            "screenshot_format": "jpeg",
+            "screenshot_quality": 85,
+            "download_save_path": "data/custom_downloads",
+            "screenshot_save_path": "data/custom_screenshots",
+            "file_retention_days": 14,
+        }
+        plugin = main.PlaywrightToolPlugin(mock_ctx, config=cfg)
+
+        # 1. AdapterFactory 接入与 PlaywrightAdapter 实例化
+        from astrbot_plugin_playwright_tools.adapts.playwright_adapter import PlaywrightAdapter
+        self.assertIsInstance(plugin.adapter, PlaywrightAdapter)
+        self.assertEqual(plugin.adapter.browser_type, "firefox")
+
+        # 2. ContextManager 注入 audit_logger
+        self.assertIs(plugin.context_manager.audit_logger, plugin.audit_logger)
+
+        # 3. MediaHandler 接入扩展配置
+        self.assertEqual(plugin.media_handler.screenshot_format, "jpeg")
+        self.assertEqual(plugin.media_handler.screenshot_quality, 85)
+        self.assertEqual(plugin.media_handler.download_dir, "data/custom_downloads")
+        self.assertEqual(plugin.media_handler.screenshot_dir, "data/custom_screenshots")
+        self.assertEqual(plugin.media_handler.file_retention_days, 14)
+
+        # 4. LifecycleApiHandler 实例
+        from astrbot_plugin_playwright_tools.api.lifecycle_api import LifecycleApiHandler
+        self.assertIsInstance(plugin.lifecycle_api, LifecycleApiHandler)
+        self.assertIs(plugin.lifecycle_api.context_mgr, plugin.context_manager)
+        self.assertIs(plugin.lifecycle_api.audit_logger, plugin.audit_logger)
+        self.assertIs(plugin.lifecycle_api.media_handler, plugin.media_handler)
+
+    def test_browser_cmd_list_empty_and_populated(self):
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / "cmd_list_test.db")
+        mock_ctx = MagicMock()
+        plugin = main.PlaywrightToolPlugin(mock_ctx, config={"audit_db_path": db_file})
+
+        event = MagicMock()
+        event.session_id = "sess_100"
+        event.get_sender_id.return_value = "user_100"
+        event.is_admin.return_value = False
+        event.plain_result = lambda text: text
+
+        # 1. 活跃上下文为空
+        async def mock_active_empty():
+            return []
+        plugin.context_manager.get_active_contexts_detail = mock_active_empty
+        results = collect_async_gen(plugin.browser_cmd(event, sub_cmd="list"))
+        self.assertEqual(results, ["当前会话暂无活跃的浏览器上下文。"])
+
+        # 2. 存在不属于本会话的上下文
+        async def mock_active_other():
+            return [
+                {
+                    "context_key": "other:user_2:admin",
+                    "session_id": "sess_other",
+                    "owner_id": "user_2",
+                    "allowed_users": ["user_2"],
+                    "tab_count": 1,
+                    "active_tab_url": "https://other.com",
+                }
+            ]
+        plugin.context_manager.get_active_contexts_detail = mock_active_other
+        results = collect_async_gen(plugin.browser_cmd(event, sub_cmd="list"))
+        self.assertEqual(results, ["当前会话暂无活跃的浏览器上下文。"])
+
+        # 3. 存在属于本会话的活跃上下文
+        async def mock_active_matched():
+            return [
+                {
+                    "context_key": "sess_100:user_100",
+                    "session_id": "sess_100",
+                    "owner_id": "user_100",
+                    "allowed_users": ["user_100", "user_collab"],
+                    "tab_count": 2,
+                    "active_tab_url": "https://astrbot.org",
+                }
+            ]
+        plugin.context_manager.get_active_contexts_detail = mock_active_matched
+        results = collect_async_gen(plugin.browser_cmd(event, sub_cmd="list"))
+        self.assertEqual(len(results), 1)
+        out = results[0]
+        self.assertIn("【当前会话活跃浏览器】", out)
+        self.assertIn("共 1 个活跃上下文:", out)
+        self.assertIn("1. Key: sess_100:user_100 | 所有者: user_100 | 协作者: user_100, user_collab | 标签页数: 2 | 当前: https://astrbot.org", out)
+
+    def test_browser_cmd_list_all_admin_permission(self):
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / "cmd_list_all_test.db")
+        mock_ctx = MagicMock()
+        plugin = main.PlaywrightToolPlugin(mock_ctx, config={"audit_db_path": db_file})
+
+        # 1. 普通用户被拒绝
+        event_user = MagicMock()
+        event_user.session_id = "sess_1"
+        event_user.get_sender_id.return_value = "normal_user"
+        event_user.is_admin.return_value = False
+        event_user.plain_result = lambda text: text
+
+        results = collect_async_gen(plugin.browser_cmd(event_user, sub_cmd="list-all"))
+        self.assertEqual(results, ["无权限：仅管理员可查看全部会话的活跃上下文。"])
+
+        # 2. 管理员查看 - 暂无活跃
+        event_admin = MagicMock()
+        event_admin.session_id = "sess_1"
+        event_admin.get_sender_id.return_value = "admin_user"
+        event_admin.is_admin.return_value = True
+        event_admin.plain_result = lambda text: text
+
+        async def mock_active_empty():
+            return []
+        plugin.context_manager.get_active_contexts_detail = mock_active_empty
+        results = collect_async_gen(plugin.browser_cmd(event_admin, sub_cmd="list-all"))
+        self.assertEqual(results, ["全平台暂无活跃的浏览器上下文。"])
+
+        # 3. 管理员查看 - 存在全平台上下文
+        async def mock_active_all():
+            return [
+                {
+                    "context_key": "sess_1:user_1",
+                    "session_id": "sess_1",
+                    "owner_id": "user_1",
+                    "allowed_users": ["user_1"],
+                    "tab_count": 1,
+                    "active_tab_url": "https://test.com",
+                },
+                {
+                    "context_key": "sess_2:user_2",
+                    "session_id": "sess_2",
+                    "owner_id": "user_2",
+                    "allowed_users": ["user_2"],
+                    "tab_count": 3,
+                    "active_tab_url": "about:blank",
+                }
+            ]
+        plugin.context_manager.get_active_contexts_detail = mock_active_all
+        results = collect_async_gen(plugin.browser_cmd(event_admin, sub_cmd="list-all"))
+        self.assertEqual(len(results), 1)
+        out = results[0]
+        self.assertIn("【全平台活跃浏览器】", out)
+        self.assertIn("共 2 个活跃上下文:", out)
+        self.assertIn("1. Key: sess_1:user_1 (会话: sess_1) | 所有者: user_1 | 协作者: user_1 | 标签页数: 1 | 当前: https://test.com", out)
+        self.assertIn("2. Key: sess_2:user_2 (会话: sess_2) | 所有者: user_2 | 协作者: user_2 | 标签页数: 3 | 当前: about:blank", out)
+
+    def test_browser_cmd_kill_permission_and_execution(self):
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / "cmd_kill_test.db")
+        mock_ctx = MagicMock()
+        plugin = main.PlaywrightToolPlugin(mock_ctx, config={"audit_db_path": db_file})
+
+        # 1. 普通用户被拒绝
+        event_user = MagicMock()
+        event_user.session_id = "sess_1"
+        event_user.get_sender_id.return_value = "normal_user"
+        event_user.is_admin.return_value = False
+        event_user.plain_result = lambda text: text
+
+        results = collect_async_gen(plugin.browser_cmd(event_user, sub_cmd="kill", arg="key1"))
+        self.assertEqual(results, ["无权限：仅管理员可强行关闭上下文。"])
+
+        # 2. 管理员缺少参数
+        event_admin = MagicMock()
+        event_admin.session_id = "sess_1"
+        event_admin.get_sender_id.return_value = "admin_user"
+        event_admin.is_admin.return_value = True
+        event_admin.plain_result = lambda text: text
+
+        results = collect_async_gen(plugin.browser_cmd(event_admin, sub_cmd="kill", arg="   "))
+        self.assertEqual(results, ["请提供要关闭的 context_key，例如: /browser kill default:123456:admin"])
+
+        # 3. 管理员成功销毁
+        killed_args = []
+        async def mock_force_kill(target_key, operator_id=None):
+            killed_args.append((target_key, operator_id))
+            return True, "上下文已成功强制关闭并释放资源"
+        plugin.context_manager.force_kill_context = mock_force_kill
+
+        results = collect_async_gen(plugin.browser_cmd(event_admin, sub_cmd="kill", arg="sess_1:user_1"))
+        self.assertEqual(results, ["上下文已成功强制关闭并释放资源"])
+        self.assertEqual(killed_args, [("sess_1:user_1", "admin_user")])
+
+    def test_browser_cmd_help_text(self):
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / "cmd_help_test.db")
+        mock_ctx = MagicMock()
+        plugin = main.PlaywrightToolPlugin(mock_ctx, config={"audit_db_path": db_file})
+
+        event = MagicMock()
+        event.session_id = "sess_1"
+        event.get_sender_id.return_value = "user_1"
+        event.is_admin.return_value = False
+        event.plain_result = lambda text: text
+
+        results = collect_async_gen(plugin.browser_cmd(event, sub_cmd="unknown_cmd"))
+        self.assertEqual(len(results), 1)
+        help_msg = results[0]
+        self.assertIn("/browser list", help_msg)
+        self.assertIn("/browser list-all", help_msg)
+        self.assertIn("/browser kill", help_msg)
 
 if __name__ == "__main__":
     unittest.main()
