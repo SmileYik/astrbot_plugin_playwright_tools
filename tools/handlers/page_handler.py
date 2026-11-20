@@ -1,7 +1,11 @@
+import logging
+import traceback
 from ...core.context_manager import ContextManager
 from ...core.security_manager import SecurityManager
 from ...core.audit_logger import AuditLogger
 from ...core.page_extractor import PageExtractor
+
+logger = logging.getLogger(__name__)
 
 class PageHandler:
     """页面导航、内容读取、快速检索与标签页/弹窗管理。"""
@@ -86,6 +90,7 @@ class PageHandler:
             )
             return res
         except Exception as e:
+            logger.error(f"[PlaywrightTool] open_url 异常: {e}\n{traceback.format_exc()}")
             err_msg = f"页面打开异常: {str(e)}"
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
@@ -135,6 +140,7 @@ class PageHandler:
             )
             return res
         except Exception as e:
+            logger.error(f"[PlaywrightTool] read_page 异常: {e}\n{traceback.format_exc()}")
             err_msg = f"读取页面异常: {str(e)}"
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
@@ -184,6 +190,7 @@ class PageHandler:
             )
             return res
         except Exception as e:
+            logger.error(f"[PlaywrightTool] search_page 异常: {e}\n{traceback.format_exc()}")
             err_msg = f"检索页面异常: {str(e)}"
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,

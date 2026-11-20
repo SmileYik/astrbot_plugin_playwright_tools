@@ -2,10 +2,14 @@ import asyncio
 import base64
 import os
 import time
+import logging
+import traceback
 from pathlib import Path
 from ...core.context_manager import ContextManager
 from ...core.security_manager import SecurityManager
 from ...core.audit_logger import AuditLogger
+
+logger = logging.getLogger(__name__)
 
 class MediaHandler:
     """媒体与截图双重熔断处理器。"""
@@ -84,6 +88,7 @@ class MediaHandler:
             )
             return res
         except Exception as e:
+            logger.error(f"[PlaywrightTool] screenshot_viewport 异常: {e}\n{traceback.format_exc()}")
             return f"视口截图异常: {str(e)}"
 
     async def screenshot_full(
@@ -162,6 +167,7 @@ class MediaHandler:
             except Exception as fb_err:
                 return f"长截图超时且降级失败: {str(fb_err)}"
         except Exception as e:
+            logger.error(f"[PlaywrightTool] screenshot_full 异常: {e}\n{traceback.format_exc()}")
             try:
                 shot_coro.close()
             except Exception:
@@ -227,4 +233,5 @@ class MediaHandler:
             )
             return res
         except Exception as e:
+            logger.error(f"[PlaywrightTool] download_file 异常: {e}\n{traceback.format_exc()}")
             return f"下载异常: {str(e)}"

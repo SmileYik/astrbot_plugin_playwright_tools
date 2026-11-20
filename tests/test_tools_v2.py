@@ -95,6 +95,32 @@ class TestToolsV2(unittest.TestCase):
             res = run_coro(self.page_tool.call(self.mock_context_wrapper, action="search", keyword="关键词"))
         self.assertEqual(res, "搜索结果: 关键词")
 
+    def test_page_tool_switch_tab_default_index(self):
+        called_args = {}
+        async def mock_switch_tab(s_id, u_id, tab_index, **kwargs):
+            called_args["tab_index"] = tab_index
+            return f"切换至: {tab_index}"
+        self.mock_page_handler.switch_tab = mock_switch_tab
+
+        with patch("asyncio.wait_for", fake_wait_for):
+            res = run_coro(self.page_tool.call(self.mock_context_wrapper, action="switch_tab"))
+        self.assertEqual(called_args.get("tab_index"), 1)
+        self.assertEqual(res, "切换至: 1")
+
+    def test_execute_with_timeout_logs_traceback(self):
+        async def mock_fail(*args, **kwargs):
+            raise ValueError("测试异常内容")
+        self.mock_page_handler.open_url = mock_fail
+
+        with patch("astrbot_plugin_playwright_tools.tools.tools.logger") as mock_logger:
+            with patch("asyncio.wait_for", fake_wait_for):
+                res = run_coro(self.page_tool.call(self.mock_context_wrapper, action="open", url="https://example.com"))
+            self.assertIn("测试异常内容", res)
+            self.assertTrue(mock_logger.error.called)
+            logged_msg = mock_logger.error.call_args[0][0]
+            self.assertIn("ValueError", logged_msg)
+            self.assertIn("Traceback", logged_msg)
+
     def test_page_tool_timeout(self):
         async def mock_open(s_id, u_id, url, **kwargs):
             return "ok"

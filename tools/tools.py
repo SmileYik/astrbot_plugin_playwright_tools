@@ -1,8 +1,12 @@
 import asyncio
 import os
 import inspect
+import logging
+import traceback
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 try:
     from astrbot.api.all import FunctionTool, AstrAgentContext
@@ -121,6 +125,8 @@ async def _execute_with_timeout(coro, timeout_seconds: int) -> str:
             pass
         return f"操作超时：执行超过 {timeout_seconds} 秒限制，已强制终止。"
     except Exception as e:
+        tb_str = traceback.format_exc()
+        logger.error(f"[PlaywrightTool] 工具执行未预期异常: {e}\n{tb_str}")
         try:
             coro.close()
         except Exception:
@@ -186,10 +192,12 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
         )
 
     async def _action_switch_tab(self, session_id: str, sender_id: str, session_name: str = "", sender_name: str = "", **kwargs) -> str:
-        tab_index = kwargs.get("tab_index", 0)
+        tab_index = kwargs.get("tab_index")
+        if tab_index is None:
+            tab_index = 1
         return await _invoke_handler(
             self.page_handler.switch_tab,
-            session_id, sender_id, tab_index=int(tab_index or 0),
+            session_id, sender_id, tab_index=int(tab_index),
             session_name=session_name, sender_name=sender_name
         )
 

@@ -1,6 +1,10 @@
+import logging
+import traceback
 from ...core.context_manager import ContextManager
 from ...core.security_manager import SecurityManager
 from ...core.audit_logger import AuditLogger
+
+logger = logging.getLogger(__name__)
 
 class InteractHandler:
     """页面动作交互处理器 (点击、输入、选择、悬停、聚焦/失焦、拖拽、按键、滚动)。"""
@@ -75,6 +79,7 @@ class InteractHandler:
             )
             return res_msg
         except Exception as e:
+            logger.error(f"[PlaywrightTool] click 异常: {e}\n{traceback.format_exc()}")
             err_msg = f"点击异常: {str(e)}"
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
@@ -137,6 +142,7 @@ class InteractHandler:
             )
             return res_msg
         except Exception as e:
+            logger.error(f"[PlaywrightTool] fill_form 异常: {e}\n{traceback.format_exc()}")
             err_msg = f"填写异常: {str(e)}"
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
@@ -206,6 +212,7 @@ class InteractHandler:
             )
             return res_msg
         except Exception as e:
+            logger.error(f"[PlaywrightTool] select_option 异常: {e}\n{traceback.format_exc()}")
             return f"选择异常: {str(e)}"
 
     async def hover(
@@ -260,6 +267,7 @@ class InteractHandler:
             )
             return res_msg
         except Exception as e:
+            logger.error(f"[PlaywrightTool] hover 异常: {e}\n{traceback.format_exc()}")
             return f"悬停异常: {str(e)}"
 
     async def focus(
@@ -308,6 +316,7 @@ class InteractHandler:
             )
             return res
         except Exception as e:
+            logger.error(f"[PlaywrightTool] focus 异常: {e}\n{traceback.format_exc()}")
             return f"聚焦异常: {str(e)}"
 
     async def blur(
@@ -356,6 +365,7 @@ class InteractHandler:
             )
             return res
         except Exception as e:
+            logger.error(f"[PlaywrightTool] blur 异常: {e}\n{traceback.format_exc()}")
             return f"失焦异常: {str(e)}"
 
     async def drag(
@@ -416,6 +426,7 @@ class InteractHandler:
             )
             return res_msg
         except Exception as e:
+            logger.error(f"[PlaywrightTool] drag 异常: {e}\n{traceback.format_exc()}")
             return f"拖拽异常: {str(e)}"
 
     async def press_key(
@@ -463,6 +474,7 @@ class InteractHandler:
             )
             return res_msg
         except Exception as e:
+            logger.error(f"[PlaywrightTool] press_key 异常: {e}\n{traceback.format_exc()}")
             return f"按键异常: {str(e)}"
 
     async def scroll(
@@ -491,12 +503,16 @@ class InteractHandler:
             )
             return f"滚动失败: {reason}"
 
-        delta = amount if direction.lower() == "down" else -amount
-        await page.evaluate("(d) => window.scrollBy(0, d)", delta)
-        res_msg = f"{hint}\n页面已向{direction}滚动 {amount} 像素。".strip()
-        await self.audit_logger.log_action(
-            session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-            "scroll", url, {"direction": direction, "amount": amount}, res_msg, is_permitted=True,
-            session_name=session_name, sender_name=sender_name
-        )
-        return res_msg
+        try:
+            delta = amount if direction.lower() == "down" else -amount
+            await page.evaluate("(d) => window.scrollBy(0, d)", delta)
+            res_msg = f"{hint}\n页面已向{direction}滚动 {amount} 像素。".strip()
+            await self.audit_logger.log_action(
+                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
+                "scroll", url, {"direction": direction, "amount": amount}, res_msg, is_permitted=True,
+                session_name=session_name, sender_name=sender_name
+            )
+            return res_msg
+        except Exception as e:
+            logger.error(f"[PlaywrightTool] scroll 异常: {e}\n{traceback.format_exc()}")
+            return f"滚动异常: {str(e)}"
