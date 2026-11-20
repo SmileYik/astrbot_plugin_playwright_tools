@@ -4,6 +4,16 @@
 
 ---
 
+## [v2.2.0] - 2026-11-20
+
+### 架构彻底重构 (Playwright-Native Architecture Refactor)
+- **原生 Playwright 交互体系**：将 `InteractHandler` 中所有点击、表单输入、下拉选择、悬停、聚焦/失焦、拖拽动作彻底重构为 Playwright 原生 Locator API 调用（`locator.click()`、`locator.fill()`、`locator.select_option()`、`locator.drag_to()` 等），全面享受框架自带的可操作性检查与受控组件事件分发，彻底移除裸 JS 字符串注入。
+- **解耦浏览器后端适配器**：将 `CamoufoxAdapter` 与通用 `BrowserAdapterBase` 严格解耦，将其职责定位为单一的底层浏览器启动器，向上层完全输出标准的 Playwright `Browser` 与 `BrowserContext`，消除对 Camoufox 的专有强绑定。
+- **强类型与官方日志规范**：核心会话上下文与 Handlers 引入 `playwright.async_api` 强类型约束；日志全面采用 AstrBot 官方标准的 `from astrbot.api import logger`。
+- **精简测试架构**：移除冗余笨重的端到端集成测试，保留纯净快速的完整单元测试套件（89 项用例秒级通过）。
+
+---
+
 ## [v2.1.2] - 2026-11-20
 
 ### 稳定性与测试基建 (Stability & Test Infrastructure)

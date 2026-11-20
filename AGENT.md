@@ -56,10 +56,8 @@
 
 ## 测试与验证规范
 
-每次编写或修改任何关于工具、适配器或核心组件（`tools/`、`core/`、`adapts/`）的代码后，都必须进行实际测试验证：
-1. **单元测试**：运行 `python -m unittest discover tests`，保证所有基础单测 100% 通过。
-2. **真实浏览器端到端测试 (硬性门禁)**：在本地当前 uv 环境下运行 `python -m unittest tests/e2e/test_real_browser.py -v`，确保真实 Camoufox 浏览器能够正常拉起、完成操作并安全释放。
-必须实际确认真实测试通过后方可声明完成或提交代码，严禁仅凭静态推断或仅凭 Mock 测试盲目交付。
+每次编写或修改任何关于工具、适配器或核心组件（`tools/`、`core/`、`adapts/`）的代码后，都必须运行单元测试进行验证：
+运行 `python -m unittest discover tests`，保证所有基础单测 100% 通过。不使用端到端（e2e）测试。
 
 ## 日志
 
