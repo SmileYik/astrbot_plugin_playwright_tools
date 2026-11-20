@@ -3,9 +3,11 @@ import os
 import sys
 from unittest.mock import AsyncMock, patch, MagicMock
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from adapts.base import BrowserAdapterBase
-from adapts.camoufox_adapter import CamoufoxAdapter
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+from astrbot_plugin_playwright_tools.adapts.base import BrowserAdapterBase
+from astrbot_plugin_playwright_tools.adapts.camoufox_adapter import CamoufoxAdapter
 
 def run_coro(coro):
     try:
@@ -18,7 +20,7 @@ class TestBrowserAdapter(unittest.TestCase):
         adapter = CamoufoxAdapter(headless=True)
         self.assertIsInstance(adapter, BrowserAdapterBase)
 
-    @patch("adapts.camoufox_adapter.AsyncCamoufox")
+    @patch("astrbot_plugin_playwright_tools.adapts.camoufox_adapter.AsyncCamoufox")
     def test_start_and_create_context(self, mock_camoufox):
         mock_instance = MagicMock()
         mock_browser = AsyncMock()

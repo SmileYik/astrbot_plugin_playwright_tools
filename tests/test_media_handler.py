@@ -6,8 +6,10 @@ import base64
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from tools.handlers.media_handler import MediaHandler
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+from astrbot_plugin_playwright_tools.tools.handlers.media_handler import MediaHandler
 
 TEMP_DIR = Path(tempfile.gettempdir()) / "astrbot_test_media_v2"
 

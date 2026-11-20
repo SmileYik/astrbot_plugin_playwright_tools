@@ -4,8 +4,10 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from core.audit_logger import AuditLogger
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+from astrbot_plugin_playwright_tools.core.audit_logger import AuditLogger
 
 TEMP_DIR = Path(tempfile.gettempdir()) / "astrbot_test_audit"
 
@@ -25,8 +27,10 @@ import csv
 import io
 from pathlib import Path
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from core.audit_logger import AuditLogger
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+from astrbot_plugin_playwright_tools.core.audit_logger import AuditLogger
 
 TEMP_DIR = Path(tempfile.gettempdir()) / "astrbot_test_audit"
 

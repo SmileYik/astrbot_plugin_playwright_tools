@@ -3,9 +3,11 @@ import os
 import sys
 from unittest.mock import MagicMock
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from tools.handlers.page_handler import PageHandler
-from core.page_extractor import PageExtractor
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+from astrbot_plugin_playwright_tools.tools.handlers.page_handler import PageHandler
+from astrbot_plugin_playwright_tools.core.page_extractor import PageExtractor
 
 def run_coro(coro):
     try:

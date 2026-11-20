@@ -3,9 +3,11 @@ import os
 import sys
 from unittest.mock import AsyncMock, MagicMock
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from core.context_manager import ContextManager
-from core.security_manager import SecurityManager
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+from astrbot_plugin_playwright_tools.core.context_manager import ContextManager
+from astrbot_plugin_playwright_tools.core.security_manager import SecurityManager
 
 def run_coro(coro):
     try:

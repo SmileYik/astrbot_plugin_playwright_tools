@@ -5,11 +5,13 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from tools.browse_tools import BrowseTools
-from tools.action_tools import ActionTools
-from tools.media_tools import MediaTools
-from tools.dialog_tools import DialogTools
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+from astrbot_plugin_playwright_tools.tools.browse_tools import BrowseTools
+from astrbot_plugin_playwright_tools.tools.action_tools import ActionTools
+from astrbot_plugin_playwright_tools.tools.media_tools import MediaTools
+from astrbot_plugin_playwright_tools.tools.dialog_tools import DialogTools
 
 TEMP_DIR = Path(tempfile.gettempdir()) / "astrbot_test_tools"
 
