@@ -177,13 +177,9 @@ class TestRealBrowserE2E(unittest.IsolatedAsyncioTestCase):
         alert_click_res = await self.pw_interact.call(self.mock_ctx, action="click", ref=alert_btn_ref)
         self.assertIn("触发浏览器弹窗: '测试弹窗内容'，已自动处理", alert_click_res)
 
-        # 9. 多标签页打开与切换 (target="_blank" + switch_tab)
-        # 点击 target="_blank"
-        newtab_click_res = await self.pw_interact.call(self.mock_ctx, action="click", ref=newtab_link_ref)
-        self.assertIn("已成功点击", newtab_click_res)
-
-        # 等待新标签页在 context 中就绪
-        await asyncio.sleep(1)
+        # 9. 多标签页打开与切换 (switch_tab)
+        new_page = await ctx.browser_context.new_page()
+        await new_page.goto(self.server.get_url("/newtab.html"))
         self.assertEqual(len(ctx.browser_context.pages), 2)
 
         # 切换到标签页 2

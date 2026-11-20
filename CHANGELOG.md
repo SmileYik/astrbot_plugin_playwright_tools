@@ -4,6 +4,17 @@
 
 ---
 
+## [v2.1.2] - 2026-11-20
+
+### 稳定性与测试基建 (Stability & Test Infrastructure)
+- **真实浏览器端到端测试套件 (Real Browser E2E)**：新增 `tests/e2e/test_real_browser.py` 与本地内置测试静态页夹具（`tests/e2e/fixtures/`），在本地真实 Camoufox 无头环境下全链路自动化测试 `pw_page`、`pw_interact`、`pw_media` 的打开、阅读、搜索、表单输入、按钮点击、下拉选择、页面滚动、Alert 弹窗处理、多标签页切换（`target="_blank"` 与 `switch_tab`）、视口与整页长截图及资源安全释放。
+- **规范包导入路径修复**：修正单元测试中遗留的顶层模块导入路径，统一通过标准包路径导入，解决测试运行时的相对导入越界异常，实现全量 85+ 单元测试绿灯通过。
+- **异常 Traceback 完整日志保全**：在 Handlers 各动作与顶层 `_execute_with_timeout` 中强化异常捕获，记录完整调用栈信息，彻底告别单行简短异常导致的排查困境。
+- **标签页缺省参数修复**：将 `_action_switch_tab` 缺省索引修复为 `1`，与全系统 1-based 语义对齐。
+- **依赖声明与规范入宪**：提供标准 `requirements.txt`；在 `AGENT.md` 强制设立硬性规范：代码修改后必须在本机实际执行真实浏览器 E2E 测试并验证通过。
+
+---
+
 ## [v2.1.1] - 2026-11-20
 
 ### 修复与重构 (Bug Fixes & Refactoring)

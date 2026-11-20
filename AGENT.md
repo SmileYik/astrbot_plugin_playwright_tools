@@ -45,9 +45,25 @@
 
 每次 [metadata.yaml](metadata.yaml) 消息变化后, 都需要在 [main.py](main.py) 中更新对应信息.
 
+## 环境
+
+当前环境由uv进行管理, 虚拟环境在 [.venv](.venv) 下.
+
+必要内容有
+- python 3.12
+- playwright
+- camoufox[geoip]
+
+## 测试与验证规范
+
+每次编写或修改任何关于工具、适配器或核心组件（`tools/`、`core/`、`adapts/`）的代码后，都必须进行实际测试验证：
+1. **单元测试**：运行 `python -m unittest discover tests`，保证所有基础单测 100% 通过。
+2. **真实浏览器端到端测试 (硬性门禁)**：在本地当前 uv 环境下运行 `python -m unittest tests/e2e/test_real_browser.py -v`，确保真实 Camoufox 浏览器能够正常拉起、完成操作并安全释放。
+必须实际确认真实测试通过后方可声明完成或提交代码，严禁仅凭静态推断或仅凭 Mock 测试盲目交付。
+
 ## 日志
 
-需要在各个关键节点上埋下日志, 方便后续追踪调试.
+需要在各个关键节点上埋下日志, 异常发生时必须完整打印和记录 traceback 调用栈，方便后续追踪调试.
 
 ## 1. Think Before Coding
 
