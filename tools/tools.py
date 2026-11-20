@@ -140,10 +140,14 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
     def __post_init__(self):
         if self.page_handler is None:
             raise ValueError("PwPageTool 初始化必须传入 page_handler")
+        page_handler = self.page_handler
+        timeout_seconds = self.timeout_seconds
         try:
             super().__init__(name=self.name, description=self.description, parameters=self.parameters)
         except Exception:
             pass
+        object.__setattr__(self, "page_handler", page_handler)
+        object.__setattr__(self, "timeout_seconds", timeout_seconds)
         self._actions = {
             "open": self._action_open,
             "read": self._action_read,
@@ -231,10 +235,14 @@ class PwInteractTool(FunctionTool[AstrAgentContext]):
     def __post_init__(self):
         if self.interact_handler is None:
             raise ValueError("PwInteractTool 初始化必须传入 interact_handler")
+        interact_handler = self.interact_handler
+        timeout_seconds = self.timeout_seconds
         try:
             super().__init__(name=self.name, description=self.description, parameters=self.parameters)
         except Exception:
             pass
+        object.__setattr__(self, "interact_handler", interact_handler)
+        object.__setattr__(self, "timeout_seconds", timeout_seconds)
         self._actions = {
             "click": self._action_click,
             "fill": self._action_fill,
@@ -370,10 +378,18 @@ class PwMediaTool(FunctionTool[AstrAgentContext]):
     def __post_init__(self):
         if self.media_handler is None:
             raise ValueError("PwMediaTool 初始化必须传入 media_handler")
+        media_handler = self.media_handler
+        timeout_seconds = self.timeout_seconds
+        screenshot_max_height_px = self.screenshot_max_height_px
+        screenshot_timeout_seconds = self.screenshot_timeout_seconds
         try:
             super().__init__(name=self.name, description=self.description, parameters=self.parameters)
         except Exception:
             pass
+        object.__setattr__(self, "media_handler", media_handler)
+        object.__setattr__(self, "timeout_seconds", timeout_seconds)
+        object.__setattr__(self, "screenshot_max_height_px", screenshot_max_height_px)
+        object.__setattr__(self, "screenshot_timeout_seconds", screenshot_timeout_seconds)
         self._actions = {
             "screenshot_viewport": self._action_screenshot_viewport,
             "screenshot_full": self._action_screenshot_full,
