@@ -67,5 +67,20 @@ class TestPageHandler(unittest.TestCase):
         res = run_coro(self.handler.switch_tab("s1", "u1", tab_index=99))
         self.assertIn("超出范围", res)
 
+    def test_page_handler_read_with_target_param(self):
+        async def mock_eval(script):
+            return {
+                "title": "Test Page",
+                "url": "https://test.com",
+                "elements": [],
+                "markdownText": "# 正文标题\n\n正文详细段落"
+            }
+        self.mock_page.evaluate = mock_eval
+
+        res = run_coro(self.handler.read_page("s1", "u1", target="text", page=1))
+        self.assertIn("# 正文标题", res)
+        self.assertIn("页面正文视图", res)
+        self.assertIn("target='elements'", res)
+
 if __name__ == "__main__":
     unittest.main()

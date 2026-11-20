@@ -178,19 +178,21 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
 
     async def _action_read(self, session_id: str, sender_id: str, session_name: str = "", sender_name: str = "", **kwargs) -> str:
         page = kwargs.get("page", 1)
+        target = kwargs.get("target", "all")
         return await _invoke_handler(
             self.page_handler.read_page,
-            session_id, sender_id, page=int(page or 1),
+            session_id, sender_id, page=int(page or 1), target=str(target or "all"),
             session_name=session_name, sender_name=sender_name
         )
 
     async def _action_search(self, session_id: str, sender_id: str, session_name: str = "", sender_name: str = "", **kwargs) -> str:
         keyword = kwargs.get("keyword")
+        target = kwargs.get("target", "all")
         if not keyword:
             return "参数错误: action='search' 时必须提供 keyword 参数"
         return await _invoke_handler(
             self.page_handler.search_page,
-            session_id, sender_id, keyword=str(keyword),
+            session_id, sender_id, keyword=str(keyword), target=str(target or "all"),
             session_name=session_name, sender_name=sender_name
         )
 

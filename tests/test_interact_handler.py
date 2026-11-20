@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, AsyncMock
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
-from astrbot_plugin_playwright_tools.tools.handlers.interact_handler import InteractHandler
+from astrbot_plugin_playwright_tools.tools.handlers.interact_handler import InteractHandler, clean_playwright_error
 
 def run_coro(coro):
     try:
@@ -128,6 +128,18 @@ class TestInteractHandler(unittest.TestCase):
 
         res_press = run_coro(self.handler.press_key("s1", "u1", key="Enter"))
         self.assertIn("按键失败: 没有权限", res_press)
+
+    def test_clean_playwright_error_strips_call_log(self):
+        raw_error = Exception(
+            "Locator.click: Timeout 10000ms exceeded.\n"
+            "Call log:\n"
+            "  - waiting for locator(\"[data-astr-ref=\\\"311\\\"]\")\n"
+            "  - <dialog open=\"\" role=\"dialog\"> intercepts pointer events\n"
+        )
+        cleaned = clean_playwright_error(raw_error)
+        self.assertNotIn("Call log:", cleaned)
+        self.assertIn("页面弹层遮挡", cleaned)
+        self.assertIn("[推荐操作:", cleaned)
 
 if __name__ == "__main__":
     unittest.main()

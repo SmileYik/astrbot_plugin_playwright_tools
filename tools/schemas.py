@@ -16,6 +16,11 @@ PW_PAGE_SCHEMA = {
             "type": "integer",
             "description": "分页查看时的页码编号，从1开始 (action='read' 时可选，默认为1)",
         },
+        "target": {
+            "type": "string",
+            "enum": ["all", "text", "elements"],
+            "description": "查看或搜索的目标范围：'all'(全部正文与可交互元素), 'text'(仅正文段落), 'elements'(仅可交互操作元素) (action='read' 或 'search' 时可选，默认为'all')",
+        },
         "keyword": {
             "type": "string",
             "description": "页面内容搜索关键词 (action='search' 时必填)",

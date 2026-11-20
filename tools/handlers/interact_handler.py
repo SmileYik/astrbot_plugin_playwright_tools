@@ -1,3 +1,4 @@
+import re
 import traceback
 from typing import TYPE_CHECKING, Any
 from ...core.context_manager import ContextManager
@@ -15,6 +16,39 @@ try:
 except ImportError:
     import logging
     logger = logging.getLogger(__name__)
+
+
+def clean_playwright_error(e: Exception) -> str:
+    """提取 Playwright 异常核心原因，彻底去除冗长的底层 Call log 与调用栈。"""
+    raw = str(e)
+    # 检查是否为遮挡错误 (intercepts pointer events)
+    if "intercepts pointer events" in raw:
+        tag_match = re.search(r"<([a-zA-Z0-9\-]+)[^>]*>\s*intercepts pointer events", raw)
+        blocked_tag = f"<{tag_match.group(1)}>" if tag_match else "页面弹窗/遮罩"
+        return (
+            f"操作超时 (10秒): 目标元素被页面弹层遮挡 ({blocked_tag})，无法接收点击事件。\n"
+            f"[推荐操作: 请先查阅页面元素列表，点击关闭按钮或关闭遮挡的弹层]"
+        )
+
+    # 检查定位超时 (waiting for locator)
+    if "Timeout" in raw and "waiting for locator" in raw:
+        return (
+            "操作超时 (10秒): 未能定位到目标元素或元素不可见/不可点击。\n"
+            "[推荐操作: 页面可能已动态更新，请先调用 pw_page(action='read') 获取最新可用元素]"
+        )
+
+    # 检查通用超时
+    if "Timeout" in raw:
+        return "操作超时 (10秒): 执行未在规定时间内完成。\n[推荐操作: 可检查网络或页面加载状态后重试]"
+
+    # 剥离 Call log
+    if "Call log:" in raw:
+        clean_first_line = raw.split("Call log:")[0].strip()
+        return f"操作异常: {clean_first_line}\n[推荐操作: 检查参数与页面状态后重试]"
+
+    first_line = raw.splitlines()[0] if raw.splitlines() else str(raw)
+    return f"操作异常: {first_line}\n[推荐操作: 检查参数与页面状态后重试]"
+
 
 class InteractHandler:
     """页面动作交互处理器 (点击、输入、选择、悬停、聚焦/失焦、拖拽、按键、滚动)。"""
@@ -69,7 +103,7 @@ class InteractHandler:
                 dialog_info = f" (触发浏览器弹窗: '{ctx.last_dialog_message}'，已自动处理)"
                 ctx.last_dialog_message = None
 
-            res_msg = f"{hint}\n已成功点击 [{ref}] <{tag}> {text}{dialog_info}".strip()
+            res_msg = f"{hint}\n已成功点击 [{ref}] <{tag}> {text}{dialog_info}\n[推荐操作: 若点击引发了页面跳转或内容更新，建议调用 pw_page(action='read') 查看最新页面]".strip()
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
                 "click", url, {"ref": ref}, res_msg, is_permitted=True,
@@ -78,7 +112,7 @@ class InteractHandler:
             return res_msg
         except Exception as e:
             logger.error(f"[PlaywrightTool] click 异常: {e}\n{traceback.format_exc()}")
-            err_msg = f"点击异常: {str(e)}"
+            err_msg = clean_playwright_error(e)
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
                 "click", url, {"ref": ref}, err_msg, is_permitted=True,
@@ -119,7 +153,7 @@ class InteractHandler:
             locator: Locator = page.locator(f'[data-astr-ref="{ref}"]')
             await locator.fill(str(text), timeout=10000)
 
-            res_msg = f"{hint}\n已成功在输入框 [{ref}] 填入内容。".strip()
+            res_msg = f"{hint}\n已成功在输入框 [{ref}] 填入内容。\n[推荐操作: 表单输入完成，可查阅对应提交按钮 Ref 并调用 pw_interact(action='click') 进行提交]".strip()
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
                 "fill_form", url, {"ref": ref, "text": text}, res_msg, is_permitted=True,
@@ -128,7 +162,7 @@ class InteractHandler:
             return res_msg
         except Exception as e:
             logger.error(f"[PlaywrightTool] fill_form 异常: {e}\n{traceback.format_exc()}")
-            err_msg = f"填写异常: {str(e)}"
+            err_msg = clean_playwright_error(e)
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
                 "fill_form", url, {"ref": ref, "text": text}, err_msg, is_permitted=True,
@@ -182,7 +216,7 @@ class InteractHandler:
             return res_msg
         except Exception as e:
             logger.error(f"[PlaywrightTool] select_option 异常: {e}\n{traceback.format_exc()}")
-            return f"选择异常: {str(e)}"
+            return clean_playwright_error(e)
 
     async def hover(
         self,
@@ -224,7 +258,7 @@ class InteractHandler:
             return res_msg
         except Exception as e:
             logger.error(f"[PlaywrightTool] hover 异常: {e}\n{traceback.format_exc()}")
-            return f"悬停异常: {str(e)}"
+            return clean_playwright_error(e)
 
     async def focus(
         self,
@@ -265,7 +299,7 @@ class InteractHandler:
             return res
         except Exception as e:
             logger.error(f"[PlaywrightTool] focus 异常: {e}\n{traceback.format_exc()}")
-            return f"聚焦异常: {str(e)}"
+            return clean_playwright_error(e)
 
     async def blur(
         self,
@@ -306,7 +340,7 @@ class InteractHandler:
             return res
         except Exception as e:
             logger.error(f"[PlaywrightTool] blur 异常: {e}\n{traceback.format_exc()}")
-            return f"失焦异常: {str(e)}"
+            return clean_playwright_error(e)
 
     async def drag(
         self,
@@ -353,7 +387,7 @@ class InteractHandler:
             return res_msg
         except Exception as e:
             logger.error(f"[PlaywrightTool] drag 异常: {e}\n{traceback.format_exc()}")
-            return f"拖拽异常: {str(e)}"
+            return clean_playwright_error(e)
 
     async def press_key(
         self,
@@ -395,7 +429,7 @@ class InteractHandler:
             return res_msg
         except Exception as e:
             logger.error(f"[PlaywrightTool] press_key 异常: {e}\n{traceback.format_exc()}")
-            return f"按键异常: {str(e)}"
+            return clean_playwright_error(e)
 
     async def scroll(
         self,
@@ -440,4 +474,4 @@ class InteractHandler:
             return res_msg
         except Exception as e:
             logger.error(f"[PlaywrightTool] scroll 异常: {e}\n{traceback.format_exc()}")
-            return f"滚动异常: {str(e)}"
+            return clean_playwright_error(e)
