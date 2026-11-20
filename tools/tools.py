@@ -205,19 +205,18 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
             session_name=session_name, sender_name=sender_name
         )
 
-    async def call(self, context: AstrAgentContext, **kwargs):
+    async def call(self, context: AstrAgentContext, **kwargs) -> str:
         event, session_id, sender_id, session_name, sender_name = _extract_event_and_metadata(context)
         action = kwargs.get("action")
         handler = self._actions.get(action)
         if not handler:
-            yield f"未知的动作: {action}。支持的动作包括: open, read, search, switch_tab, dialog, close"
-            return
+            return f"未知的动作: {action}。支持的动作包括: open, read, search, switch_tab, dialog, close"
 
         res = await _execute_with_timeout(
             handler(session_id, sender_id, session_name=session_name, sender_name=sender_name, **kwargs),
             self.timeout_seconds
         )
-        yield res
+        return res
 
 
 @dataclass
@@ -340,22 +339,21 @@ class PwInteractTool(FunctionTool[AstrAgentContext]):
             session_name=session_name, sender_name=sender_name
         )
 
-    async def call(self, context: AstrAgentContext, **kwargs):
+    async def call(self, context: AstrAgentContext, **kwargs) -> str:
         event, session_id, sender_id, session_name, sender_name = _extract_event_and_metadata(context)
         action = kwargs.get("action")
         handler = self._actions.get(action)
         if not handler:
-            yield (
+            return (
                 f"未知的动作: {action}。支持的动作包括: click, fill, select, "
                 "hover, focus, blur, drag, press_key, scroll"
             )
-            return
 
         res = await _execute_with_timeout(
             handler(session_id, sender_id, session_name=session_name, sender_name=sender_name, **kwargs),
             self.timeout_seconds
         )
-        yield res
+        return res
 
 
 @dataclass
@@ -413,13 +411,12 @@ class PwMediaTool(FunctionTool[AstrAgentContext]):
             session_name=session_name, sender_name=sender_name
         )
 
-    async def call(self, context: AstrAgentContext, **kwargs):
+    async def call(self, context: AstrAgentContext, **kwargs) -> str:
         event, session_id, sender_id, session_name, sender_name = _extract_event_and_metadata(context)
         action = kwargs.get("action")
         handler = self._actions.get(action)
         if not handler:
-            yield f"未知的动作: {action}。支持的动作包括: screenshot_viewport, screenshot_full, download"
-            return
+            return f"未知的动作: {action}。支持的动作包括: screenshot_viewport, screenshot_full, download"
 
         res = await _execute_with_timeout(
             handler(session_id, sender_id, session_name=session_name, sender_name=sender_name, **kwargs),
@@ -429,11 +426,11 @@ class PwMediaTool(FunctionTool[AstrAgentContext]):
         target = str(kwargs.get("target", "chat")).lower()
         if action in ("screenshot_viewport", "screenshot_full") and target == "chat" and res.startswith("[IMAGE_PATH:"):
             img_path = res.split("\n", 1)[0].strip()[len("[IMAGE_PATH:"):].rstrip("]")
-            if hasattr(event, "image_result") and callable(event.image_result):
-                try:
-                    yield event.image_result(img_path)
-                    return
-                except Exception:
-                    pass
+            try:
+                if hasattr(event, "send") and callable(event.send):
+                    from astrbot.core.message.message_event_result import MessageChain
+                    await event.send(MessageChain().file_image(img_path))
+            except Exception:
+                pass
 
-        yield res
+        return res

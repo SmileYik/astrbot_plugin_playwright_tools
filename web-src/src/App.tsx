@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import "./styles/theme.css";
-import { AuditLogItem, AuditStats, ApiResponse, LogsResponseData } from "./types";
+import { AuditLogItem, AuditStats } from "./types";
 import { TopAppBar } from "./components/TopAppBar";
 import { StatsOverview } from "./components/StatsOverview";
 import { AuditCard } from "./components/AuditCard";
@@ -118,16 +118,17 @@ export function App() {
 
     if (bridge && typeof bridge.apiGet === "function") {
       try {
-        const res = await bridge.apiGet<ApiResponse<LogsResponseData>>("audit/logs", {
+        const res = await bridge.apiGet<any>("audit/logs", {
           page,
           page_size: pageSize,
           keyword: keyword.trim(),
           status,
           tool_name: toolName.trim(),
         });
-        if (res && res.code === 0 && res.data) {
-          setLogs(res.data.items || []);
-          setTotal(res.data.total || 0);
+        const data = (res && Array.isArray((res as any).items)) ? res : (res?.data ?? res);
+        if (data && Array.isArray(data.items)) {
+          setLogs(data.items);
+          setTotal(data.total || 0);
         } else {
           showBanner(res?.message || "拉取日志失败", "error");
         }
@@ -167,9 +168,10 @@ export function App() {
     const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
     if (bridge && typeof bridge.apiGet === "function") {
       try {
-        const res = await bridge.apiGet<ApiResponse<AuditStats>>("audit/stats");
-        if (res && res.code === 0 && res.data) {
-          setStats(res.data);
+        const res = await bridge.apiGet<any>("audit/stats");
+        const data = (res && typeof (res as any).total === "number") ? res : (res?.data ?? res);
+        if (data && typeof data.total === "number") {
+          setStats(data);
         }
       } catch {
         // 静默失败
@@ -198,15 +200,16 @@ export function App() {
     const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
     if (bridge && typeof bridge.apiGet === "function") {
       try {
-        const res = await bridge.apiGet<ApiResponse<string>>("audit/export", {
+        const res = await bridge.apiGet<any>("audit/export", {
           format,
           keyword: keyword.trim(),
           status,
           tool_name: toolName.trim(),
         });
-        if (res && res.code === 0 && res.data) {
+        const content = typeof res === "string" ? res : (res?.data ?? res);
+        if (content && typeof content === "string") {
           const mime = format === "csv" ? "text/csv;charset=utf-8;" : "application/json;charset=utf-8;";
-          const blob = new Blob([res.data], { type: mime });
+          const blob = new Blob([content], { type: mime });
           const url = URL.createObjectURL(blob);
           const link = document.createElement("a");
           link.href = url;
@@ -216,6 +219,8 @@ export function App() {
           document.body.removeChild(link);
           URL.revokeObjectURL(url);
           showBanner(`成功导出 ${format.toUpperCase()} 文件`, "info");
+        } else {
+          showBanner(res?.message || "导出内容为空或失败", "error");
         }
       } catch (err) {
         showBanner(`导出失败: ${err}`, "error");
@@ -230,11 +235,12 @@ export function App() {
     const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
     if (bridge && typeof bridge.apiPost === "function") {
       try {
-        const res = await bridge.apiPost<ApiResponse<{ cleared: number }>>("audit/clear", {
+        const res = await bridge.apiPost<any>("audit/clear", {
           confirm: true,
         });
-        if (res && res.code === 0) {
-          showBanner(`已清空 ${res.data.cleared} 条历史审计记录`, "info");
+        const cleared = typeof res?.cleared === "number" ? res.cleared : res?.data?.cleared;
+        if (cleared !== undefined || res?.code === 0) {
+          showBanner(`已清空 ${cleared ?? 0} 条历史审计记录`, "info");
           setIsClearModalOpen(false);
           setPage(1);
           fetchLogs();

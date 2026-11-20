@@ -41,8 +41,11 @@ sys.modules["astrbot.api.event"] = mock_event
 sys.modules["astrbot.api.star"] = mock_star_module
 sys.modules["astrbot.api.web"] = mock_web_module
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-import main
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+import astrbot_plugin_playwright_tools.main as main
+import astrbot_plugin_playwright_tools.api.audit_api as audit_api_module
 
 def run_coro(coro):
     try:
@@ -70,7 +73,7 @@ class TestPluginMain(unittest.TestCase):
             meta = yaml.safe_load(f)
         self.assertEqual(meta["name"], "astrbot_plugin_playwright_tools")
         self.assertEqual(meta["display_name"], "PlaywrightTool")
-        self.assertEqual(meta["version"], "v2.1.0")
+        self.assertEqual(meta["version"], "v2.1.1")
 
     def test_conf_schema_v2_fields(self):
         with open("_conf_schema.json", "r", encoding="utf-8") as f:
@@ -181,6 +184,7 @@ class TestPluginMain(unittest.TestCase):
         # 配置 mock request
         mock_req = MagicMock()
         mock_req.query.get.side_effect = lambda k, default=None, **kw: default
+        audit_api_module.request = mock_req
         main.request = mock_req
 
         plugin = main.PlaywrightToolPlugin(mock_ctx, config={
@@ -215,8 +219,10 @@ class TestPluginMain(unittest.TestCase):
         # 模拟确认清空
         async def mock_json(default={}):
             return {"confirm": True}
-        main.request = MagicMock()
-        main.request.json = mock_json
+        mock_req2 = MagicMock()
+        mock_req2.json = mock_json
+        audit_api_module.request = mock_req2
+        main.request = mock_req2
 
         res_clear = run_coro(plugin.api_audit_clear())
         self.assertEqual(res_clear["data"]["code"], 0)

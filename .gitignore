@@ -1,5 +1,7 @@
 # references
 third-part-reference/
+_test*
+tests/_test*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

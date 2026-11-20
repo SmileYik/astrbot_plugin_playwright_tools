@@ -5,16 +5,9 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
 
-try:
-    from astrbot.api.web import json_response, request, error_response
-except ImportError:
-    def json_response(data, status_code=200, headers=None):
-        return {"data": data, "status_code": status_code}
-    def error_response(msg, status_code=400, data=None):
-        return {"error": msg, "status_code": status_code, "data": data}
-    request = None
-
 PLUGIN_NAME = "astrbot_plugin_playwright_tools"
+
+from .api.audit_api import AuditApiHandler
 
 from .core.audit_logger import AuditLogger
 from .core.security_manager import SecurityManager
@@ -31,7 +24,7 @@ from .tools.tools import PwPageTool, PwInteractTool, PwMediaTool
     "PlaywrightTool",
     "SmileYik",
     "基于 Playwright 的大模型网页自动化工具插件，支持多租户隔离与权限白名单。",
-    "v2.1.0"
+    "v2.1.1"
 )
 class PlaywrightToolPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
@@ -116,32 +109,15 @@ class PlaywrightToolPlugin(Star):
         if hasattr(self.context, "add_llm_tools"):
             self.context.add_llm_tools(self.pw_page_tool, self.pw_interact_tool, self.pw_media_tool)
 
-        # 5. 注册 Web API 路由
-        if hasattr(self.context, "register_web_api"):
-            self.context.register_web_api(
-                f"/{PLUGIN_NAME}/audit/logs",
-                self.api_audit_logs,
-                ["GET"],
-                "获取审计日志列表",
-            )
-            self.context.register_web_api(
-                f"/{PLUGIN_NAME}/audit/stats",
-                self.api_audit_stats,
-                ["GET"],
-                "获取审计日志统计数据",
-            )
-            self.context.register_web_api(
-                f"/{PLUGIN_NAME}/audit/export",
-                self.api_audit_export,
-                ["GET"],
-                "导出审计日志数据",
-            )
-            self.context.register_web_api(
-                f"/{PLUGIN_NAME}/audit/clear",
-                self.api_audit_clear,
-                ["POST"],
-                "清空审计日志数据",
-            )
+        # 5. 初始化并注册 Web API 模块
+        self.audit_api = AuditApiHandler(self.audit_logger)
+        self.audit_api.register_routes(self.context, PLUGIN_NAME)
+
+        # 兼容委托供历史引用使用
+        self.api_audit_logs = self.audit_api.api_audit_logs
+        self.api_audit_stats = self.audit_api.api_audit_stats
+        self.api_audit_export = self.audit_api.api_audit_export
+        self.api_audit_clear = self.audit_api.api_audit_clear
 
         self._retention_days = retention_days
         self._cleanup_task: asyncio.Task | None = None
@@ -254,81 +230,6 @@ class PlaywrightToolPlugin(Star):
             else:
                 req.system_prompt = self.system_prompt_injection
 
-    # ==================== 后端 Web API ====================
-
-    async def api_audit_logs(self):
-        """分页与条件检索审计记录。"""
-        page = 1
-        page_size = 20
-        keyword = ""
-        status = "all"
-        tool_name = ""
-
-        if request and hasattr(request, "query"):
-            try:
-                page = int(request.query.get("page", 1))
-            except (ValueError, TypeError):
-                page = 1
-            try:
-                page_size = min(max(1, int(request.query.get("page_size", 20))), 100)
-            except (ValueError, TypeError):
-                page_size = 20
-            keyword = str(request.query.get("keyword", "") or "").strip()
-            status = str(request.query.get("status", "all") or "all").strip()
-            tool_name = str(request.query.get("tool_name", "") or "").strip()
-
-        items, total = await self.audit_logger.query_logs(
-            page=page, page_size=page_size, keyword=keyword, status=status, tool_name=tool_name
-        )
-        return json_response({
-            "code": 0,
-            "data": {
-                "total": total,
-                "items": items,
-                "page": page,
-                "page_size": page_size,
-            }
-        })
-
-    async def api_audit_stats(self):
-        """获取审计指标数据。"""
-        stats = await self.audit_logger.get_stats()
-        return json_response({"code": 0, "data": stats})
-
-    async def api_audit_export(self):
-        """导出审计数据为 JSON 或 CSV。"""
-        fmt = "json"
-        keyword = ""
-        status = "all"
-        tool_name = ""
-
-        if request and hasattr(request, "query"):
-            fmt = str(request.query.get("format", request.query.get("fmt", "json")) or "json").strip()
-            keyword = str(request.query.get("keyword", "") or "").strip()
-            status = str(request.query.get("status", "all") or "all").strip()
-            tool_name = str(request.query.get("tool_name", "") or "").strip()
-
-        content = await self.audit_logger.export_logs(
-            fmt=fmt, keyword=keyword, status=status, tool_name=tool_name
-        )
-        return json_response({"code": 0, "data": content, "format": fmt})
-
-    async def api_audit_clear(self):
-        """清空历史审计记录。"""
-        confirm = False
-        if request and hasattr(request, "json") and callable(request.json):
-            try:
-                payload = await request.json(default={})
-                if isinstance(payload, dict):
-                    confirm = bool(payload.get("confirm", False))
-            except Exception:
-                confirm = False
-
-        if not confirm:
-            return json_response({"code": -1, "message": "清空操作需要确认参数 confirm=true"}, status_code=400)
-
-        cleared = await self.audit_logger.clear_logs()
-        return json_response({"code": 0, "data": {"cleared": cleared}})
 
     async def terminate(self):
         """插件销毁释放所有浏览器资源及取消轮询清理任务。"""

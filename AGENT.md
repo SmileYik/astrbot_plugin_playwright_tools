@@ -3,6 +3,8 @@
 ## 项目目录构
 
 - adapts: 浏览器适配器代码
+- api: 网页 Web API 路由与业务代码
+- core: 核心逻辑组件代码
 - tools: AI工具代码
 - docs: 项目文档
 - views: 可视化界面
