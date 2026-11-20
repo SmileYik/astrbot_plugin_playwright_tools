@@ -5,12 +5,8 @@ version: v2.2.0
 author: SmileYik
 repo: https://github.com/SmileYik/astrbot_plugin_playwright_tools
 views:
-  - name: audit
+  - name: browser
     target: plugin_page
-    title: 网页工具审计
-    description: 查看 Playwright 自动化网页工具的执行明细、DOM快照与安全拦截审计日志
-  - name: lifecycle
-    target: plugin_page
-    title: 会话生命周期管理
-    description: 查看并管理活跃的浏览器上下文、标签页与生命周期历史
+    title: 网页工具控制台
+    description: Playwright 自动化网页工具的执行审计、DOM快照与会话生命周期统一管理控制台
 

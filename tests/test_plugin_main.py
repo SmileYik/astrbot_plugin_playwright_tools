@@ -165,16 +165,11 @@ class TestPluginMain(unittest.TestCase):
         self.assertIn("views", meta)
         views = meta["views"]
         self.assertIsInstance(views, list)
-        self.assertEqual(len(views), 2)
-        audit_view = next((v for v in views if v.get("name") == "audit"), None)
-        self.assertIsNotNone(audit_view)
-        self.assertEqual(audit_view["target"], "plugin_page")
-        self.assertEqual(audit_view["title"], "网页工具审计")
-
-        lifecycle_view = next((v for v in views if v.get("name") == "lifecycle"), None)
-        self.assertIsNotNone(lifecycle_view)
-        self.assertEqual(lifecycle_view["target"], "plugin_page")
-        self.assertEqual(lifecycle_view["title"], "会话生命周期管理")
+        self.assertEqual(len(views), 1, "Should only declare a single unified SPA view")
+        browser_view = views[0]
+        self.assertEqual(browser_view.get("name"), "browser")
+        self.assertEqual(browser_view.get("target"), "plugin_page")
+        self.assertEqual(browser_view.get("title"), "网页工具控制台")
 
     def test_web_api_routes_registered(self):
         TEMP_DIR.mkdir(parents=True, exist_ok=True)
