@@ -157,8 +157,10 @@ export function App() {
             i.sender_name.toLowerCase().includes(kw)
         );
       }
-      setLogs(filtered);
-      setTotal(filtered.length);
+      const totalCount = filtered.length;
+      const sliced = filtered.slice((page - 1) * pageSize, page * pageSize);
+      setLogs(sliced);
+      setTotal(totalCount);
     }
     setIsLoading(false);
   }, [page, pageSize, keyword, status, toolName]);

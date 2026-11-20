@@ -14,6 +14,7 @@ export interface AuditLogItem {
   deny_reason: string;
   is_error: boolean;
   error_message: string;
+  screenshot_path?: string;
 }
 
 export interface AuditStats {

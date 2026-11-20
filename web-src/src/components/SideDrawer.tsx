@@ -8,6 +8,7 @@ interface SideDrawerProps {
 
 export const SideDrawer: React.FC<SideDrawerProps> = ({ item, onClose }) => {
   const [copiedType, setCopiedType] = useState<string | null>(null);
+  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
 
   // 监听 ESC 键关闭抽屉
   useEffect(() => {
@@ -21,6 +22,16 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({ item, onClose }) => {
     }
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [item, onClose]);
+
+  // 加载截图预览
+  useEffect(() => {
+    if (!item?.screenshot_path) {
+      setScreenshotUrl(null);
+      return;
+    }
+    const path = item.screenshot_path;
+    setScreenshotUrl(`audit/screenshot?path=${encodeURIComponent(path)}`);
+  }, [item?.screenshot_path]);
 
   if (!item) return null;
 
@@ -302,6 +313,57 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({ item, onClose }) => {
               {formattedArgs || "{}"}
             </pre>
           </div>
+
+          {/* 截图预览 */}
+          {item.screenshot_path && (
+            <div>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "8px",
+                }}
+              >
+                <span style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-text)" }}>
+                  📸 审计截图存档
+                </span>
+                <span style={{ fontSize: "12px", color: "var(--color-text-secondary)", fontFamily: "var(--font-mono)" }}>
+                  {item.screenshot_path}
+                </span>
+              </div>
+              <div
+                style={{
+                  backgroundColor: "var(--color-surface-container)",
+                  border: "1px solid var(--color-border)",
+                  borderRadius: "var(--radius-lg)",
+                  padding: "12px",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                }}
+              >
+                {screenshotUrl && (
+                  <img
+                    src={screenshotUrl}
+                    alt="审计截图"
+                    style={{
+                      maxWidth: "100%",
+                      maxHeight: "360px",
+                      objectFit: "contain",
+                      borderRadius: "var(--radius-md)",
+                      border: "1px solid var(--color-border)",
+                      cursor: "zoom-in",
+                    }}
+                    onClick={() => window.open(screenshotUrl, "_blank")}
+                  />
+                )}
+                <div style={{ marginTop: "6px", fontSize: "12px", color: "var(--color-text-secondary)" }}>
+                  点击可在新标签页查看原图
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* 输出结果 / DOM 快照长文本 */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>

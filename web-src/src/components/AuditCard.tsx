@@ -137,6 +137,21 @@ export const AuditCard: React.FC<AuditCardProps> = ({ item, onClick, isSelected 
           >
             {item.tool_name}
           </span>
+          {item.screenshot_path && (
+            <span
+              style={{
+                padding: "2px 8px",
+                borderRadius: "var(--radius-sm)",
+                fontSize: "12px",
+                fontWeight: 600,
+                backgroundColor: "var(--color-secondary-container, #e8def8)",
+                color: "var(--color-on-secondary-container, #1d192b)",
+              }}
+              title={`截图存档: ${item.screenshot_path}`}
+            >
+              📸 截图
+            </span>
+          )}
           <span style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>
             {item.timestamp}
           </span>
