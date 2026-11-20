@@ -24,12 +24,14 @@ class MediaHandler:
         audit_logger: AuditLogger,
         allow_screenshot_to_ai: bool = False,
         download_dir: str = "data/downloads",
+        audit_save_screenshots: bool = True,
     ):
         self.context_mgr = context_mgr
         self.security_mgr = security_mgr
         self.audit_logger = audit_logger
         self.allow_screenshot_to_ai = allow_screenshot_to_ai
         self.download_dir = download_dir
+        self.audit_save_screenshots = audit_save_screenshots
         try:
             Path(self.download_dir).mkdir(parents=True, exist_ok=True)
         except OSError:

@@ -4,8 +4,9 @@ from typing import Any
 class PageExtractor:
     """页面精简提炼与 Ref ID 索引映射器。负责将可见 DOM 提炼为低 Token、高精确度的文本骨架。"""
 
-    def __init__(self, max_page_char_length: int = 2500):
+    def __init__(self, max_page_char_length: int = 2500, multiline_separator: str = " | "):
         self.max_page_char_length = max_page_char_length
+        self.multiline_separator = multiline_separator
 
     def extract_snapshot(
         self,

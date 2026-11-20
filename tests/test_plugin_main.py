@@ -232,5 +232,21 @@ class TestPluginMain(unittest.TestCase):
         res_stats_after = run_coro(plugin.api_audit_stats())
         self.assertEqual(res_stats_after["data"]["data"]["total"], 0)
 
+    def test_plugin_config_initialization_with_new_audit_and_extractor_settings(self):
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / "new_cfg_test.db")
+        mock_ctx = MagicMock()
+        mock_ctx.add_llm_tools = MagicMock()
+        cfg = {
+            "audit_db_path": db_file,
+            "audit_max_output_chars": 5000,
+            "audit_save_screenshots": False,
+            "element_multiline_separator": " / "
+        }
+        plugin = main.PlaywrightToolPlugin(mock_ctx, config=cfg)
+        self.assertEqual(plugin.page_extractor.multiline_separator, " / ")
+        self.assertEqual(plugin.audit_logger.max_output_chars, 5000)
+        self.assertFalse(plugin.media_handler.audit_save_screenshots)
+
 if __name__ == "__main__":
     unittest.main()

@@ -52,6 +52,9 @@ class PlaywrightToolPlugin(Star):
         idle_timeout = int(self.config.get("idle_timeout_minutes", 10))
         storage_state_path = str(self.config.get("storage_state_path", ""))
         retention_days = int(self.config.get("audit_retention_days", 30))
+        audit_max_output_chars = int(self.config.get("audit_max_output_chars", 0))
+        audit_save_screenshots = bool(self.config.get("audit_save_screenshots", True))
+        element_multiline_separator = str(self.config.get("element_multiline_separator", " | "))
 
         tool_timeout = int(self.config.get("tool_execution_timeout_seconds", 30))
         screenshot_max_height = int(self.config.get("screenshot_max_height_px", 8000))
@@ -60,14 +63,17 @@ class PlaywrightToolPlugin(Star):
 
         # 2. 初始化核心服务
         audit_db_path = str(self.config.get("audit_db_path", "data/audit.db"))
-        self.audit_logger = AuditLogger(audit_db_path)
+        self.audit_logger = AuditLogger(audit_db_path, max_output_chars=audit_max_output_chars)
         self.security_manager = SecurityManager(
             admin_only=admin_only,
             admin_uids=extra_admins,
             whitelist_rules=whitelist_rules,
             admin_bypass=True,
         )
-        self.page_extractor = PageExtractor(max_page_char_length=2500)
+        self.page_extractor = PageExtractor(
+            max_page_char_length=2500,
+            multiline_separator=element_multiline_separator,
+        )
         self.adapter = CamoufoxAdapter(headless=True)
         self.context_manager = ContextManager(
             adapter=self.adapter,
@@ -94,6 +100,7 @@ class PlaywrightToolPlugin(Star):
             self.audit_logger,
             allow_screenshot_to_ai=allow_screenshot_to_ai,
             download_dir="data/downloads",
+            audit_save_screenshots=audit_save_screenshots,
         )
 
         self.pw_page_tool = PwPageTool(page_handler=self.page_handler, timeout_seconds=tool_timeout)

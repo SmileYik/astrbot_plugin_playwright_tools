@@ -59,6 +59,21 @@
     "description": "审计记录保存天数",
     "default": 30
   },
+  "audit_max_output_chars": {
+    "type": "int",
+    "description": "审计记录单条工具输出最大字符上限 (0 表示不限长度)",
+    "default": 0
+  },
+  "audit_save_screenshots": {
+    "type": "bool",
+    "description": "是否在审计中将截图工具产生的截图文件单独持久化并关联记录",
+    "default": true
+  },
+  "element_multiline_separator": {
+    "type": "string",
+    "description": "页面可操作元素内部换行时的分隔替换文本",
+    "default": " | "
+  },
   "enable_close_tool": {
     "type": "bool",
     "description": "是否向 AI 注册主动关闭浏览器上下文的工具",

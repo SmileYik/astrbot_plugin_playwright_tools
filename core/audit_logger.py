@@ -15,8 +15,9 @@ TOOL_GROUPS: dict[str, list[str]] = {
 class AuditLogger:
     """SQLite 审计记录器，负责记录所有大模型工具调用并在启动或定时任务中清理过期数据。"""
 
-    def __init__(self, db_path: str = "data/audit.db"):
+    def __init__(self, db_path: str = "data/audit.db", max_output_chars: int = 0):
         self.db_path = db_path
+        self.max_output_chars = max_output_chars
         self._ensure_db()
 
     def _ensure_db(self) -> None:
