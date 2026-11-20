@@ -30,7 +30,7 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({ item, onClose }) => {
       return;
     }
     const path = item.screenshot_path;
-    setScreenshotUrl(`audit/screenshot?path=${encodeURIComponent(path)}`);
+    setScreenshotUrl(`/api/v1/plugins/extensions/astrbot_plugin_playwright_tools/audit/screenshot?path=${encodeURIComponent(path)}`);
   }, [item?.screenshot_path]);
 
   if (!item) return null;

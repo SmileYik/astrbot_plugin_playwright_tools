@@ -30,13 +30,20 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
   const [searchInput, setSearchInput] = useState(keyword);
   const [showExportMenu, setShowExportMenu] = useState(false);
 
-  // 防抖 300ms 触发搜索
+  // 同步外部 keyword 变更
   useEffect(() => {
-    const timer = setTimeout(() => {
-      onKeywordChange(searchInput);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchInput, onKeywordChange]);
+    setSearchInput(keyword);
+  }, [keyword]);
+
+  // 防抖 300ms 触发搜索（仅当输入值与外部 keyword 真正不同时触发）
+  useEffect(() => {
+    if (searchInput !== keyword) {
+      const timer = setTimeout(() => {
+        onKeywordChange(searchInput);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [searchInput, keyword, onKeywordChange]);
 
   return (
     <header

@@ -9,4 +9,8 @@ views:
     target: plugin_page
     title: 网页工具审计
     description: 查看 Playwright 自动化网页工具的执行明细、DOM快照与安全拦截审计日志
+  - name: lifecycle
+    target: plugin_page
+    title: 会话生命周期管理
+    description: 查看并管理活跃的浏览器上下文、标签页与生命周期历史
 
