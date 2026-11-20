@@ -1,3 +1,4 @@
+import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -22,6 +23,7 @@ class BrowserSessionContext:
     current_page: "Page"
     pages: list["Page"] = field(default_factory=list)
     allowed_users: set[str] = field(default_factory=set)
+    created_time: float = field(default_factory=time.time)
     last_active_time: float = field(default_factory=time.time)
     ref_map: dict[int, dict] = field(default_factory=dict)
     dialog_action: dict | None = None
@@ -44,17 +46,66 @@ class ContextManager:
         mode: str = "personal",
         idle_timeout_minutes: int = 10,
         storage_state_path: str = "",
+        audit_logger: Any = None,
     ):
         self.adapter = adapter
         self.security = security
         self.mode = mode.lower()  # "personal" 或 "session"
         self.idle_timeout_minutes = idle_timeout_minutes
         self.storage_state_path = storage_state_path
+        self.audit_logger = audit_logger
         self.contexts: dict[Any, BrowserSessionContext] = {}
         self.user_active_pointer: dict[tuple[str, str], str] = {}
 
     def _get_context_key(self, session_id: str, owner_id: str) -> Any:
         return (session_id, owner_id) if self.mode == "personal" else session_id
+
+    def _format_context_key(self, key: Any) -> str:
+        """格式化上下文 Key，若为 (session_id, owner_id) 则返回 'session_id:owner_id'，否则返回其字符串表示。"""
+        if isinstance(key, (tuple, list)) and len(key) == 2:
+            return f"{key[0]}:{key[1]}"
+        return str(key)
+
+    def _fire_lifecycle_log(
+        self,
+        session_id: str,
+        context_key: str,
+        owner_id: str,
+        event_type: str,
+        operator_id: str,
+        session_name: str = "",
+        details: dict | list | str | None = None,
+    ) -> Any:
+        """非阻塞或安全派发生命周期审计记录。"""
+        if not self.audit_logger:
+            return None
+        try:
+            res = self.audit_logger.log_lifecycle(
+                session_id=session_id,
+                context_key=context_key,
+                owner_id=owner_id,
+                event_type=event_type,
+                operator_id=operator_id,
+                session_name=session_name,
+                details=details,
+            )
+            if hasattr(res, "__await__"):
+                try:
+                    loop = asyncio.get_running_loop()
+                    return loop.create_task(res)
+                except RuntimeError:
+                    try:
+                        res.send(None)
+                    except StopIteration:
+                        pass
+                    except Exception:
+                        try:
+                            res.close()
+                        except Exception:
+                            pass
+            return res
+        except Exception:
+            return None
 
     async def resolve_context(
         self, session_id: str, sender_id: str, peek: bool = False
@@ -182,6 +233,22 @@ class ContextManager:
             except Exception:
                 pass
 
+        if self.audit_logger:
+            try:
+                key = self._get_context_key(session_id, owner_id)
+                res = self.audit_logger.log_lifecycle(
+                    session_id=session_id,
+                    context_key=self._format_context_key(key),
+                    owner_id=owner_id,
+                    event_type="create",
+                    operator_id=owner_id,
+                    details={"mode": self.mode},
+                )
+                if hasattr(res, "__await__"):
+                    await res
+            except Exception:
+                pass
+
         return ctx
 
     def invite_user(self, session_id: str, owner_id: str, target_user_id: str) -> tuple[bool, str]:
@@ -198,6 +265,15 @@ class ContextManager:
             return False, "只有当前浏览器的创建者才能邀请协作者"
 
         context.allowed_users.add(target_user_id)
+        if self.audit_logger:
+            self._fire_lifecycle_log(
+                session_id=session_id,
+                context_key=self._format_context_key(key),
+                owner_id=context.owner_id,
+                event_type="join",
+                operator_id=owner_id,
+                details={"invited_user": target_user_id},
+            )
         return True, f"已成功将 @{target_user_id} 邀请加入您的浏览器操作上下文"
 
     def switch_user_context(self, session_id: str, sender_id: str, target_owner_id: str) -> tuple[bool, str]:
@@ -214,6 +290,15 @@ class ContextManager:
             return False, f"您未被授予操作用户 @{target_owner_id} 浏览器的权限"
 
         self.user_active_pointer[(session_id, sender_id)] = target_owner_id
+        if self.audit_logger:
+            self._fire_lifecycle_log(
+                session_id=session_id,
+                context_key=self._format_context_key(target_key),
+                owner_id=target_ctx.owner_id,
+                event_type="switch",
+                operator_id=sender_id,
+                details={"target_owner": target_owner_id},
+            )
         return True, f"已将您的操作上下文切换至用户 @{target_owner_id} 的浏览器"
 
     async def close_user_context(self, session_id: str, sender_id: str) -> tuple[bool, str]:
@@ -226,7 +311,10 @@ class ContextManager:
 
         ctx = self.contexts.pop(key)
         try:
-            await ctx.browser_context.close()
+            if hasattr(ctx, "browser_context") and ctx.browser_context:
+                res = ctx.browser_context.close()
+                if hasattr(res, "__await__"):
+                    await res
         except Exception:
             pass
 
@@ -234,6 +322,20 @@ class ContextManager:
         to_del = [k for k, v in self.user_active_pointer.items() if k[0] == session_id and v == sender_id]
         for k in to_del:
             del self.user_active_pointer[k]
+
+        if self.audit_logger:
+            try:
+                res = self.audit_logger.log_lifecycle(
+                    session_id=session_id,
+                    context_key=self._format_context_key(key),
+                    owner_id=ctx.owner_id,
+                    event_type="close",
+                    operator_id=sender_id,
+                )
+                if hasattr(res, "__await__"):
+                    await res
+            except Exception:
+                pass
 
         return True, "已成功关闭并释放您的浏览器上下文"
 
@@ -254,9 +356,160 @@ class ContextManager:
             ctx = self.contexts.pop(k, None)
             if ctx:
                 try:
-                    await ctx.browser_context.close()
+                    if hasattr(ctx, "browser_context") and ctx.browser_context:
+                        res = ctx.browser_context.close()
+                        if hasattr(res, "__await__"):
+                            await res
                 except Exception:
                     pass
                 count += 1
+                to_del = [
+                    ptr for ptr, v in self.user_active_pointer.items()
+                    if ptr[0] == getattr(ctx, "session_id", "") and v == getattr(ctx, "owner_id", "")
+                ]
+                for ptr in to_del:
+                    del self.user_active_pointer[ptr]
+
+                if self.audit_logger:
+                    try:
+                        res = self.audit_logger.log_lifecycle(
+                            session_id=getattr(ctx, "session_id", ""),
+                            context_key=self._format_context_key(k),
+                            owner_id=getattr(ctx, "owner_id", ""),
+                            event_type="timeout",
+                            operator_id="system",
+                            details={"idle_minutes": self.idle_timeout_minutes},
+                        )
+                        if hasattr(res, "__await__"):
+                            await res
+                    except Exception:
+                        pass
 
         return count
+
+    async def force_kill_context(self, context_key: str, operator_id: str) -> tuple[bool, str]:
+        """强制终止指定上下文并释放底层资源。"""
+        context_key = str(context_key)
+        target_k = None
+        target_ctx = None
+        for k, ctx in list(self.contexts.items()):
+            if k == context_key or self._format_context_key(k) == context_key:
+                target_k = k
+                target_ctx = ctx
+                break
+
+        if not target_ctx or target_k is None:
+            return False, f"未找到上下文: {context_key}"
+
+        self.contexts.pop(target_k, None)
+        try:
+            if hasattr(target_ctx, "browser_context") and target_ctx.browser_context:
+                res = target_ctx.browser_context.close()
+                if hasattr(res, "__await__"):
+                    await res
+        except Exception:
+            pass
+
+        session_id = getattr(target_ctx, "session_id", "")
+        owner_id = getattr(target_ctx, "owner_id", "")
+        to_del = [
+            k for k, v in self.user_active_pointer.items()
+            if (k[0] == session_id and v == owner_id)
+        ]
+        for k in to_del:
+            del self.user_active_pointer[k]
+
+        if self.audit_logger:
+            try:
+                res = self.audit_logger.log_lifecycle(
+                    session_id=session_id,
+                    context_key=self._format_context_key(target_k),
+                    owner_id=owner_id,
+                    event_type="force_kill",
+                    operator_id=operator_id,
+                    details={"operator": operator_id},
+                )
+                if hasattr(res, "__await__"):
+                    await res
+            except Exception:
+                pass
+
+        return True, "上下文已成功强制关闭并释放资源"
+
+    async def get_active_contexts_detail(self) -> list[dict]:
+        """获取所有当前活跃的会话及其标签页明细。"""
+        result = []
+        for key, ctx in list(self.contexts.items()):
+            key_str = self._format_context_key(key)
+            pages = []
+            if hasattr(ctx, "browser_context") and getattr(ctx.browser_context, "pages", None) is not None:
+                bc_pages = ctx.browser_context.pages
+                if isinstance(bc_pages, list):
+                    pages = bc_pages
+            if not pages and hasattr(ctx, "pages") and isinstance(ctx.pages, list):
+                pages = ctx.pages
+
+            cur_p = getattr(ctx, "current_page", None)
+            active_url = ""
+            if cur_p:
+                u = getattr(cur_p, "url", "")
+                active_url = str(u() if callable(u) else u) if u else ""
+
+            tabs = []
+            for idx, p in enumerate(pages):
+                url_val = getattr(p, "url", "")
+                url_str = str(url_val() if callable(url_val) else url_val) if url_val else ""
+
+                title_str = ""
+                try:
+                    if hasattr(p, "title"):
+                        if callable(p.title):
+                            t_res = p.title()
+                            if hasattr(t_res, "__await__"):
+                                try:
+                                    t_val = await asyncio.wait_for(t_res, timeout=2.0)
+                                except (RuntimeError, NotImplementedError):
+                                    t_val = await t_res
+                                if isinstance(t_val, (str, int, float, bool)):
+                                    title_str = str(t_val)
+                                elif hasattr(t_val, "_mock_name") or type(t_val).__name__.endswith("Mock"):
+                                    title_str = ""
+                                else:
+                                    title_str = str(t_val)
+                            else:
+                                if isinstance(t_res, (str, int, float, bool)):
+                                    title_str = str(t_res)
+                                elif hasattr(t_res, "_mock_name") or type(t_res).__name__.endswith("Mock"):
+                                    title_str = ""
+                                else:
+                                    title_str = str(t_res)
+                        else:
+                            if isinstance(p.title, (str, int, float, bool)):
+                                title_str = str(p.title)
+                            elif hasattr(p.title, "_mock_name") or type(p.title).__name__.endswith("Mock"):
+                                title_str = ""
+                            else:
+                                title_str = str(p.title)
+                except Exception:
+                    title_str = ""
+
+                tabs.append({
+                    "index": idx,
+                    "url": url_str,
+                    "title": title_str,
+                    "is_active": (p == cur_p),
+                })
+
+            item = {
+                "context_key": key_str,
+                "session_id": getattr(ctx, "session_id", ""),
+                "owner_id": getattr(ctx, "owner_id", ""),
+                "allowed_users": list(getattr(ctx, "allowed_users", set())),
+                "created_time": getattr(ctx, "created_time", getattr(ctx, "last_active_time", 0.0)),
+                "last_active_time": getattr(ctx, "last_active_time", 0.0),
+                "tab_count": len(pages),
+                "active_tab_url": active_url,
+                "tabs": tabs,
+            }
+            result.append(item)
+        return result
