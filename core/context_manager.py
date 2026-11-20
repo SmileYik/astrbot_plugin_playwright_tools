@@ -1,17 +1,26 @@
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from ..adapts.base import BrowserAdapterBase
 from .security_manager import SecurityManager
 
+if TYPE_CHECKING:
+    from playwright.async_api import BrowserContext, Page
+else:
+    try:
+        from playwright.async_api import BrowserContext, Page
+    except ImportError:
+        BrowserContext = Any
+        Page = Any
+
 @dataclass
 class BrowserSessionContext:
-    """单个浏览器上下文会话数据结构。"""
+    """单个浏览器上下文会话数据结构，强类型持有原生 Playwright BrowserContext 与 Page。"""
     session_id: str
     owner_id: str
-    browser_context: Any
-    current_page: Any
-    pages: list[Any] = field(default_factory=list)
+    browser_context: "BrowserContext"
+    current_page: "Page"
+    pages: list["Page"] = field(default_factory=list)
     allowed_users: set[str] = field(default_factory=set)
     last_active_time: float = field(default_factory=time.time)
     ref_map: dict[int, dict] = field(default_factory=dict)
@@ -21,6 +30,9 @@ class BrowserSessionContext:
     def touch(self) -> None:
         """更新最后活跃时间。"""
         self.last_active_time = time.time()
+
+# 别名
+ManagedContext = BrowserSessionContext
 
 class ContextManager:
     """多租户浏览器上下文管理器，负责个人/会话模式隔离、协作寻址及生命周期回收。"""
