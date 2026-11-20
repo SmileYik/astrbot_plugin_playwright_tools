@@ -15,7 +15,7 @@ else:
 
 @dataclass
 class BrowserSessionContext:
-    """单个浏览器上下文会话数据结构，强类型持有原生 Playwright BrowserContext 与 Page。"""
+    """单个浏览器上下文会话数据结构。"""
     session_id: str
     owner_id: str
     browser_context: "BrowserContext"

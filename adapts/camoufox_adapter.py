@@ -18,9 +18,7 @@ except ImportError:
     AsyncCamoufox = None
 
 class CamoufoxAdapter(BrowserAdapterBase):
-    """基于 Camoufox (反指纹 Firefox) 的异步浏览器适配器。
-    该模块仅作为 Playwright Browser 的底层启动器，输出标准的 Playwright 实例。
-    """
+    """基于 Camoufox 的异步浏览器适配器。"""
 
     def __init__(self, headless: bool = True, geoip: bool = False):
         self.headless = headless

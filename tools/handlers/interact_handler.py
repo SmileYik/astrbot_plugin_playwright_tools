@@ -1,7 +1,14 @@
 import traceback
+from typing import TYPE_CHECKING, Any
 from ...core.context_manager import ContextManager
 from ...core.security_manager import SecurityManager
 from ...core.audit_logger import AuditLogger
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page, Locator
+else:
+    Page = Any
+    Locator = Any
 
 try:
     from astrbot.api import logger
@@ -35,7 +42,7 @@ class InteractHandler:
         if ctx is None:
             return "操作失败: 无法获取浏览器上下文"
 
-        page = ctx.current_page
+        page: Page = ctx.current_page
         url = getattr(page, "url", "")
         allowed, reason = self.security_mgr.check_permission(ctx.owner_id, url, "click")
         if not allowed:
@@ -54,20 +61,8 @@ class InteractHandler:
         text = el_info.get("text", "")
 
         try:
-            script = """
-            (ref) => {
-                const target = document.querySelector(`[data-astr-ref="${ref}"]`);
-                if (target) {
-                    target.scrollIntoView({behavior: 'smooth', block: 'center'});
-                    target.click();
-                    return true;
-                }
-                return false;
-            }
-            """
-            clicked = await page.evaluate(script, ref)
-            if not clicked:
-                return f"点击失败: 未能定位元素 [{ref}]"
+            locator: Locator = page.locator(f'[data-astr-ref="{ref}"]')
+            await locator.click(timeout=10000)
 
             dialog_info = ""
             if ctx.last_dialog_message:
@@ -106,7 +101,7 @@ class InteractHandler:
         if ctx is None:
             return "操作失败: 无法获取浏览器上下文"
 
-        page = ctx.current_page
+        page: Page = ctx.current_page
         url = getattr(page, "url", "")
         allowed, reason = self.security_mgr.check_permission(ctx.owner_id, url, "fill")
         if not allowed:
@@ -121,21 +116,8 @@ class InteractHandler:
             return f"填写失败: 无效的元素引用 [{ref}]"
 
         try:
-            script = """
-            ([ref, val]) => {
-                const target = document.querySelector(`[data-astr-ref="${ref}"]`);
-                if (target) {
-                    target.value = val;
-                    target.dispatchEvent(new Event('input', { bubbles: true }));
-                    target.dispatchEvent(new Event('change', { bubbles: true }));
-                    return true;
-                }
-                return false;
-            }
-            """
-            filled = await page.evaluate(script, [ref, text])
-            if not filled:
-                return f"填写失败: 未能定位元素 [{ref}]"
+            locator: Locator = page.locator(f'[data-astr-ref="{ref}"]')
+            await locator.fill(str(text), timeout=10000)
 
             res_msg = f"{hint}\n已成功在输入框 [{ref}] 填入内容。".strip()
             await self.audit_logger.log_action(
@@ -169,7 +151,7 @@ class InteractHandler:
         if ctx is None:
             return "操作失败: 无法获取浏览器上下文"
 
-        page = ctx.current_page
+        page: Page = ctx.current_page
         url = getattr(page, "url", "")
         allowed, reason = self.security_mgr.check_permission(ctx.owner_id, url, "click")
         if not allowed:
@@ -184,28 +166,12 @@ class InteractHandler:
             return f"选择失败: 无效的元素引用 [{ref}]"
 
         try:
-            script = """
-            ([ref, val]) => {
-                const target = document.querySelector(`[data-astr-ref="${ref}"]`);
-                if (!target || target.tagName.toLowerCase() !== 'select') return false;
-                let found = false;
-                for (let opt of target.options) {
-                    if (opt.value === val || opt.text === val) {
-                        target.value = opt.value;
-                        found = true;
-                        break;
-                    }
-                }
-                if (found) {
-                    target.dispatchEvent(new Event('change', { bubbles: true }));
-                    return true;
-                }
-                return false;
-            }
-            """
-            selected = await page.evaluate(script, [ref, value])
-            if not selected:
-                return f"选择失败: 下拉框 [{ref}] 中未找到匹配的选项 '{value}'"
+            locator: Locator = page.locator(f'[data-astr-ref="{ref}"]')
+            # 优先按 value 匹配，若失败则尝试按 label 匹配
+            try:
+                await locator.select_option(value=value, timeout=5000)
+            except Exception:
+                await locator.select_option(label=value, timeout=5000)
 
             res_msg = f"{hint}\n已在下拉框 [{ref}] 成功选取 '{value}'。".strip()
             await self.audit_logger.log_action(
@@ -231,7 +197,7 @@ class InteractHandler:
         if ctx is None:
             return "操作失败: 无法获取浏览器上下文"
 
-        page = ctx.current_page
+        page: Page = ctx.current_page
         url = getattr(page, "url", "")
         allowed, reason = self.security_mgr.check_permission(ctx.owner_id, url, "click")
         if not allowed:
@@ -246,21 +212,8 @@ class InteractHandler:
             return f"悬停失败: 无效的元素引用 [{ref}]"
 
         try:
-            script = """
-            (ref) => {
-                const target = document.querySelector(`[data-astr-ref="${ref}"]`);
-                if (target) {
-                    target.scrollIntoView({behavior: 'smooth', block: 'center'});
-                    target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-                    target.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
-                    return true;
-                }
-                return false;
-            }
-            """
-            hovered = await page.evaluate(script, ref)
-            if not hovered:
-                return f"悬停失败: 未能定位元素 [{ref}]"
+            locator: Locator = page.locator(f'[data-astr-ref="{ref}"]')
+            await locator.hover(timeout=10000)
 
             res_msg = f"{hint}\n已成功悬停在元素 [{ref}] 上。".strip()
             await self.audit_logger.log_action(
@@ -286,7 +239,7 @@ class InteractHandler:
         if ctx is None:
             return "操作失败: 无法获取浏览器上下文"
 
-        page = ctx.current_page
+        page: Page = ctx.current_page
         url = getattr(page, "url", "")
         allowed, reason = self.security_mgr.check_permission(ctx.owner_id, url, "click")
         if not allowed:
@@ -301,16 +254,8 @@ class InteractHandler:
             return f"聚焦失败: 无效的元素引用 [{ref}]"
 
         try:
-            script = """
-            (ref) => {
-                const target = document.querySelector(`[data-astr-ref="${ref}"]`);
-                if (target) { target.focus(); return true; }
-                return false;
-            }
-            """
-            ok = await page.evaluate(script, ref)
-            if not ok:
-                return f"聚焦失败: 未能定位元素 [{ref}]"
+            locator: Locator = page.locator(f'[data-astr-ref="{ref}"]')
+            await locator.focus(timeout=10000)
             res = f"{hint}\n已聚焦到元素 [{ref}]。".strip()
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
@@ -335,7 +280,7 @@ class InteractHandler:
         if ctx is None:
             return "操作失败: 无法获取浏览器上下文"
 
-        page = ctx.current_page
+        page: Page = ctx.current_page
         url = getattr(page, "url", "")
         allowed, reason = self.security_mgr.check_permission(ctx.owner_id, url, "click")
         if not allowed:
@@ -350,16 +295,8 @@ class InteractHandler:
             return f"失焦失败: 无效的元素引用 [{ref}]"
 
         try:
-            script = """
-            (ref) => {
-                const target = document.querySelector(`[data-astr-ref="${ref}"]`);
-                if (target) { target.blur(); return true; }
-                return false;
-            }
-            """
-            ok = await page.evaluate(script, ref)
-            if not ok:
-                return f"失焦失败: 未能定位元素 [{ref}]"
+            locator: Locator = page.locator(f'[data-astr-ref="{ref}"]')
+            await locator.evaluate("el => el.blur()")
             res = f"{hint}\n元素 [{ref}] 已失焦。".strip()
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
@@ -385,7 +322,7 @@ class InteractHandler:
         if ctx is None:
             return "操作失败: 无法获取浏览器上下文"
 
-        page = ctx.current_page
+        page: Page = ctx.current_page
         url = getattr(page, "url", "")
         allowed, reason = self.security_mgr.check_permission(ctx.owner_id, url, "click")
         if not allowed:
@@ -403,23 +340,9 @@ class InteractHandler:
             return f"拖拽失败: 无效的拖拽目标元素引用 [{target_ref}]"
 
         try:
-            script = """
-            ([srcRef, dstRef]) => {
-                const src = document.querySelector(`[data-astr-ref="${srcRef}"]`);
-                const dst = document.querySelector(`[data-astr-ref="${dstRef}"]`);
-                if (!src || !dst) return false;
-
-                const dataTransfer = new DataTransfer();
-                src.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }));
-                dst.dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer }));
-                dst.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer }));
-                src.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer }));
-                return true;
-            }
-            """
-            dragged = await page.evaluate(script, [ref, target_ref])
-            if not dragged:
-                return "拖拽失败: 无法在 DOM 中定位源或目标元素"
+            source: Locator = page.locator(f'[data-astr-ref="{ref}"]')
+            target: Locator = page.locator(f'[data-astr-ref="{target_ref}"]')
+            await source.drag_to(target, timeout=10000)
 
             res_msg = f"{hint}\n已成功将元素 [{ref}] 拖拽至 [{target_ref}] 位置。".strip()
             await self.audit_logger.log_action(
@@ -445,7 +368,7 @@ class InteractHandler:
         if ctx is None:
             return "操作失败: 无法获取浏览器上下文"
 
-        page = ctx.current_page
+        page: Page = ctx.current_page
         url = getattr(page, "url", "")
         allowed, reason = self.security_mgr.check_permission(ctx.owner_id, url, "fill")
         if not allowed:
@@ -461,13 +384,7 @@ class InteractHandler:
             return "按键失败: 请提供有效的按键名称"
 
         try:
-            if hasattr(page, "keyboard") and hasattr(page.keyboard, "press"):
-                await page.keyboard.press(key_name)
-            else:
-                await page.evaluate(
-                    "(k) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }))",
-                    key_name
-                )
+            await page.keyboard.press(key_name)
 
             res_msg = f"{hint}\n已成功向页面发送按键 '{key_name}'。".strip()
             await self.audit_logger.log_action(
@@ -494,7 +411,7 @@ class InteractHandler:
         if ctx is None:
             return "滚动失败: 无法获取浏览器上下文"
 
-        page = ctx.current_page
+        page: Page = ctx.current_page
         url = getattr(page, "url", "")
         allowed, reason = self.security_mgr.check_permission(ctx.owner_id, url, "scroll")
         if not allowed:
@@ -508,8 +425,13 @@ class InteractHandler:
 
         try:
             delta = amount if direction.lower() == "down" else -amount
-            await page.evaluate("(d) => window.scrollBy(0, d)", delta)
-            res_msg = f"{hint}\n页面已向{direction}滚动 {amount} 像素。".strip()
+            if hasattr(page, "mouse") and hasattr(page.mouse, "wheel"):
+                await page.mouse.wheel(0, delta)
+            else:
+                await page.evaluate("(d) => window.scrollBy(0, d)", delta)
+
+            dir_name = "下" if direction.lower() == "down" else ("上" if direction.lower() == "up" else direction)
+            res_msg = f"{hint}\n页面已向{dir_name}滚动 {amount} 像素。".strip()
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
                 "scroll", url, {"direction": direction, "amount": amount}, res_msg, is_permitted=True,

@@ -1,7 +1,7 @@
 import unittest
 import os
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock
 
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 if parent_dir not in sys.path:
@@ -25,15 +25,22 @@ class TestInteractHandler(unittest.TestCase):
             return None
         self.mock_audit.log_action = mock_log
 
+        self.mock_locator = AsyncMock()
         self.mock_page = MagicMock()
         self.mock_page.url = "https://example.com"
+        self.mock_page.locator.return_value = self.mock_locator
+        self.mock_page.keyboard = AsyncMock()
+        self.mock_page.mouse = AsyncMock()
+
         self.mock_context = MagicMock()
         self.mock_context.owner_id = "u1"
         self.mock_context.current_page = self.mock_page
+        self.mock_context.last_dialog_message = None
         self.mock_context.ref_map = {
-            1: {"tag": "div", "text": "card1"},
+            1: {"tag": "button", "text": "btn1"},
             2: {"tag": "div", "text": "target_bin"},
-            3: {"tag": "input", "text": ""}
+            3: {"tag": "input", "text": ""},
+            4: {"tag": "select", "text": ""}
         }
 
         async def mock_resolve(session_id, sender_id):
@@ -42,21 +49,38 @@ class TestInteractHandler(unittest.TestCase):
 
         self.handler = InteractHandler(self.mock_mgr, self.mock_sec, self.mock_audit)
 
+    def test_click_element(self):
+        res = run_coro(self.handler.click("s1", "u1", ref=1))
+        self.assertIn("已成功点击 [1]", res)
+        self.mock_page.locator.assert_called_with('[data-astr-ref="1"]')
+        self.mock_locator.click.assert_called_once()
+
+    def test_fill_form(self):
+        res = run_coro(self.handler.fill_form("s1", "u1", ref=3, text="Hello Playwright"))
+        self.assertIn("已成功在输入框 [3] 填入内容", res)
+        self.mock_page.locator.assert_called_with('[data-astr-ref="3"]')
+        self.mock_locator.fill.assert_called_with("Hello Playwright", timeout=10000)
+
+    def test_select_option(self):
+        res = run_coro(self.handler.select_option("s1", "u1", ref=4, value="opt2"))
+        self.assertIn("已在下拉框 [4] 成功选取 'opt2'", res)
+        self.mock_page.locator.assert_called_with('[data-astr-ref="4"]')
+        self.mock_locator.select_option.assert_called()
+
     def test_hover_element(self):
-        async def mock_eval(*args, **kwargs):
-            return True
-        self.mock_page.evaluate = mock_eval
         res = run_coro(self.handler.hover("s1", "u1", ref=1))
-        self.assertIn("已成功悬停", res)
+        self.assertIn("已成功悬停在元素 [1]", res)
+        self.mock_page.locator.assert_called_with('[data-astr-ref="1"]')
+        self.mock_locator.hover.assert_called_once()
 
     def test_focus_and_blur(self):
-        async def mock_eval(*args, **kwargs):
-            return True
-        self.mock_page.evaluate = mock_eval
         res_focus = run_coro(self.handler.focus("s1", "u1", ref=3))
-        self.assertIn("已聚焦", res_focus)
+        self.assertIn("已聚焦到元素 [3]", res_focus)
+        self.mock_locator.focus.assert_called_once()
+
         res_blur = run_coro(self.handler.blur("s1", "u1", ref=3))
-        self.assertIn("已失焦", res_blur)
+        self.assertIn("元素 [3] 已失焦", res_blur)
+        self.mock_locator.evaluate.assert_called_with("el => el.blur()")
 
     def test_drag_element_missing_target(self):
         res = run_coro(self.handler.drag("s1", "u1", ref=1, target_ref=99))
@@ -64,7 +88,7 @@ class TestInteractHandler(unittest.TestCase):
 
     def test_drag_denied_logs_audit(self):
         self.mock_sec.check_permission.return_value = (False, "没有点击权限")
-        mock_log = unittest.mock.AsyncMock()
+        mock_log = AsyncMock()
         self.mock_audit.log_action = mock_log
         res = run_coro(self.handler.drag("s1", "u1", ref=1, target_ref=2, session_name="群1", sender_name="用户1"))
         self.assertIn("拖拽失败: 没有点击权限", res)
@@ -76,19 +100,26 @@ class TestInteractHandler(unittest.TestCase):
         self.assertEqual(kwargs.get("sender_name"), "用户1")
 
     def test_drag_element_success(self):
-        async def mock_eval(*args, **kwargs):
-            return True
-        self.mock_page.evaluate = mock_eval
+        target_locator = AsyncMock()
+        def mock_loc(sel):
+            if 'data-astr-ref="1"' in sel:
+                return self.mock_locator
+            return target_locator
+        self.mock_page.locator.side_effect = mock_loc
+
         res = run_coro(self.handler.drag("s1", "u1", ref=1, target_ref=2))
         self.assertIn("已成功将元素 [1] 拖拽至 [2]", res)
+        self.mock_locator.drag_to.assert_called_with(target_locator, timeout=10000)
 
     def test_press_key(self):
-        async def mock_key(key):
-            return None
-        self.mock_page.keyboard = MagicMock()
-        self.mock_page.keyboard.press = mock_key
         res = run_coro(self.handler.press_key("s1", "u1", key="Enter"))
         self.assertIn("已成功向页面发送按键", res)
+        self.mock_page.keyboard.press.assert_called_with("Enter")
+
+    def test_scroll(self):
+        res = run_coro(self.handler.scroll("s1", "u1", direction="down", amount=300))
+        self.assertIn("页面已向下滚动 300 像素", res)
+        self.mock_page.mouse.wheel.assert_called_with(0, 300)
 
     def test_permission_denied_focus_and_press(self):
         self.mock_sec.check_permission.return_value = (False, "没有权限")
