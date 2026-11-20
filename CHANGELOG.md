@@ -6,6 +6,21 @@
 
 ## [v2.2.0] - 2026-11-20
 
+### 页面阅读体验与独立分页 (Structured Content & Independent Pagination)
+- **结构化 Markdown 正文提炼**：网页正文提炼全面支持提取 `#` 一级标题、`##` 二级标题、`###` 三级标题、段落、列表项及表格 Markdown 语法，彻底消除散碎短行与排版割裂。
+- **正文与控件分流独立分页 (`target`)**：`pw_page` 的 `read` 与 `search` 动作支持 `target="all" | "text" | "elements"`（默认 `all`）。大模型可指定 `target="text"` 独立连贯通读文章长篇，或指定 `target="elements"` 专注文档交互控件。
+- **可操作元素换行平整化**：可交互控件内的换行符自动归一化单行展示，支持在配置项中自定义连接分隔符 `element_multiline_separator`（默认 `' | '`）。
+- **无状态提炼与多租户隔离**：`PageExtractor` 保持无状态单例，各会话快照独立保存在各自的 `ManagedContext.snapshot_data`，完美保障高并发与多租户隔离。
+
+### 交互报错精炼与操作推荐 (Sanitized Errors & Next-Action Guidance)
+- **Playwright 底层报错脱敏与精炼**：编写 `clean_playwright_error`，剥除 Playwright 内部 `Call log:` 及指针拦截冗余日志，对超时、弹层遮挡（`<dialog open>`）、元素失联等场景精简为一句话中文提示。
+- **智能下一步行动指引**：在页面打开、阅读完结、元素点击、表单提交及拦截报错后，自动注入针对性 `[推荐操作: ...]` 指引，降低大模型幻觉与无效重试。
+
+### 真实审计落盘与 WebUI 升级 (Real Audit Outputs & Visual Inspector)
+- **真实输出与截断配置**：修复审计日志仅记录开始占位符的问题，全面记录真实执行结果；支持配置 `audit_max_output_chars`（默认 `0` 不限，大于 0 时自动截断并附带标记）。
+- **截图安全持久化与预览**：新增配置 `audit_save_screenshots`（默认 `true`），仅对 `pw_media` 截图动作落盘至 `data/audit_screenshots/` 并记录相对路径；Web API 提供带目录越界防护的图片服务接口 `GET /{plugin_name}/audit/screenshot`。
+- **Web API 分页与离线预览修复**：实现 `extract_query_param` 支持 `args` / `query_params` / `query` 多源参数提取，彻底修复 AstrBot Dashboard 下分页停留在第 1 页的缺陷；前端抽屉支持完整输出检视、复制与截图缩略图展开查看。
+
 ### 架构彻底重构 (Playwright-Native Architecture Refactor)
 - **原生 Playwright 交互体系**：将 `InteractHandler` 中所有点击、表单输入、下拉选择、悬停、聚焦/失焦、拖拽动作彻底重构为 Playwright 原生 Locator API 调用（`locator.click()`、`locator.fill()`、`locator.select_option()`、`locator.drag_to()` 等），全面享受框架自带的可操作性检查与受控组件事件分发，彻底移除裸 JS 字符串注入。
 - **解耦浏览器后端适配器**：将 `CamoufoxAdapter` 与通用 `BrowserAdapterBase` 严格解耦，将其职责定位为单一的底层浏览器启动器，向上层完全输出标准的 Playwright `Browser` 与 `BrowserContext`，消除对 Camoufox 的专有强绑定。
