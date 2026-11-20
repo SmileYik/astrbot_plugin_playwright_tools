@@ -107,6 +107,16 @@ class TestToolsV2(unittest.TestCase):
         self.assertEqual(called_args.get("tab_index"), 1)
         self.assertEqual(res, "切换至: 1")
 
+        # Test empty string tab_index gracefully falls back to 1
+        with patch("asyncio.wait_for", fake_wait_for):
+            res = run_coro(self.page_tool.call(self.mock_context_wrapper, action="switch_tab", tab_index=""))
+        self.assertEqual(called_args.get("tab_index"), 1)
+
+        # Test non-numeric string tab_index gracefully falls back to 1
+        with patch("asyncio.wait_for", fake_wait_for):
+            res = run_coro(self.page_tool.call(self.mock_context_wrapper, action="switch_tab", tab_index="invalid"))
+        self.assertEqual(called_args.get("tab_index"), 1)
+
     def test_execute_with_timeout_logs_traceback(self):
         async def mock_fail(*args, **kwargs):
             raise ValueError("测试异常内容")

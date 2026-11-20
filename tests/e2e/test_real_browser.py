@@ -93,7 +93,11 @@ class TestRealBrowserE2E(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         # 保证在全部测试用例结束或者清理时关闭适配器
-        pass
+        if hasattr(self, "adapter") and self.adapter:
+            try:
+                await self.adapter.stop()
+            except Exception:
+                pass
 
     async def test_01_full_e2e_lifecycle(self):
         """测试从浏览器打开页面、阅读、检索、各种表单与元素交互、弹窗、多标签页、截图到关闭的完整生命周期。"""

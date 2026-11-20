@@ -2,14 +2,17 @@ import asyncio
 import base64
 import os
 import time
-import logging
 import traceback
 from pathlib import Path
 from ...core.context_manager import ContextManager
 from ...core.security_manager import SecurityManager
 from ...core.audit_logger import AuditLogger
 
-logger = logging.getLogger(__name__)
+try:
+    from astrbot.api import logger
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
 
 class MediaHandler:
     """媒体与截图双重熔断处理器。"""
