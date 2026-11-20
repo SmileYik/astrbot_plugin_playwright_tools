@@ -157,7 +157,7 @@ class TestPluginMain(unittest.TestCase):
             "audit_db_path": db_file,
         })
 
-        self.assertEqual(mock_ctx.register_web_api.call_count, 4)
+        self.assertEqual(mock_ctx.register_web_api.call_count, 5)
         registered_calls = [c[0] for c in mock_ctx.register_web_api.call_args_list]
         routes_map = {call[0]: call[2] for call in registered_calls}
 
@@ -172,6 +172,9 @@ class TestPluginMain(unittest.TestCase):
 
         self.assertIn("/astrbot_plugin_playwright_tools/audit/clear", routes_map)
         self.assertEqual(routes_map["/astrbot_plugin_playwright_tools/audit/clear"], ["POST"])
+
+        self.assertIn("/astrbot_plugin_playwright_tools/audit/screenshot", routes_map)
+        self.assertEqual(routes_map["/astrbot_plugin_playwright_tools/audit/screenshot"], ["GET"])
 
     def test_web_api_handlers_call(self):
         TEMP_DIR.mkdir(parents=True, exist_ok=True)

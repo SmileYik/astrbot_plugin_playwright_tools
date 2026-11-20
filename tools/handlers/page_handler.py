@@ -90,7 +90,7 @@ class PageHandler:
             res = f"{hint}\n{chunk_output}\n\n[推荐操作: 可调用 pw_page(action='read', target='text') 阅读正文，或 target='elements' 查看控件列表]".strip()
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "open_url", url, {"url": url}, "页面打开成功", is_permitted=True,
+                "open_url", url, {"url": url}, res, is_permitted=True,
                 session_name=session_name, sender_name=sender_name
             )
             return res
@@ -143,7 +143,7 @@ class PageHandler:
             res = f"{hint}\n{chunk_output}".strip()
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "read_page", current_url, {"page": page, "target": target}, f"读取第 {page} 页成功", is_permitted=True,
+                "read_page", current_url, {"page": page, "target": target}, res, is_permitted=True,
                 session_name=session_name, sender_name=sender_name
             )
             return res
@@ -196,7 +196,7 @@ class PageHandler:
             res = f"{hint}\n{search_output}".strip()
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "search_page", current_url, {"keyword": keyword, "target": target}, f"检索关键词 '{keyword}' 成功", is_permitted=True,
+                "search_page", current_url, {"keyword": keyword, "target": target}, res, is_permitted=True,
                 session_name=session_name, sender_name=sender_name
             )
             return res

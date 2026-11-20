@@ -3,6 +3,7 @@ import base64
 import os
 import time
 import traceback
+import uuid
 from pathlib import Path
 from ...core.context_manager import ContextManager
 from ...core.security_manager import SecurityManager
@@ -25,6 +26,7 @@ class MediaHandler:
         allow_screenshot_to_ai: bool = False,
         download_dir: str = "data/downloads",
         audit_save_screenshots: bool = True,
+        audit_screenshots_dir: str = "data/audit_screenshots",
     ):
         self.context_mgr = context_mgr
         self.security_mgr = security_mgr
@@ -32,8 +34,13 @@ class MediaHandler:
         self.allow_screenshot_to_ai = allow_screenshot_to_ai
         self.download_dir = download_dir
         self.audit_save_screenshots = audit_save_screenshots
+        self.audit_screenshots_dir = audit_screenshots_dir
         try:
             Path(self.download_dir).mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        try:
+            Path(self.audit_screenshots_dir).mkdir(parents=True, exist_ok=True)
         except OSError:
             pass
 
@@ -86,10 +93,23 @@ class MediaHandler:
         try:
             image_bytes = await page.screenshot(full_page=False)
             res = self._save_or_encode(image_bytes, target)
+            screenshot_path = ""
+            if self.audit_save_screenshots:
+                try:
+                    audit_dir = Path(self.audit_screenshots_dir)
+                    audit_dir.mkdir(parents=True, exist_ok=True)
+                    shot_name = f"shot_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}.png"
+                    shot_file = audit_dir / shot_name
+                    with open(shot_file, "wb") as f:
+                        f.write(image_bytes)
+                    screenshot_path = str(Path(self.audit_screenshots_dir) / shot_name).replace("\\", "/")
+                except Exception as shot_err:
+                    logger.warning(f"[PlaywrightTool] 保存视口截图审计文件失败: {shot_err}")
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "screenshot_viewport", url, {"target": target}, "视口截图生成成功", is_permitted=True,
-                session_name=session_name, sender_name=sender_name
+                "screenshot_viewport", url, {"target": target}, res, is_permitted=True,
+                session_name=session_name, sender_name=sender_name,
+                screenshot_path=screenshot_path
             )
             return res
         except Exception as e:
@@ -180,10 +200,23 @@ class MediaHandler:
             return f"长截图异常: {str(e)}"
 
         res = self._save_or_encode(image_bytes, target, note)
+        screenshot_path = ""
+        if self.audit_save_screenshots:
+            try:
+                audit_dir = Path(self.audit_screenshots_dir)
+                audit_dir.mkdir(parents=True, exist_ok=True)
+                shot_name = f"shot_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}.png"
+                shot_file = audit_dir / shot_name
+                with open(shot_file, "wb") as f:
+                    f.write(image_bytes)
+                screenshot_path = str(Path(self.audit_screenshots_dir) / shot_name).replace("\\", "/")
+            except Exception as shot_err:
+                logger.warning(f"[PlaywrightTool] 保存长截图审计文件失败: {shot_err}")
         await self.audit_logger.log_action(
             session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-            "screenshot_full", url, {"target": target, "max_height_px": max_height_px}, "长截图生成成功", is_permitted=True,
-            session_name=session_name, sender_name=sender_name
+            "screenshot_full", url, {"target": target, "max_height_px": max_height_px}, res, is_permitted=True,
+            session_name=session_name, sender_name=sender_name,
+            screenshot_path=screenshot_path
         )
         return res
 

@@ -50,7 +50,8 @@ class TestMediaHandler(unittest.TestCase):
             self.mock_sec,
             self.mock_audit,
             allow_screenshot_to_ai=True,
-            download_dir=str(TEMP_DIR / "downloads")
+            download_dir=str(TEMP_DIR / "downloads"),
+            audit_screenshots_dir=str(TEMP_DIR / "audit_screenshots"),
         )
 
     def test_screenshot_viewport_chat(self):

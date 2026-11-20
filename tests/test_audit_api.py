@@ -43,7 +43,7 @@ class TestAuditApi(unittest.TestCase):
 
         self.handler.register_routes(mock_ctx, "my_plugin")
 
-        self.assertEqual(mock_ctx.register_web_api.call_count, 4)
+        self.assertEqual(mock_ctx.register_web_api.call_count, 5)
         calls = [c[0] for c in mock_ctx.register_web_api.call_args_list]
         routes_map = {c[0]: c[2] for c in calls}
 
@@ -58,6 +58,9 @@ class TestAuditApi(unittest.TestCase):
 
         self.assertIn("/my_plugin/audit/clear", routes_map)
         self.assertEqual(routes_map["/my_plugin/audit/clear"], ["POST"])
+
+        self.assertIn("/my_plugin/audit/screenshot", routes_map)
+        self.assertEqual(routes_map["/my_plugin/audit/screenshot"], ["GET"])
 
     def test_api_audit_logs(self):
         async def mock_query(page, page_size, keyword, status, tool_name):
@@ -119,6 +122,25 @@ class TestAuditApi(unittest.TestCase):
         res = run_coro(self.handler.api_audit_clear())
         self.assertEqual(res["data"]["code"], 0)
         self.assertEqual(res["data"]["data"]["cleared"], 5)
+
+    def test_extract_query_param_multi_source_support(self):
+        from astrbot_plugin_playwright_tools.api.audit_api import extract_query_param
+        class FakeDashboardReqArgs:
+            def __init__(self):
+                self.args = {"page": "3", "keyword": "wiki"}
+        req1 = FakeDashboardReqArgs()
+        self.assertEqual(extract_query_param(req1, "page", 1, int), 3)
+        self.assertEqual(extract_query_param(req1, "keyword", ""), "wiki")
+
+        class FakeDashboardReqQueryParams:
+            def __init__(self):
+                self.query_params = {"page": "5"}
+        req2 = FakeDashboardReqQueryParams()
+        self.assertEqual(extract_query_param(req2, "page", 1, int), 5)
+
+    def test_screenshot_route_blocks_directory_traversal(self):
+        res = run_coro(self.handler.api_audit_screenshot(path="../../etc/passwd"))
+        self.assertEqual(res["status_code"], 403)
 
 
 if __name__ == "__main__":

@@ -42,9 +42,14 @@ class AuditLogger:
                         is_permitted INTEGER NOT NULL,
                         deny_reason TEXT,
                         is_error INTEGER NOT NULL,
-                        error_message TEXT
+                        error_message TEXT,
+                        screenshot_path TEXT DEFAULT ''
                     )
                 """)
+                try:
+                    conn.execute("ALTER TABLE tool_audit_logs ADD COLUMN screenshot_path TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass
         finally:
             conn.close()
 
@@ -64,10 +69,14 @@ class AuditLogger:
         custom_timestamp: str | None = None,
         session_name: str = "",
         sender_name: str = "",
+        screenshot_path: str = "",
     ) -> None:
         """记录单条工具审计记录。"""
         ts = custom_timestamp or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         args_json = json.dumps(input_args or {}, ensure_ascii=False)
+
+        if self.max_output_chars > 0 and output_result and len(output_result) > self.max_output_chars:
+            output_result = output_result[:self.max_output_chars] + "\n...[审计日志已截断]"
 
         conn = sqlite3.connect(self.db_path, timeout=10.0)
         try:
@@ -77,13 +86,13 @@ class AuditLogger:
                     INSERT INTO tool_audit_logs (
                         timestamp, session_id, session_name, context_key, sender_id, sender_name,
                         tool_name, url, input_args, output_result, is_permitted, deny_reason,
-                        is_error, error_message
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        is_error, error_message, screenshot_path
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         ts, session_id, session_name, context_key, sender_id, sender_name,
                         tool_name, url, args_json, output_result, 1 if is_permitted else 0,
-                        deny_reason, 1 if is_error else 0, error_message
+                        deny_reason, 1 if is_error else 0, error_message, screenshot_path
                     )
                 )
         finally:
@@ -214,7 +223,8 @@ class AuditLogger:
                 fieldnames = [
                     "id", "timestamp", "session_id", "session_name", "context_key",
                     "sender_id", "sender_name", "tool_name", "url", "input_args",
-                    "output_result", "is_permitted", "deny_reason", "is_error", "error_message"
+                    "output_result", "is_permitted", "deny_reason", "is_error", "error_message",
+                    "screenshot_path"
                 ]
                 writer = csv.DictWriter(output, fieldnames=fieldnames, quoting=csv.QUOTE_MINIMAL)
                 writer.writeheader()

@@ -267,6 +267,26 @@ class TestAuditLogger(unittest.TestCase):
         count = run_coro(self.logger.get_count())
         self.assertEqual(count, 0)
 
+    def test_audit_records_real_output_and_truncates_when_limit_set(self):
+        self.logger.max_output_chars = 20
+        run_coro(self.logger.log_action(
+            session_id="s1", context_key="c1", sender_id="u1",
+            tool_name="pw_page:read", url="https://example.com",
+            output_result="12345678901234567890EXTRA_TEXT"
+        ))
+        items, _ = run_coro(self.logger.query_logs(page=1, page_size=1))
+        self.assertTrue(items[0]["output_result"].startswith("12345678901234567890"))
+        self.assertIn("[审计日志已截断", items[0]["output_result"])
+
+    def test_audit_records_screenshot_path(self):
+        run_coro(self.logger.log_action(
+            session_id="s1", context_key="c1", sender_id="u1",
+            tool_name="pw_media:screenshot_viewport", url="https://example.com",
+            output_result="截图成功", screenshot_path="data/audit_screenshots/shot_123.png"
+        ))
+        items, _ = run_coro(self.logger.query_logs(page=1, page_size=1))
+        self.assertEqual(items[0]["screenshot_path"], "data/audit_screenshots/shot_123.png")
+
 if __name__ == "__main__":
     unittest.main()
 
