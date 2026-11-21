@@ -307,7 +307,7 @@ class PwInteractTool(FunctionTool[AstrAgentContext]):
             return "参数错误: action='click' 时必须提供 ref 参数"
         return await _invoke_handler(
             self.interact_handler.click,
-            session_id, sender_id, ref=int(ref),
+            session_id, sender_id, ref=str(ref),
             session_name=session_name, sender_name=sender_name
         )
 
@@ -318,7 +318,7 @@ class PwInteractTool(FunctionTool[AstrAgentContext]):
             return "参数错误: action='fill' 时必须提供 ref 参数"
         return await _invoke_handler(
             self.interact_handler.fill_form,
-            session_id, sender_id, ref=int(ref), text=str(text),
+            session_id, sender_id, ref=str(ref), text=str(text),
             session_name=session_name, sender_name=sender_name
         )
 
@@ -329,7 +329,7 @@ class PwInteractTool(FunctionTool[AstrAgentContext]):
             return "参数错误: action='select' 时必须提供 ref 参数"
         return await _invoke_handler(
             self.interact_handler.select_option,
-            session_id, sender_id, ref=int(ref), value=str(value),
+            session_id, sender_id, ref=str(ref), value=str(value),
             session_name=session_name, sender_name=sender_name
         )
 
@@ -339,7 +339,7 @@ class PwInteractTool(FunctionTool[AstrAgentContext]):
             return "参数错误: action='hover' 时必须提供 ref 参数"
         return await _invoke_handler(
             self.interact_handler.hover,
-            session_id, sender_id, ref=int(ref),
+            session_id, sender_id, ref=str(ref),
             session_name=session_name, sender_name=sender_name
         )
 
@@ -349,7 +349,7 @@ class PwInteractTool(FunctionTool[AstrAgentContext]):
             return "参数错误: action='focus' 时必须提供 ref 参数"
         return await _invoke_handler(
             self.interact_handler.focus,
-            session_id, sender_id, ref=int(ref),
+            session_id, sender_id, ref=str(ref),
             session_name=session_name, sender_name=sender_name
         )
 
@@ -359,7 +359,7 @@ class PwInteractTool(FunctionTool[AstrAgentContext]):
             return "参数错误: action='blur' 时必须提供 ref 参数"
         return await _invoke_handler(
             self.interact_handler.blur,
-            session_id, sender_id, ref=int(ref),
+            session_id, sender_id, ref=str(ref),
             session_name=session_name, sender_name=sender_name
         )
 
@@ -370,7 +370,7 @@ class PwInteractTool(FunctionTool[AstrAgentContext]):
             return "参数错误: action='drag' 时必须提供 ref 与 target_ref 参数"
         return await _invoke_handler(
             self.interact_handler.drag,
-            session_id, sender_id, ref=int(ref), target_ref=int(target_ref),
+            session_id, sender_id, ref=str(ref), target_ref=str(target_ref),
             session_name=session_name, sender_name=sender_name
         )
 
@@ -469,7 +469,7 @@ class PwMediaTool(FunctionTool[AstrAgentContext]):
             return "参数错误: action='download' 时必须提供 ref 参数"
         return await _invoke_handler(
             self.media_handler.download_file,
-            session_id, sender_id, ref=int(ref),
+            session_id, sender_id, ref=str(ref),
             session_name=session_name, sender_name=sender_name
         )
 

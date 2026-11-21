@@ -120,9 +120,13 @@ class PlaywrightToolPlugin(Star):
             self.audit_logger,
             reader=self.reader,
             enable_close_tool=enable_close_tool,
+            mask_password_inputs=self.mask_password_inputs,
         )
         self.interact_handler = InteractHandler(
-            self.context_manager, self.security_manager, self.audit_logger
+            self.context_manager,
+            self.security_manager,
+            self.audit_logger,
+            mask_password_inputs=self.mask_password_inputs,
         )
         self.media_handler = MediaHandler(
             self.context_manager,
@@ -135,6 +139,7 @@ class PlaywrightToolPlugin(Star):
             screenshot_quality=screenshot_quality,
             screenshot_dir=self.screenshot_save_path,
             file_retention_days=file_retention_days,
+            mask_password_inputs=self.mask_password_inputs,
         )
 
         self.pw_page_tool = PwPageTool(page_handler=self.page_handler, timeout_seconds=tool_timeout)

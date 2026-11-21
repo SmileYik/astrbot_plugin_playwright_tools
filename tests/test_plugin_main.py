@@ -159,6 +159,9 @@ class TestPluginMain(unittest.TestCase):
             "system_prompt_injection": "你是一个网页浏览助手。",
         })
         self.assertTrue(plugin.mask_password_inputs)
+        self.assertTrue(plugin.page_handler.mask_password_inputs)
+        self.assertTrue(plugin.interact_handler.mask_password_inputs)
+        self.assertTrue(plugin.media_handler.mask_password_inputs)
         self.assertEqual(plugin.content_extraction_mode, "inline_markdown")
         self.assertEqual(plugin.page_chunk_char_limit, 2000)
         from astrbot_plugin_playwright_tools.core.readers import InlineMarkdownReader
@@ -187,6 +190,9 @@ class TestPluginMain(unittest.TestCase):
             },
         })
         self.assertFalse(plugin.mask_password_inputs)
+        self.assertFalse(plugin.page_handler.mask_password_inputs)
+        self.assertFalse(plugin.interact_handler.mask_password_inputs)
+        self.assertFalse(plugin.media_handler.mask_password_inputs)
         self.assertEqual(plugin.content_extraction_mode, "aria_snapshot")
         self.assertEqual(plugin.page_chunk_char_limit, 3500)
         from astrbot_plugin_playwright_tools.core.readers import AriaSnapshotReader

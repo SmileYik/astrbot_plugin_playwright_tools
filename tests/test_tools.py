@@ -18,7 +18,12 @@ from astrbot_plugin_playwright_tools.tools.tools import (
     PwMediaTool,
     _extract_event_and_metadata,
 )
-from astrbot_plugin_playwright_tools.tools.schemas import PW_PAGE_SCHEMA, PW_READ_SCHEMA
+from astrbot_plugin_playwright_tools.tools.schemas import (
+    PW_PAGE_SCHEMA,
+    PW_READ_SCHEMA,
+    PW_INTERACT_SCHEMA,
+    PW_MEDIA_SCHEMA,
+)
 from astrbot_plugin_playwright_tools.tools.handlers.page_handler import PageHandler
 from astrbot_plugin_playwright_tools.tools.handlers.interact_handler import InteractHandler
 from astrbot_plugin_playwright_tools.tools.handlers.media_handler import MediaHandler
@@ -197,14 +202,79 @@ class TestTools(unittest.TestCase):
         self.assertIsInstance(res, str)
         self.assertIn("未知的动作", res)
 
+    def test_interact_and_media_schemas_ref_is_string(self):
+        interact_props = PW_INTERACT_SCHEMA["properties"]
+        self.assertEqual(interact_props["ref"]["type"], "string")
+        self.assertIn("e2", interact_props["ref"]["description"])
+        self.assertEqual(interact_props["target_ref"]["type"], "string")
+
+        media_props = PW_MEDIA_SCHEMA["properties"]
+        self.assertEqual(media_props["ref"]["type"], "string")
+        self.assertIn("e2", media_props["ref"]["description"])
+
     def test_interact_tool_dispatch_click(self):
+        called = {}
         async def mock_click(s_id, u_id, ref, **kwargs):
+            called["ref"] = ref
             return f"点击元素成功: {ref}"
         self.mock_interact_handler.click = mock_click
 
         with patch("asyncio.wait_for", fake_wait_for):
-            res = run_coro(self.interact_tool.call(self.mock_context_wrapper, action="click", ref=3))
-        self.assertEqual(res, "点击元素成功: 3")
+            res = run_coro(self.interact_tool.call(self.mock_context_wrapper, action="click", ref="e2"))
+        self.assertEqual(called.get("ref"), "e2")
+        self.assertEqual(res, "点击元素成功: e2")
+
+    def test_interact_tool_dispatch_drag_string_refs(self):
+        called = {}
+        async def mock_drag(s_id, u_id, ref, target_ref, **kwargs):
+            called["ref"] = ref
+            called["target_ref"] = target_ref
+            return f"拖拽成功: {ref} -> {target_ref}"
+        self.mock_interact_handler.drag = mock_drag
+
+        with patch("asyncio.wait_for", fake_wait_for):
+            res = run_coro(self.interact_tool.call(self.mock_context_wrapper, action="drag", ref="e1", target_ref="e2"))
+        self.assertEqual(called.get("ref"), "e1")
+        self.assertEqual(called.get("target_ref"), "e2")
+        self.assertEqual(res, "拖拽成功: e1 -> e2")
+
+    def test_interact_tool_dispatch_actions_pass_string_ref(self):
+        # Test fill, select, hover, focus, blur all pass string ref
+        called = {}
+        async def mock_fill(s_id, u_id, ref, text, **kwargs):
+            called["fill"] = (ref, text)
+            return "ok"
+        async def mock_select(s_id, u_id, ref, value, **kwargs):
+            called["select"] = (ref, value)
+            return "ok"
+        async def mock_hover(s_id, u_id, ref, **kwargs):
+            called["hover"] = ref
+            return "ok"
+        async def mock_focus(s_id, u_id, ref, **kwargs):
+            called["focus"] = ref
+            return "ok"
+        async def mock_blur(s_id, u_id, ref, **kwargs):
+            called["blur"] = ref
+            return "ok"
+
+        self.mock_interact_handler.fill_form = mock_fill
+        self.mock_interact_handler.select_option = mock_select
+        self.mock_interact_handler.hover = mock_hover
+        self.mock_interact_handler.focus = mock_focus
+        self.mock_interact_handler.blur = mock_blur
+
+        with patch("asyncio.wait_for", fake_wait_for):
+            run_coro(self.interact_tool.call(self.mock_context_wrapper, action="fill", ref="e3", text="abc"))
+            run_coro(self.interact_tool.call(self.mock_context_wrapper, action="select", ref="e4", value="v1"))
+            run_coro(self.interact_tool.call(self.mock_context_wrapper, action="hover", ref="e5"))
+            run_coro(self.interact_tool.call(self.mock_context_wrapper, action="focus", ref="e6"))
+            run_coro(self.interact_tool.call(self.mock_context_wrapper, action="blur", ref="e7"))
+
+        self.assertEqual(called["fill"], ("e3", "abc"))
+        self.assertEqual(called["select"], ("e4", "v1"))
+        self.assertEqual(called["hover"], "e5")
+        self.assertEqual(called["focus"], "e6")
+        self.assertEqual(called["blur"], "e7")
 
     def test_interact_tool_missing_ref(self):
         with patch("asyncio.wait_for", fake_wait_for):
@@ -268,13 +338,16 @@ class TestTools(unittest.TestCase):
         self.assertEqual(res, "截图失败: 权限不足")
 
     def test_media_tool_download_dispatch(self):
+        called = {}
         async def mock_dl(s_id, u_id, ref, **kwargs):
-            return "[FILE_PATH:/tmp/down.pdf]\n下载成功"
+            called["ref"] = ref
+            return f"[FILE_PATH:/tmp/down.pdf]\n下载成功: {ref}"
         self.mock_media_handler.download_file = mock_dl
 
         with patch("asyncio.wait_for", fake_wait_for):
-            res = run_coro(self.media_tool.call(self.mock_context_wrapper, action="download", ref=1))
-        self.assertEqual(res, "[FILE_PATH:/tmp/down.pdf]\n下载成功")
+            res = run_coro(self.media_tool.call(self.mock_context_wrapper, action="download", ref="e1"))
+        self.assertEqual(called.get("ref"), "e1")
+        self.assertEqual(res, "[FILE_PATH:/tmp/down.pdf]\n下载成功: e1")
 
     def test_tool_handler_attribute_is_none(self):
         self.assertIsNone(self.page_tool.handler)

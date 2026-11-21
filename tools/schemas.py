@@ -56,8 +56,8 @@ PW_INTERACT_SCHEMA = {
             "description": "要执行的交互动作：click(点击元素), fill(输入文本), select(下拉框选择), hover(鼠标悬停), focus(聚焦), blur(失焦), drag(拖拽至目标元素), press_key(按键盘按键), scroll(滚动页面)",
         },
         "ref": {
-            "type": "integer",
-            "description": "目标元素在页面快照中的 Ref ID 编号 (除 press_key/scroll 外通常必填)",
+            "type": "string",
+            "description": "目标操作元素的 Ref 编号或标识符（如 '1', 'e2'）",
         },
         "text": {
             "type": "string",
@@ -68,8 +68,8 @@ PW_INTERACT_SCHEMA = {
             "description": "下拉框选中的选项值 (action='select' 时必填)",
         },
         "target_ref": {
-            "type": "integer",
-            "description": "拖拽放置的目标元素 Ref ID 编号 (action='drag' 时必填)",
+            "type": "string",
+            "description": "拖拽放置的目标元素 Ref 编号或标识符（如 '1', 'e2'） (action='drag' 时必填)",
         },
         "key": {
             "type": "string",
@@ -102,8 +102,8 @@ PW_MEDIA_SCHEMA = {
             "description": "截图交付目标：'chat'(直接发送至聊天供用户查看) 或 'ai'(返回 base64 供大模型分析) (截图类动作可选，默认 'chat')",
         },
         "ref": {
-            "type": "integer",
-            "description": "下载按钮或链接的 Ref ID 编号 (action='download' 时必填)",
+            "type": "string",
+            "description": "触发下载操作的目标元素 Ref 编号（如 '1', 'e2'）",
         },
     },
     "required": ["action"],
