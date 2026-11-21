@@ -28,12 +28,14 @@ class PlaywrightAdapter(BrowserAdapterBase):
         user_agent: str = "",
         window_width: int = 1280,
         window_height: int = 720,
+        executable_path: str = "",
     ):
         super().__init__(
             headless=headless,
             user_agent=user_agent,
             window_width=window_width,
             window_height=window_height,
+            executable_path=executable_path,
         )
         self.browser_type = browser_type.lower() if browser_type else "chromium"
         self._playwright_cm = None
@@ -62,7 +64,11 @@ class PlaywrightAdapter(BrowserAdapterBase):
         if browser_launcher is None:
             raise ValueError(f"不支持的 Playwright 浏览器类型: {self.browser_type}")
 
-        self._browser = await browser_launcher.launch(headless=self.headless)
+        launch_kwargs = {"headless": self.headless}
+        if self.executable_path:
+            launch_kwargs["executable_path"] = self.executable_path
+
+        self._browser = await browser_launcher.launch(**launch_kwargs)
 
     async def stop(self) -> None:
         """关闭浏览器并释放资源。"""

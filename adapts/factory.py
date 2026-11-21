@@ -14,6 +14,7 @@ class AdapterFactory:
         user_agent = str(config.get("browser_user_agent", "") or "")
         window_width = int(config.get("browser_window_width", 1280))
         window_height = int(config.get("browser_window_height", 720))
+        browser_executable_path = str(config.get("browser_executable_path", "") or "").strip()
 
         if adapter_type == "playwright":
             browser_type = str(config.get("playwright_browser_type", "chromium")).lower()
@@ -23,6 +24,7 @@ class AdapterFactory:
                 user_agent=user_agent,
                 window_width=window_width,
                 window_height=window_height,
+                executable_path=browser_executable_path,
             )
         elif adapter_type == "camoufox":
             geoip = bool(config.get("camoufox_geoip", False))

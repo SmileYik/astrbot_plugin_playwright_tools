@@ -89,6 +89,11 @@
     "description": "Playwright 原生浏览器类型 (chromium / firefox / webkit)",
     "default": "chromium"
   },
+  "browser_executable_path": {
+    "type": "string",
+    "description": "自定义浏览器二进制可执行文件路径 (留空则使用环境默认浏览器)",
+    "default": ""
+  },
   "browser_window_width": {
     "type": "int",
     "description": "浏览器初始窗口宽度 (像素)",

@@ -50,6 +50,7 @@ def test_adapter_factory_create_playwright():
         "browser_window_width": 1440,
         "browser_window_height": 900,
         "browser_user_agent": "Firefox/120.0",
+        "browser_executable_path": "  C:/Program Files/Chrome/chrome.exe  ",
     }
     adapter = AdapterFactory.create(config)
     assert isinstance(adapter, PlaywrightAdapter)
@@ -58,6 +59,7 @@ def test_adapter_factory_create_playwright():
     assert adapter.window_width == 1440
     assert adapter.window_height == 900
     assert adapter.user_agent == "Firefox/120.0"
+    assert adapter.executable_path == "C:/Program Files/Chrome/chrome.exe"
 
 
 @pytest.mark.asyncio
@@ -154,6 +156,22 @@ class TestAdapterFactory(unittest.TestCase):
         adapter = PlaywrightAdapter(browser_type="invalid_type")
         with self.assertRaises(ValueError):
             run_coro(adapter.start())
+
+    @patch("adapts.playwright_adapter.async_playwright")
+    def test_playwright_adapter_start_with_custom_executable_path(self, mock_async_playwright):
+        mock_cm = MagicMock()
+        mock_pw = MagicMock()
+        mock_browser = MagicMock()
+        mock_cm.start = AsyncMock(return_value=mock_pw)
+        mock_pw.chromium.launch = AsyncMock(return_value=mock_browser)
+        mock_async_playwright.return_value = mock_cm
+
+        adapter = PlaywrightAdapter(browser_type="chromium", executable_path="C:/custom/chrome.exe")
+        run_coro(adapter.start())
+        mock_pw.chromium.launch.assert_called_once_with(
+            headless=True,
+            executable_path="C:/custom/chrome.exe"
+        )
 
 
 if __name__ == "__main__":

@@ -19,11 +19,13 @@ class BrowserAdapterBase(ABC):
         user_agent: str = "",
         window_width: int = 1280,
         window_height: int = 720,
+        executable_path: str = "",
     ):
         self.headless = headless
         self.user_agent = user_agent
         self.window_width = window_width
         self.window_height = window_height
+        self.executable_path = str(executable_path or "").strip()
 
     @property
     @abstractmethod

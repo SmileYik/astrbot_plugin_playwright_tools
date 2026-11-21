@@ -9,6 +9,7 @@ def test_conf_schema_contains_new_fields():
     expected_fields = [
         "browser_adapter",
         "playwright_browser_type",
+        "browser_executable_path",
         "browser_window_width",
         "browser_window_height",
         "browser_user_agent",
@@ -31,6 +32,7 @@ def test_conf_schema_defaults_and_types():
         schema = json.load(f)
     assert schema["browser_adapter"]["default"] == "camoufox"
     assert schema["playwright_browser_type"]["default"] == "chromium"
+    assert schema["browser_executable_path"]["default"] == ""
     assert schema["browser_window_width"]["default"] == 1280
     assert schema["browser_window_height"]["default"] == 720
     assert schema["browser_headless"]["default"] is True

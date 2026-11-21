@@ -27,12 +27,14 @@ class CamoufoxAdapter(BrowserAdapterBase):
         user_agent: str = "",
         window_width: int = 1280,
         window_height: int = 720,
+        executable_path: str = "",
     ):
         super().__init__(
             headless=headless,
             user_agent=user_agent,
             window_width=window_width,
             window_height=window_height,
+            executable_path=executable_path,
         )
         self.geoip = geoip
         self._camoufox_cm = None
