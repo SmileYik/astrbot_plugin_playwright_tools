@@ -38,6 +38,13 @@ def run_coro(coro):
 
 
 class TestInlineMarkdownReader(unittest.TestCase):
+    def test_inline_markdown_reader_script_syntax_and_escapes(self):
+        reader = InlineMarkdownReader()
+        script = reader.get_js_extractor_script()
+        self.assertNotIn("replace(/[\r", script)
+        self.assertNotIn("replace(/[\n", script)
+        self.assertIn(r"replace(/[\r\n\t]+/g, ' ')", script)
+
     def test_semantic_block_chunking_preserves_elements(self):
         reader = InlineMarkdownReader(chunk_char_limit=150, mask_passwords=True)
         blocks = [

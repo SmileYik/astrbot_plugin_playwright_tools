@@ -129,7 +129,7 @@ class InlineMarkdownReader(BasePageReader):
             const renderInline = (node) => {{
                 if (!node) return '';
                 if (node.nodeType === 3) {{
-                    return node.nodeValue.replace(/[\r\n\t]+/g, ' ');
+                    return node.nodeValue.replace(/[\\r\\n\\t]+/g, ' ');
                 }}
                 if (node.nodeType !== 1) return '';
                 if (!isVisible(node) || noiseTags.has(node.tagName)) return '';
