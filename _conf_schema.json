@@ -1,147 +1,363 @@
 {
-  "admin_only": {
-    "type": "bool",
-    "description": "仅允许管理员使用本插件",
-    "default": false
+  "security": {
+    "type": "object",
+    "description": "安全与权限",
+    "hint": "管理管理员权限、登录凭据与网站访问白名单规则",
+    "items": {
+      "admin_only": {
+        "type": "bool",
+        "description": "仅管理员可用",
+        "hint": "开启后仅机器人管理员与额外管理员可调用浏览器工具",
+        "default": false
+      },
+      "extra_admin_uids": {
+        "type": "list",
+        "description": "额外管理员",
+        "hint": "选择或添加拥有管理权限的用户 ID 列表",
+        "default": [],
+        "_special": "sender_id"
+      },
+      "storage_state_path": {
+        "type": "string",
+        "description": "管理凭据路径",
+        "hint": "管理员专用的 Cookie / StorageState JSON 文件路径（仅管理员可用）",
+        "default": ""
+      },
+      "whitelist_rules": {
+        "type": "template_list",
+        "description": "网站白名单",
+        "hint": "添加非管理员允许访问的网站通配规则及对应权限",
+        "default": [],
+        "templates": {
+          "rule": {
+            "name": "白名单规则",
+            "display_item": "domain",
+            "items": {
+              "domain": {
+                "type": "string",
+                "description": "目标域名/通配符",
+                "hint": "支持 example.com 或 *.github.com",
+                "default": ""
+              },
+              "allowed_actions": {
+                "type": "list",
+                "description": "允许的操作行为",
+                "hint": "下拉勾选允许执行的操作",
+                "default": [
+                  "read",
+                  "screenshot"
+                ],
+                "options": [
+                  "read",
+                  "click",
+                  "fill",
+                  "scroll",
+                  "screenshot",
+                  "download"
+                ],
+                "labels": [
+                  "读取文本 (read)",
+                  "点击交互 (click)",
+                  "输入表单 (fill)",
+                  "页面滚动 (scroll)",
+                  "页面截图 (screenshot)",
+                  "下载文件 (download)"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
   },
-  "extra_admin_uids": {
-    "type": "string",
-    "description": "额外管理员 UID 列表 (多个以逗号分隔)",
-    "default": ""
+  "runtime": {
+    "type": "object",
+    "description": "会话与运行时",
+    "hint": "配置浏览器上下文隔离粒度、超时回收及系统提示词",
+    "items": {
+      "context_mode": {
+        "type": "string",
+        "description": "隔离模式",
+        "hint": "选择浏览器上下文的隔离粒度",
+        "default": "personal",
+        "options": [
+          "personal",
+          "session"
+        ],
+        "labels": [
+          "个人隔离 (personal)",
+          "会话共享 (session)"
+        ],
+        "subtitles": [
+          "每个用户独享独立的浏览器标签与上下文",
+          "同一群聊/私聊会话共享相同的浏览器上下文"
+        ]
+      },
+      "idle_timeout_minutes": {
+        "type": "int",
+        "description": "空闲销毁时长",
+        "hint": "上下文无交互超过此时长后自动关闭以释放内存 (分钟)",
+        "default": 10,
+        "slider": {
+          "min": 1,
+          "max": 120,
+          "step": 1
+        }
+      },
+      "tool_execution_timeout_seconds": {
+        "type": "int",
+        "description": "执行超时时长",
+        "hint": "单个工具执行的最长等待时间 (秒)",
+        "default": 30,
+        "slider": {
+          "min": 5,
+          "max": 180,
+          "step": 5
+        }
+      },
+      "enable_close_tool": {
+        "type": "bool",
+        "description": "注册关闭工具",
+        "hint": "是否向大模型注册主动关闭浏览器的工具",
+        "default": true
+      },
+      "system_prompt_injection": {
+        "type": "text",
+        "description": "系统提示词注入",
+        "hint": "注入大模型的自定义系统提示词，留空则不注入",
+        "default": ""
+      }
+    }
   },
-  "context_mode": {
-    "type": "string",
-    "description": "上下文隔离模式 (personal: 个人模式, session: 会话模式)",
-    "default": "personal"
+  "browser": {
+    "type": "object",
+    "description": "浏览器引擎",
+    "hint": "配置浏览器内核驱动、视口尺寸、无头模式及反爬选项",
+    "items": {
+      "browser_adapter": {
+        "type": "string",
+        "description": "浏览器适配器",
+        "hint": "底层驱动引擎：Camoufox 自带反爬指纹伪装，Playwright 支持原生多浏览器",
+        "default": "camoufox",
+        "options": [
+          "camoufox",
+          "playwright"
+        ],
+        "labels": [
+          "Camoufox (防检测)",
+          "Playwright (原生引擎)"
+        ],
+        "subtitles": [
+          "内置先进反检测与指纹伪装技术，爬虫防护网站首选",
+          "原生支持 Chromium、Firefox、WebKit 及自定义可执行文件"
+        ]
+      },
+      "playwright_browser_type": {
+        "type": "string",
+        "description": "Playwright 核心",
+        "hint": "Playwright 的浏览器内核类型，选择'其他'时必须填写下方路径",
+        "default": "chromium",
+        "options": [
+          "chromium",
+          "firefox",
+          "webkit",
+          "custom"
+        ],
+        "labels": [
+          "Chromium (推荐)",
+          "Firefox",
+          "WebKit",
+          "其他 (自定义路径)"
+        ],
+        "subtitles": [
+          "兼具最佳性能与兼容性",
+          "Firefox 核心",
+          "Safari 核心",
+          "使用本地 Chrome / Edge 等定制可执行文件"
+        ],
+        "condition": {
+          "browser_adapter": "playwright"
+        }
+      },
+      "browser_executable_path": {
+        "type": "string",
+        "description": "浏览器执行路径",
+        "hint": "自定义浏览器二进制文件的完整绝对路径（选择'其他'时必填）",
+        "default": "",
+        "condition": {
+          "playwright_browser_type": "custom"
+        }
+      },
+      "camoufox_geoip": {
+        "type": "bool",
+        "description": "GeoIP 定位防检",
+        "hint": "根据 IP 地址自动模拟时区与地理坐标",
+        "default": false,
+        "condition": {
+          "browser_adapter": "camoufox"
+        }
+      },
+      "browser_headless": {
+        "type": "bool",
+        "description": "无头模式",
+        "hint": "后台静默运行，无需图形桌面支持",
+        "default": true
+      },
+      "browser_window_width": {
+        "type": "int",
+        "description": "窗口宽度",
+        "hint": "浏览器初始视口宽度 (像素)",
+        "default": 1280,
+        "slider": {
+          "min": 800,
+          "max": 3840,
+          "step": 10
+        }
+      },
+      "browser_window_height": {
+        "type": "int",
+        "description": "窗口高度",
+        "hint": "浏览器初始视口高度 (像素)",
+        "default": 720,
+        "slider": {
+          "min": 600,
+          "max": 2160,
+          "step": 10
+        }
+      },
+      "browser_user_agent": {
+        "type": "string",
+        "description": "自定义 UA",
+        "hint": "自定义 User-Agent，留空则使用适配器内置默认值",
+        "default": ""
+      }
+    }
   },
-  "idle_timeout_minutes": {
-    "type": "int",
-    "description": "空闲自动销毁时间 (分钟)",
-    "default": 10
+  "media": {
+    "type": "object",
+    "description": "截图与交互输出",
+    "hint": "配置文件截图格式、质量压缩、尺寸上限及元素文本处理",
+    "items": {
+      "screenshot_format": {
+        "type": "string",
+        "description": "截图格式",
+        "hint": "页面截图输出的文件格式",
+        "default": "png",
+        "options": [
+          "png",
+          "jpeg"
+        ],
+        "labels": [
+          "PNG (无损高清)",
+          "JPEG (压缩优化)"
+        ],
+        "subtitles": [
+          "画质清晰，文件体积相对较大",
+          "支持调节压缩质量，节省网络带宽"
+        ]
+      },
+      "screenshot_quality": {
+        "type": "int",
+        "description": "截图质量",
+        "hint": "JPEG 格式时的图片压缩质量 (1~100)",
+        "default": 80,
+        "slider": {
+          "min": 1,
+          "max": 100,
+          "step": 1
+        },
+        "condition": {
+          "screenshot_format": "jpeg"
+        }
+      },
+      "screenshot_max_height_px": {
+        "type": "int",
+        "description": "长截图高度上限",
+        "hint": "全屏截取的最大像素高度，超出自动截断 (像素)",
+        "default": 8000,
+        "slider": {
+          "min": 1000,
+          "max": 30000,
+          "step": 500
+        }
+      },
+      "screenshot_timeout_seconds": {
+        "type": "int",
+        "description": "长截图超时时长",
+        "hint": "长截图拼接渲染的超时秒数，超时自动降级为视口截图",
+        "default": 15,
+        "slider": {
+          "min": 5,
+          "max": 120,
+          "step": 1
+        }
+      },
+      "allow_screenshot_to_ai": {
+        "type": "bool",
+        "description": "截图发送给 AI",
+        "hint": "允许大模型直接接收页面截图进行多模态视觉理解",
+        "default": false
+      },
+      "element_multiline_separator": {
+        "type": "string",
+        "description": "元素换行替换符",
+        "hint": "页面可操作元素提取时，内部换行符替换文本",
+        "default": " | "
+      }
+    }
   },
-  "tool_execution_timeout_seconds": {
-    "type": "int",
-    "description": "单个工具执行超时时间 (秒)",
-    "default": 30
-  },
-  "screenshot_max_height_px": {
-    "type": "int",
-    "description": "长截图最大高度限制 (像素)，超出自动截断",
-    "default": 8000
-  },
-  "screenshot_timeout_seconds": {
-    "type": "int",
-    "description": "长截图执行超时时间 (秒)，超时降级为视口截图",
-    "default": 15
-  },
-  "allow_screenshot_to_ai": {
-    "type": "bool",
-    "description": "是否允许将网页截图发送给大模型进行视觉分析",
-    "default": false
-  },
-  "system_prompt_injection": {
-    "type": "text",
-    "description": "自定义注入大模型的系统提示词 (为空串则不进行注入)",
-    "default": ""
-  },
-  "storage_state_path": {
-    "type": "string",
-    "description": "管理员 Cookie / StorageState JSON 文件路径 (仅对管理员创建的上下文生效)",
-    "default": ""
-  },
-  "whitelist_rules": {
-    "type": "text",
-    "description": "网站白名单与权限集合配置 (JSON 数组字符串，如 [{\"domain\": \"*.github.com\", \"allowed_actions\": [\"read\", \"click\", \"scroll\"]}])",
-    "default": "[]"
-  },
-  "audit_retention_days": {
-    "type": "int",
-    "description": "审计记录保存天数",
-    "default": 30
-  },
-  "audit_max_output_chars": {
-    "type": "int",
-    "description": "审计记录单条工具输出最大字符上限 (0 表示不限长度)",
-    "default": 0
-  },
-  "audit_save_screenshots": {
-    "type": "bool",
-    "description": "是否在审计中将截图工具产生的截图文件单独持久化并关联记录",
-    "default": true
-  },
-  "element_multiline_separator": {
-    "type": "string",
-    "description": "页面可操作元素内部换行时的分隔替换文本",
-    "default": " | "
-  },
-  "enable_close_tool": {
-    "type": "bool",
-    "description": "是否向 AI 注册主动关闭浏览器上下文的工具",
-    "default": true
-  },
-  "browser_adapter": {
-    "type": "string",
-    "description": "浏览器适配器 (camoufox / playwright)",
-    "default": "camoufox"
-  },
-  "playwright_browser_type": {
-    "type": "string",
-    "description": "Playwright 原生浏览器类型 (chromium / firefox / webkit)",
-    "default": "chromium"
-  },
-  "browser_executable_path": {
-    "type": "string",
-    "description": "自定义浏览器二进制可执行文件路径 (留空则使用环境默认浏览器)",
-    "default": ""
-  },
-  "browser_window_width": {
-    "type": "int",
-    "description": "浏览器初始窗口宽度 (像素)",
-    "default": 1280
-  },
-  "browser_window_height": {
-    "type": "int",
-    "description": "浏览器初始窗口高度 (像素)",
-    "default": 720
-  },
-  "browser_user_agent": {
-    "type": "string",
-    "description": "自定义 User-Agent (留空使用默认)",
-    "default": ""
-  },
-  "browser_headless": {
-    "type": "bool",
-    "description": "是否以无头模式运行浏览器",
-    "default": true
-  },
-  "camoufox_geoip": {
-    "type": "bool",
-    "description": "Camoufox 适配器是否开启 GeoIP 定位防检",
-    "default": false
-  },
-  "screenshot_format": {
-    "type": "string",
-    "description": "截图输出文件格式 (png / jpeg)",
-    "default": "png"
-  },
-  "screenshot_quality": {
-    "type": "int",
-    "description": "截图压缩质量 (1-100，仅当格式为 jpeg 时生效)",
-    "default": 80
-  },
-  "download_save_path": {
-    "type": "string",
-    "description": "下载文件保存路径",
-    "default": "data/downloads"
-  },
-  "screenshot_save_path": {
-    "type": "string",
-    "description": "截图文件保存路径",
-    "default": "data/screenshots"
-  },
-  "file_retention_days": {
-    "type": "int",
-    "description": "下载与截图文件保留天数 (超过将自动被动清理)",
-    "default": 7
+  "storage_audit": {
+    "type": "object",
+    "description": "存储与审计管理",
+    "hint": "配置本地持久化下载、截图路径及审计日志保留策略",
+    "collapsed": true,
+    "items": {
+      "download_save_path": {
+        "type": "string",
+        "description": "下载保存路径",
+        "hint": "浏览器下载文件保存的本地目录",
+        "default": "data/downloads"
+      },
+      "screenshot_save_path": {
+        "type": "string",
+        "description": "截图保存路径",
+        "hint": "截图文件保存的本地目录",
+        "default": "data/screenshots"
+      },
+      "file_retention_days": {
+        "type": "int",
+        "description": "文件保留天数",
+        "hint": "下载与截图文件保留天数，超时自动被动清理",
+        "default": 7,
+        "slider": {
+          "min": 1,
+          "max": 90,
+          "step": 1
+        }
+      },
+      "audit_retention_days": {
+        "type": "int",
+        "description": "审计保留天数",
+        "hint": "审计记录保存天数，超过将自动清理",
+        "default": 30,
+        "slider": {
+          "min": 1,
+          "max": 365,
+          "step": 1
+        }
+      },
+      "audit_max_output_chars": {
+        "type": "int",
+        "description": "审计字符上限",
+        "hint": "审计记录单条工具输出最大字符上限（0 表示不限长度）",
+        "default": 0
+      },
+      "audit_save_screenshots": {
+        "type": "bool",
+        "description": "审计持久化截图",
+        "hint": "是否在审计数据库中关联保存截图文件",
+        "default": true
+      }
+    }
   }
 }
