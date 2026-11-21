@@ -4,6 +4,26 @@
 
 ---
 
+## [v2.2.1] - 2026-11-21
+
+### 截图 401 彻底解决与安全服务 (Authenticated Data URL Screenshots)
+- **Data URL / Base64 直出**：增强 `AuditApiHandler.api_audit_screenshot`，默认支持返回通过 AstrBot 宿主鉴权通道获取的 Base64 Data URL（`data:image/png;base64,...`），彻底杜绝 iframe 原生 `<img>` 标签因无法携带 Bearer Token 而被 401 拦截的问题；同时支持 `format=raw` 保持二进制流直出兼容。
+- **大图查看与独立下载**：前端侧边抽屉与手动截图弹窗全面支持大图窗口独立渲染与本地下载。
+
+### 浏览器可执行文件自定义 (Custom Browser Executable Path)
+- **新增配置项 `browser_executable_path`**：在 `_conf_schema.json` 中提供通用的 `browser_executable_path` 选项，支持用户手动指定 Playwright 适配器对应的浏览器二进制可执行文件路径；若留空则平滑回退至环境中默认安装的浏览器。
+- **适配器工厂与启动透传**：`AdapterFactory` 与 `PlaywrightAdapter` 深度对接该配置项，并在 `launch(executable_path=...)` 中安全生效。
+
+### Web 前端现代化与架构重构 (CSS Modules & Centralized API Client)
+- **样式全面解耦 (CSS Modules)**：采用 Vite 原生支持的 `*.module.css`，为所有 Views（`AuditView`、`LifecycleView`）与 Components（`TopAppBar`、`StatsOverview`、`AuditCard`、`SideDrawer`、`ConfirmDialog`、`Navbar`、`App`）抽离独立模块样式文件，全面移除 JSX 内联硬编码 `style={{ ... }}`，零新增 npm 依赖。
+- **统一 API 客户端层**：在 `web-src/src/api/` 下抽取集中式的 API 模块（`client.ts`、`audit.ts`、`lifecycle.ts`），统一封装 Bridge 探测、类型定义与离线 Mock 数据回退机制。
+
+### 死代码与过期测试清理 (Dead Code & Legacy Test Cleanup)
+- **移除废弃 V1 工具**：安全删除 `tools/action_tools.py`、`tools/browse_tools.py`、`tools/dialog_tools.py`、`tools/media_tools.py`，项目工具层全面由 `handlers/` 与复合 FunctionTool 承担。
+- **清理过期测试与空文件**：删除 `tests/_test_async.py` 与 `tests/test_tools.py`，全量单元测试（136 项）秒级通过。
+
+---
+
 ## [v2.2.0] - 2026-11-20
 
 ### 页面阅读体验与独立分页 (Structured Content & Independent Pagination)

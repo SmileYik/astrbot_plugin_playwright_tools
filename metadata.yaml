@@ -1,7 +1,7 @@
 name: astrbot_plugin_playwright_tools 
 display_name: PlaywrightTool 
 desc: 基于 Playwright 的大模型网页自动化工具插件，支持多租户隔离与权限白名单。
-version: v2.2.0
+version: v2.2.1
 author: SmileYik
 repo: https://github.com/SmileYik/astrbot_plugin_playwright_tools
 views:
