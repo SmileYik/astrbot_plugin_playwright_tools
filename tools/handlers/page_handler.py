@@ -113,12 +113,14 @@ class PageHandler:
             )
             return res
         except Exception as e:
-            logger.error(f"[PlaywrightTool] open_url 异常: {e}\n{traceback.format_exc()}")
+            tb_str = traceback.format_exc()
+            logger.error(f"[PlaywrightTool] open_url 异常: {e}\n{tb_str}")
             err_msg = f"页面打开异常: {str(e)}"
+            full_error = f"{type(e).__name__}: {str(e)}\n\n{tb_str}" if tb_str else str(e)
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
                 "open_url", url, {"url": url}, err_msg, is_permitted=True,
-                is_error=True, error_message=str(e),
+                is_error=True, error_message=full_error,
                 session_name=session_name, sender_name=sender_name
             )
             return err_msg
@@ -172,12 +174,14 @@ class PageHandler:
             )
             return res
         except Exception as e:
-            logger.error(f"[PlaywrightTool] read_page 异常: {e}\n{traceback.format_exc()}")
+            tb_str = traceback.format_exc()
+            logger.error(f"[PlaywrightTool] read_page 异常: {e}\n{tb_str}")
             err_msg = f"读取页面异常: {str(e)}"
+            full_error = f"{type(e).__name__}: {str(e)}\n\n{tb_str}" if tb_str else str(e)
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
                 "read_page", current_url, {"page": page, "keyword": keyword, "refresh": refresh}, err_msg, is_permitted=True,
-                is_error=True, error_message=str(e),
+                is_error=True, error_message=full_error,
                 session_name=session_name, sender_name=sender_name
             )
             return err_msg

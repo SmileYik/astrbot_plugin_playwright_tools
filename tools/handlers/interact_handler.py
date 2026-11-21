@@ -112,12 +112,14 @@ class InteractHandler:
             )
             return res_msg
         except Exception as e:
-            logger.error(f"[PlaywrightTool] click 异常: {e}\n{traceback.format_exc()}")
+            tb_str = traceback.format_exc()
+            logger.error(f"[PlaywrightTool] click 异常: {e}\n{tb_str}")
             err_msg = clean_playwright_error(e)
+            full_error = f"{type(e).__name__}: {str(e)}\n\n{tb_str}" if tb_str else str(e)
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
                 "click", url, {"ref": ref}, err_msg, is_permitted=True,
-                is_error=True, error_message=str(e),
+                is_error=True, error_message=full_error,
                 session_name=session_name, sender_name=sender_name
             )
             return err_msg
@@ -163,12 +165,14 @@ class InteractHandler:
             )
             return res_msg
         except Exception as e:
-            logger.error(f"[PlaywrightTool] fill_form 异常: {e}\n{traceback.format_exc()}")
+            tb_str = traceback.format_exc()
+            logger.error(f"[PlaywrightTool] fill_form 异常: {e}\n{tb_str}")
             err_msg = clean_playwright_error(e)
+            full_error = f"{type(e).__name__}: {str(e)}\n\n{tb_str}" if tb_str else str(e)
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
                 "fill_form", url, {"ref": ref, "text": text}, err_msg, is_permitted=True,
-                is_error=True, error_message=str(e),
+                is_error=True, error_message=full_error,
                 session_name=session_name, sender_name=sender_name
             )
             return err_msg
@@ -218,8 +222,17 @@ class InteractHandler:
             )
             return res_msg
         except Exception as e:
-            logger.error(f"[PlaywrightTool] select_option 异常: {e}\n{traceback.format_exc()}")
-            return clean_playwright_error(e)
+            tb_str = traceback.format_exc()
+            logger.error(f"[PlaywrightTool] select_option 异常: {e}\n{tb_str}")
+            err_msg = clean_playwright_error(e)
+            full_error = f"{type(e).__name__}: {str(e)}\n\n{tb_str}" if tb_str else str(e)
+            await self.audit_logger.log_action(
+                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
+                "select_option", url, {"ref": ref, "value": value}, err_msg, is_permitted=True,
+                is_error=True, error_message=full_error,
+                session_name=session_name, sender_name=sender_name
+            )
+            return err_msg
 
     async def hover(
         self,
@@ -260,8 +273,17 @@ class InteractHandler:
             )
             return res_msg
         except Exception as e:
-            logger.error(f"[PlaywrightTool] hover 异常: {e}\n{traceback.format_exc()}")
-            return clean_playwright_error(e)
+            tb_str = traceback.format_exc()
+            logger.error(f"[PlaywrightTool] hover 异常: {e}\n{tb_str}")
+            err_msg = clean_playwright_error(e)
+            full_error = f"{type(e).__name__}: {str(e)}\n\n{tb_str}" if tb_str else str(e)
+            await self.audit_logger.log_action(
+                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
+                "hover", url, {"ref": ref}, err_msg, is_permitted=True,
+                is_error=True, error_message=full_error,
+                session_name=session_name, sender_name=sender_name
+            )
+            return err_msg
 
     async def focus(
         self,
@@ -301,8 +323,17 @@ class InteractHandler:
             )
             return res
         except Exception as e:
-            logger.error(f"[PlaywrightTool] focus 异常: {e}\n{traceback.format_exc()}")
-            return clean_playwright_error(e)
+            tb_str = traceback.format_exc()
+            logger.error(f"[PlaywrightTool] focus 异常: {e}\n{tb_str}")
+            err_msg = clean_playwright_error(e)
+            full_error = f"{type(e).__name__}: {str(e)}\n\n{tb_str}" if tb_str else str(e)
+            await self.audit_logger.log_action(
+                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
+                "focus", url, {"ref": ref}, err_msg, is_permitted=True,
+                is_error=True, error_message=full_error,
+                session_name=session_name, sender_name=sender_name
+            )
+            return err_msg
 
     async def blur(
         self,
@@ -342,8 +373,17 @@ class InteractHandler:
             )
             return res
         except Exception as e:
-            logger.error(f"[PlaywrightTool] blur 异常: {e}\n{traceback.format_exc()}")
-            return clean_playwright_error(e)
+            tb_str = traceback.format_exc()
+            logger.error(f"[PlaywrightTool] blur 异常: {e}\n{tb_str}")
+            err_msg = clean_playwright_error(e)
+            full_error = f"{type(e).__name__}: {str(e)}\n\n{tb_str}" if tb_str else str(e)
+            await self.audit_logger.log_action(
+                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
+                "blur", url, {"ref": ref}, err_msg, is_permitted=True,
+                is_error=True, error_message=full_error,
+                session_name=session_name, sender_name=sender_name
+            )
+            return err_msg
 
     async def drag(
         self,
@@ -390,8 +430,17 @@ class InteractHandler:
             )
             return res_msg
         except Exception as e:
-            logger.error(f"[PlaywrightTool] drag 异常: {e}\n{traceback.format_exc()}")
-            return clean_playwright_error(e)
+            tb_str = traceback.format_exc()
+            logger.error(f"[PlaywrightTool] drag 异常: {e}\n{tb_str}")
+            err_msg = clean_playwright_error(e)
+            full_error = f"{type(e).__name__}: {str(e)}\n\n{tb_str}" if tb_str else str(e)
+            await self.audit_logger.log_action(
+                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
+                "drag", url, {"ref": ref, "target_ref": target_ref}, err_msg, is_permitted=True,
+                is_error=True, error_message=full_error,
+                session_name=session_name, sender_name=sender_name
+            )
+            return err_msg
 
     async def press_key(
         self,
@@ -433,8 +482,17 @@ class InteractHandler:
             )
             return res_msg
         except Exception as e:
-            logger.error(f"[PlaywrightTool] press_key 异常: {e}\n{traceback.format_exc()}")
-            return clean_playwright_error(e)
+            tb_str = traceback.format_exc()
+            logger.error(f"[PlaywrightTool] press_key 异常: {e}\n{tb_str}")
+            err_msg = clean_playwright_error(e)
+            full_error = f"{type(e).__name__}: {str(e)}\n\n{tb_str}" if tb_str else str(e)
+            await self.audit_logger.log_action(
+                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
+                "press_key", url, {"key": key_name}, err_msg, is_permitted=True,
+                is_error=True, error_message=full_error,
+                session_name=session_name, sender_name=sender_name
+            )
+            return err_msg
 
     async def scroll(
         self,
@@ -478,5 +536,14 @@ class InteractHandler:
             )
             return res_msg
         except Exception as e:
-            logger.error(f"[PlaywrightTool] scroll 异常: {e}\n{traceback.format_exc()}")
-            return clean_playwright_error(e)
+            tb_str = traceback.format_exc()
+            logger.error(f"[PlaywrightTool] scroll 异常: {e}\n{tb_str}")
+            err_msg = clean_playwright_error(e)
+            full_error = f"{type(e).__name__}: {str(e)}\n\n{tb_str}" if tb_str else str(e)
+            await self.audit_logger.log_action(
+                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
+                "scroll", url, {"direction": direction, "amount": amount}, err_msg, is_permitted=True,
+                is_error=True, error_message=full_error,
+                session_name=session_name, sender_name=sender_name
+            )
+            return err_msg

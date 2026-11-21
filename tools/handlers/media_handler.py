@@ -195,8 +195,17 @@ class MediaHandler:
             )
             return res
         except Exception as e:
-            logger.error(f"[PlaywrightTool] screenshot_viewport 异常: {e}\n{traceback.format_exc()}")
-            return f"视口截图异常: {str(e)}"
+            tb_str = traceback.format_exc()
+            logger.error(f"[PlaywrightTool] screenshot_viewport 异常: {e}\n{tb_str}")
+            err_msg = f"视口截图异常: {str(e)}"
+            full_error = f"{type(e).__name__}: {str(e)}\n\n{tb_str}" if tb_str else str(e)
+            await self.audit_logger.log_action(
+                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
+                "screenshot_viewport", url, {"target": target}, err_msg, is_permitted=True,
+                is_error=True, error_message=full_error,
+                session_name=session_name, sender_name=sender_name
+            )
+            return err_msg
 
     async def screenshot_full(
         self,
@@ -280,12 +289,21 @@ class MediaHandler:
             except Exception as fb_err:
                 return f"长截图超时且降级失败: {str(fb_err)}"
         except Exception as e:
-            logger.error(f"[PlaywrightTool] screenshot_full 异常: {e}\n{traceback.format_exc()}")
+            tb_str = traceback.format_exc()
+            logger.error(f"[PlaywrightTool] screenshot_full 异常: {e}\n{tb_str}")
             try:
                 shot_coro.close()
             except Exception:
                 pass
-            return f"长截图异常: {str(e)}"
+            err_msg = f"长截图异常: {str(e)}"
+            full_error = f"{type(e).__name__}: {str(e)}\n\n{tb_str}" if tb_str else str(e)
+            await self.audit_logger.log_action(
+                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
+                "screenshot_full", url, {"target": target, "max_height_px": max_height_px}, err_msg, is_permitted=True,
+                is_error=True, error_message=full_error,
+                session_name=session_name, sender_name=sender_name
+            )
+            return err_msg
 
         res = self._save_or_encode(image_bytes, target, note)
         screenshot_path = ""
@@ -365,5 +383,14 @@ class MediaHandler:
             )
             return res
         except Exception as e:
-            logger.error(f"[PlaywrightTool] download_file 异常: {e}\n{traceback.format_exc()}")
-            return f"下载异常: {str(e)}"
+            tb_str = traceback.format_exc()
+            logger.error(f"[PlaywrightTool] download_file 异常: {e}\n{tb_str}")
+            err_msg = f"下载异常: {str(e)}"
+            full_error = f"{type(e).__name__}: {str(e)}\n\n{tb_str}" if tb_str else str(e)
+            await self.audit_logger.log_action(
+                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
+                "download_file", url, {"ref": ref}, err_msg, is_permitted=True,
+                is_error=True, error_message=full_error,
+                session_name=session_name, sender_name=sender_name
+            )
+            return err_msg

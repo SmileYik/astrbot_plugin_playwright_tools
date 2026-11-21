@@ -273,6 +273,22 @@ class TestAuditLogger(unittest.TestCase):
         items, _ = run_coro(self.logger.query_logs(page=1, page_size=1))
         self.assertEqual(items[0]["screenshot_path"], "data/audit_screenshots/shot_123.png")
 
+    def test_audit_records_and_searches_full_stack_trace(self):
+        dummy_traceback = (
+            "ValueError: test evaluation error\n\n"
+            "Traceback (most recent call last):\n"
+            '  File "test_file.py", line 42, in test_fn\n'
+            "    raise ValueError('test evaluation error')\n"
+        )
+        run_coro(self.logger.log_action(
+            "s1", "c1", "u1", "read_page", "https://example.com",
+            {"page": 1}, "读取页面异常: test evaluation error",
+            is_permitted=True, is_error=True, error_message=dummy_traceback
+        ))
+        items, total = run_coro(self.logger.query_logs(keyword="test_file.py", status="error"))
+        self.assertEqual(total, 1)
+        self.assertIn("Traceback (most recent call last):", items[0]["error_message"])
+
     def test_lifecycle_logs_crud(self):
         # 记录生命周期事件
         run_coro(self.logger.log_lifecycle(
