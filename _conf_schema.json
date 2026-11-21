@@ -31,13 +31,13 @@
         "templates": {
           "rule": {
             "name": "白名单规则",
-            "display_item": "domain",
+            "display_item": "domains",
             "items": {
-              "domain": {
-                "type": "string",
-                "description": "目标域名/通配符",
-                "hint": "支持 example.com 或 *.github.com",
-                "default": ""
+              "domains": {
+                "type": "list",
+                "description": "目标域名/通配符列表",
+                "hint": "输入域名或通配符（如 *.github.com、github.com），本规则内的所有操作权限均应用于该域名集合",
+                "default": []
               },
               "allowed_actions": {
                 "type": "list",

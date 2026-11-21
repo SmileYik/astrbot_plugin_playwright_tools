@@ -60,5 +60,40 @@ class TestSecurityManager(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertIn("仅管理员可用", reason)
 
+    def test_whitelist_rules_multi_domains_match(self):
+        rules = [
+            {
+                "domains": ["*.github.com", "github.com", "git-scm.com"],
+                "allowed_actions": ["read", "click"]
+            }
+        ]
+        mgr = SecurityManager(admin_only=False, whitelist_rules=rules)
+        # 测试导航
+        nav_ok, _ = mgr.is_url_allowed_navigation("user1", "https://git-scm.com/docs")
+        self.assertTrue(nav_ok)
+        nav_fail, _ = mgr.is_url_allowed_navigation("user1", "https://gitlab.com")
+        self.assertFalse(nav_fail)
+
+        # 测试列表中不同域名
+        ok1, _ = mgr.check_permission("user1", "https://api.github.com/repos", "read")
+        self.assertTrue(ok1)
+        ok2, _ = mgr.check_permission("user1", "https://github.com/SmileYik", "click")
+        self.assertTrue(ok2)
+        ok3, _ = mgr.check_permission("user1", "https://git-scm.com/docs", "read")
+        self.assertTrue(ok3)
+        # 拒绝未在列表的域名与未授权动作
+        ok4, _ = mgr.check_permission("user1", "https://gitlab.com", "read")
+        self.assertFalse(ok4)
+        ok5, _ = mgr.check_permission("user1", "https://github.com", "download")
+        self.assertFalse(ok5)
+
+    def test_whitelist_rules_backward_compatibility_single_domain(self):
+        rules = [{"domain": "example.com", "allowed_actions": ["read"]}]
+        mgr = SecurityManager(admin_only=False, whitelist_rules=rules)
+        ok, _ = mgr.check_permission("user1", "https://example.com", "read")
+        self.assertTrue(ok)
+        nav_ok, _ = mgr.is_url_allowed_navigation("user1", "https://example.com")
+        self.assertTrue(nav_ok)
+
 if __name__ == "__main__":
     unittest.main()

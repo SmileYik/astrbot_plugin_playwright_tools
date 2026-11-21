@@ -49,9 +49,9 @@ class TestConfSchema(unittest.TestCase):
         self.assertIn("templates", sec["whitelist_rules"])
         self.assertIn("rule", sec["whitelist_rules"]["templates"])
         rule_template = sec["whitelist_rules"]["templates"]["rule"]
-        self.assertEqual(rule_template.get("display_item"), "domain")
+        self.assertEqual(rule_template.get("display_item"), "domains")
         rule_items = rule_template["items"]
-        self.assertEqual(rule_items["domain"]["type"], "string")
+        self.assertEqual(rule_items["domains"]["type"], "list")
         self.assertEqual(rule_items["allowed_actions"]["type"], "list")
         self.assertEqual(
             rule_items["allowed_actions"]["options"],

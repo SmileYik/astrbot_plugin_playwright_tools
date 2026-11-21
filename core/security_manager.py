@@ -53,6 +53,16 @@ class SecurityManager:
             return True
         return False
 
+    def _is_rule_match(self, host: str, rule: dict) -> bool:
+        """检查主机域名是否命中规则中的任一域名配置（兼容 domains 列表与单个 domain）。"""
+        domains = rule.get("domains")
+        if domains is None:
+            dom = rule.get("domain")
+            domains = [dom] if dom else []
+        elif isinstance(domains, str):
+            domains = [domains]
+        return any(self._is_domain_match(host, str(d)) for d in domains if str(d).strip())
+
     def is_url_allowed_navigation(self, user_id: str, target_url: str) -> tuple[bool, str]:
         """校验目标 URL 是否允许作为顶层页面进行导航访问。"""
         parsed = urlparse(target_url)
@@ -73,8 +83,7 @@ class SecurityManager:
 
         # 匹配白名单规则
         for rule in self.whitelist_rules:
-            domain_pat = rule.get("domain", "")
-            if self._is_domain_match(host, domain_pat):
+            if self._is_rule_match(host, rule):
                 return True, ""
 
         return False, f"拒绝导航：目标域名 '{host}' 未在白名单规则中"
@@ -99,8 +108,7 @@ class SecurityManager:
 
         matched_rule = None
         for rule in self.whitelist_rules:
-            domain_pat = rule.get("domain", "")
-            if self._is_domain_match(host, domain_pat):
+            if self._is_rule_match(host, rule):
                 matched_rule = rule
                 break
 
