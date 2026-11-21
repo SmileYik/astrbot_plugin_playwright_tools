@@ -1,5 +1,6 @@
 import React from "react";
 import { AuditStats } from "../types";
+import styles from "./StatsOverview.module.css";
 
 interface StatsOverviewProps {
   stats: AuditStats;
@@ -25,7 +26,7 @@ export const StatsOverview: React.FC<StatsOverviewProps> = ({
     {
       label: "今日调用",
       count: stats.today_count,
-      status: null, // 不参与过滤状态切换，仅作为今日指标
+      status: null,
       color: "var(--color-info)",
       bg: "var(--color-info-bg)",
       textColor: "var(--color-info)",
@@ -61,14 +62,7 @@ export const StatsOverview: React.FC<StatsOverviewProps> = ({
   ];
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexWrap: "wrap",
-        gap: "10px",
-        margin: "16px 0 20px 0",
-      }}
-    >
+    <div className={styles.container}>
       {chips.map((chip, index) => {
         const isSelected = chip.status !== null && activeStatus === chip.status;
         return (
@@ -79,38 +73,25 @@ export const StatsOverview: React.FC<StatsOverviewProps> = ({
                 onSelectStatus(chip.status);
               }
             }}
+            className={`${styles.chip} ${chip.status === null ? styles.nonClickable : ""}`}
             style={{
-              flex: "1 1 140px",
-              minWidth: "120px",
-              padding: "10px 14px",
-              backgroundColor: isSelected ? chip.bg : "var(--color-surface)",
-              borderRadius: "var(--radius-lg)",
-              border: isSelected ? `2px solid ${chip.color}` : "1px solid var(--color-border)",
-              boxShadow: "var(--shadow-sm)",
-              cursor: chip.status !== null ? "pointer" : "default",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              transition: "all var(--transition-fast)",
+              backgroundColor: isSelected ? chip.bg : undefined,
+              borderColor: isSelected ? chip.color : undefined,
+              borderWidth: isSelected ? "2px" : undefined,
             }}
           >
             <div>
-              <div style={{ fontSize: "11px", color: "var(--color-text-secondary)", marginBottom: "2px" }}>
+              <div className={styles.label}>
                 {chip.icon} {chip.label}
               </div>
-              <div style={{ fontSize: "18px", fontWeight: 700, color: "var(--color-text)" }}>
-                {chip.count}
-              </div>
+              <div className={styles.count}>{chip.count}</div>
             </div>
             {isSelected && (
               <span
+                className={styles.badge}
                 style={{
-                  fontSize: "11px",
-                  fontWeight: 600,
                   color: chip.color,
                   backgroundColor: "rgba(255,255,255,0.6)",
-                  padding: "2px 6px",
-                  borderRadius: "var(--radius-full)",
                 }}
               >
                 已选中

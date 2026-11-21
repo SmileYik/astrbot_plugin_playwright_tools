@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import "./styles/theme.css";
+import styles from "./App.module.css";
 import { Navbar, NavTabType } from "./components/Navbar";
 import { AuditView } from "./views/AuditView";
 import { LifecycleView } from "./views/LifecycleView";
@@ -58,31 +59,15 @@ export function App() {
   }, []);
 
   return (
-    <div
-      style={{
-        maxWidth: "1140px",
-        margin: "0 auto",
-        padding: "24px 20px 60px 20px",
-      }}
-    >
+    <div className={styles.appContainer}>
       {/* 离线预览或全局通知气泡 */}
       {bannerMsg && (
         <div
-          style={{
-            position: "fixed",
-            top: "20px",
-            right: "20px",
-            zIndex: 3000,
-            padding: "12px 20px",
-            borderRadius: "var(--radius-lg)",
-            backgroundColor:
-              bannerMsg.type === "error" ? "var(--color-error)" : "var(--color-primary)",
-            color: "#ffffff",
-            boxShadow: "var(--shadow-lg)",
-            fontSize: "14px",
-            fontWeight: 500,
-            animation: "fadeIn 0.2s ease-in-out",
-          }}
+          className={`${styles.floatingBanner} ${
+            bannerMsg.type === "error"
+              ? styles.floatingBannerError
+              : styles.floatingBannerInfo
+          }`}
         >
           {bannerMsg.text}
         </div>

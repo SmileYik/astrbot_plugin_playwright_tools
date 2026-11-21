@@ -5,73 +5,26 @@ import { StatsOverview } from "../components/StatsOverview";
 import { AuditCard } from "../components/AuditCard";
 import { SideDrawer } from "../components/SideDrawer";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-
-// 离线/预览模式模拟数据
-const MOCK_ITEMS: AuditLogItem[] = [
-  {
-    id: 1,
-    timestamp: "2026-11-20 00:15:30",
-    session_id: "group_1001",
-    session_name: "开发架构讨论群",
-    context_key: "group_1001:user_88",
-    sender_id: "user_88",
-    sender_name: "林架构师",
-    tool_name: "pw_page:open",
-    url: "https://github.com/SmileYik/astrbot_plugin_playwright_tools",
-    input_args: JSON.stringify({ url: "https://github.com/SmileYik/astrbot_plugin_playwright_tools" }),
-    output_result: "页面加载成功 (200 OK)\n标题: SmileYik/astrbot_plugin_playwright_tools\n[1] <button> Code\n[2] <a> Issues\n[3] <a> Pull Requests",
-    is_permitted: true,
-    deny_reason: "",
-    is_error: false,
-    error_message: "",
-  },
-  {
-    id: 2,
-    timestamp: "2026-11-20 00:18:42",
-    session_id: "private_2002",
-    session_name: "私聊: 自动化测试机",
-    context_key: "private_2002:user_99",
-    sender_id: "user_99",
-    sender_name: "测试机",
-    tool_name: "pw_interact:click",
-    url: "https://internal-bank.local/transfer",
-    input_args: JSON.stringify({ ref: 42 }),
-    output_result: "",
-    is_permitted: false,
-    deny_reason: "黑名单拦截：域名 internal-bank.local 不在允许访问的白名单中",
-    is_error: false,
-    error_message: "",
-  },
-  {
-    id: 3,
-    timestamp: "2026-11-20 00:22:15",
-    session_id: "group_1001",
-    session_name: "开发架构讨论群",
-    context_key: "group_1001:user_88",
-    sender_id: "user_88",
-    sender_name: "林架构师",
-    tool_name: "pw_media:screenshot_full",
-    url: "https://github.com/trending",
-    input_args: JSON.stringify({ target: "chat", max_height_px: 8000 }),
-    output_result: "[IMAGE_PATH:/data/downloads/screenshot_1700000000.png]\n全页面长截图生成完毕，高度 3240px",
-    is_permitted: true,
-    deny_reason: "",
-    is_error: false,
-    error_message: "",
-  },
-];
+import {
+  fetchAuditLogs,
+  fetchAuditStats,
+  exportAuditLogs,
+  clearAuditLogs,
+  isBridgeAvailable,
+} from "../api";
+import styles from "./AuditView.module.css";
 
 interface AuditViewProps {
-  showBanner: (text: string, type?: "info" | "error") => void;
-  isBridgeReady: boolean;
+  showBanner?: (msg: string, type?: "info" | "error") => void;
+  isBridgeReady?: boolean;
 }
 
 export const AuditView: React.FC<AuditViewProps> = ({
-  showBanner,
-  isBridgeReady,
+  showBanner: externalShowBanner,
+  isBridgeReady: externalBridgeReady,
 }) => {
   const [logs, setLogs] = useState<AuditLogItem[]>([]);
-  const [total, setTotal] = useState(0);
+  const [total, setTotal] = useState<number>(0);
   const [stats, setStats] = useState<AuditStats>({
     total: 0,
     allowed: 0,
@@ -80,17 +33,27 @@ export const AuditView: React.FC<AuditViewProps> = ({
     today_count: 0,
   });
 
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
-  const [keyword, setKeyword] = useState("");
+  const [page, setPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(15);
+  const [keyword, setKeyword] = useState<string>("");
   const [status, setStatus] = useState<"all" | "allowed" | "denied" | "error">("all");
-  const [toolName, setToolName] = useState("");
+  const [toolName, setToolName] = useState<string>("");
 
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [selectedItem, setSelectedItem] = useState<AuditLogItem | null>(null);
-  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isClearModalOpen, setIsClearModalOpen] = useState<boolean>(false);
+  const [banner, setBanner] = useState<{ msg: string; type: "info" | "error" } | null>(null);
 
-  // 防抖切页回弹修复：使用 useCallback 稳定引用
+  const showBanner = useCallback((msg: string, type: "info" | "error" = "info") => {
+    if (externalShowBanner) {
+      externalShowBanner(msg, type);
+    }
+    setBanner({ msg, type });
+    setTimeout(() => {
+      setBanner((prev) => (prev?.msg === msg ? null : prev));
+    }, 4000);
+  }, [externalShowBanner]);
+
   const handleKeywordChange = useCallback((val: string) => {
     setKeyword(val);
     setPage(1);
@@ -107,161 +70,88 @@ export const AuditView: React.FC<AuditViewProps> = ({
   }, []);
 
   // 获取审计列表
-  const fetchLogs = useCallback(async () => {
+  const loadLogs = useCallback(async () => {
     setIsLoading(true);
-    const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
-
-    if (bridge && typeof bridge.apiGet === "function") {
-      try {
-        const res = await bridge.apiGet<any>("audit/logs", {
-          page,
-          page_size: pageSize,
-          keyword: keyword.trim(),
-          status,
-          tool_name: toolName.trim(),
-        });
-        const data = (res && Array.isArray((res as any).items)) ? res : (res?.data ?? res);
-        if (data && Array.isArray(data.items)) {
-          setLogs(data.items);
-          setTotal(data.total || 0);
-        } else {
-          showBanner(res?.message || "拉取日志失败", "error");
-        }
-      } catch (err) {
-        showBanner(`接口请求异常: ${err}`, "error");
-      }
-    } else {
-      // 离线/预览模式自动回退模拟数据过滤
-      let filtered = [...MOCK_ITEMS];
-      if (status !== "all") {
-        if (status === "allowed") filtered = filtered.filter((i) => i.is_permitted && !i.is_error);
-        if (status === "denied") filtered = filtered.filter((i) => !i.is_permitted);
-        if (status === "error") filtered = filtered.filter((i) => i.is_error);
-      }
-      if (toolName) {
-        filtered = filtered.filter((i) => i.tool_name.startsWith(toolName));
-      }
-      if (keyword) {
-        const kw = keyword.toLowerCase();
-        filtered = filtered.filter(
-          (i) =>
-            i.url.toLowerCase().includes(kw) ||
-            i.input_args.toLowerCase().includes(kw) ||
-            i.output_result.toLowerCase().includes(kw) ||
-            i.session_name.toLowerCase().includes(kw) ||
-            i.sender_name.toLowerCase().includes(kw)
-        );
-      }
-      const totalCount = filtered.length;
-      const sliced = filtered.slice((page - 1) * pageSize, page * pageSize);
-      setLogs(sliced);
-      setTotal(totalCount);
+    try {
+      const data = await fetchAuditLogs({
+        page,
+        page_size: pageSize,
+        keyword: keyword.trim(),
+        status,
+        tool_name: toolName.trim(),
+      });
+      setLogs(data.items || []);
+      setTotal(data.total || 0);
+    } catch (err) {
+      showBanner(`获取日志失败: ${err}`, "error");
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   }, [page, pageSize, keyword, status, toolName, showBanner]);
 
   // 获取指标统计
-  const fetchStats = useCallback(async () => {
-    const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
-    if (bridge && typeof bridge.apiGet === "function") {
-      try {
-        const res = await bridge.apiGet<any>("audit/stats");
-        const data = (res && typeof (res as any).total === "number") ? res : (res?.data ?? res);
-        if (data && typeof data.total === "number") {
-          setStats(data);
-        }
-      } catch {
-        // 静默失败
-      }
-    } else {
-      setStats({
-        total: MOCK_ITEMS.length,
-        allowed: MOCK_ITEMS.filter((i) => i.is_permitted && !i.is_error).length,
-        denied: MOCK_ITEMS.filter((i) => !i.is_permitted).length,
-        error: MOCK_ITEMS.filter((i) => i.is_error).length,
-        today_count: MOCK_ITEMS.length,
-      });
+  const loadStats = useCallback(async () => {
+    try {
+      const s = await fetchAuditStats();
+      setStats(s);
+    } catch {
+      // 静默处理
     }
   }, []);
 
   useEffect(() => {
-    fetchLogs();
-  }, [fetchLogs]);
+    loadLogs();
+  }, [loadLogs]);
 
   useEffect(() => {
-    fetchStats();
-  }, [fetchStats]);
+    loadStats();
+  }, [loadStats]);
 
   // 导出日志
   const handleExport = async (format: "json" | "csv") => {
-    const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
-    if (bridge && typeof bridge.apiGet === "function") {
-      try {
-        const res = await bridge.apiGet<any>("audit/export", {
-          format,
-          keyword: keyword.trim(),
-          status,
-          tool_name: toolName.trim(),
-        });
-        const content = typeof res === "string" ? res : (res?.data ?? res);
-        if (content && typeof content === "string") {
-          const mime = format === "csv" ? "text/csv;charset=utf-8;" : "application/json;charset=utf-8;";
-          const blob = new Blob([content], { type: mime });
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement("a");
-          link.href = url;
-          link.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.${format}`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url);
-          showBanner(`成功导出 ${format.toUpperCase()} 文件`, "info");
-        } else {
-          showBanner(res?.message || "导出内容为空或失败", "error");
-        }
-      } catch (err) {
-        showBanner(`导出失败: ${err}`, "error");
+    try {
+      const result = await exportAuditLogs(format);
+      if (result.data) {
+        const mime = format === "csv" ? "text/csv;charset=utf-8;" : "application/json;charset=utf-8;";
+        const blob = new Blob([result.data], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.${format}`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        showBanner(`成功导出 ${format.toUpperCase()} 文件`, "info");
       }
-    } else {
-      showBanner("当前处于离线模式，无法从后端生成导出文件", "error");
+    } catch (err) {
+      showBanner(`导出失败: ${err}`, "error");
     }
   };
 
   // 清空日志
   const handleClear = async () => {
-    const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
-    if (bridge && typeof bridge.apiPost === "function") {
-      try {
-        const res = await bridge.apiPost<any>("audit/clear", {
-          confirm: true,
-        });
-        const cleared = typeof res?.cleared === "number" ? res.cleared : res?.data?.cleared;
-        if (cleared !== undefined || res?.code === 0) {
-          showBanner(`已清空 ${cleared ?? 0} 条历史审计记录`, "info");
-          setIsClearModalOpen(false);
-          setPage(1);
-          fetchLogs();
-          fetchStats();
-        } else {
-          showBanner(res?.message || "清空失败", "error");
-        }
-      } catch (err) {
-        showBanner(`清空请求失败: ${err}`, "error");
+    try {
+      const ok = await clearAuditLogs();
+      if (ok) {
+        showBanner("历史审计记录已清空", "info");
+      } else {
+        showBanner("清空操作完成", "info");
       }
-    } else {
-      setLogs([]);
-      setTotal(0);
-      setStats({ total: 0, allowed: 0, denied: 0, error: 0, today_count: 0 });
       setIsClearModalOpen(false);
-      showBanner("离线模式：模拟数据已清空", "info");
+      setPage(1);
+      loadLogs();
+      loadStats();
+    } catch (err) {
+      showBanner(`清空失败: ${err}`, "error");
     }
   };
 
   const totalPages = Math.ceil(total / pageSize) || 1;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-      {/* 顶部操作条 */}
+    <div className={styles.container}>
+      {/* 顶部应用栏与过滤组件 */}
       <TopAppBar
         keyword={keyword}
         onKeywordChange={handleKeywordChange}
@@ -272,157 +162,110 @@ export const AuditView: React.FC<AuditViewProps> = ({
         onExport={handleExport}
         onClearClick={() => setIsClearModalOpen(true)}
         onRefresh={() => {
-          fetchLogs();
-          fetchStats();
+          loadLogs();
+          loadStats();
         }}
         isLoading={isLoading}
-        isBridgeReady={isBridgeReady}
+        isBridgeReady={externalBridgeReady !== undefined ? externalBridgeReady : isBridgeAvailable()}
       />
 
-      {/* 指标卡片 Chips */}
+      {/* 横幅消息反馈 */}
+      {banner && (
+        <div
+          className={`${styles.banner} ${
+            banner.type === "error" ? styles.bannerError : styles.bannerInfo
+          }`}
+        >
+          <span>{banner.msg}</span>
+          <button onClick={() => setBanner(null)} className={styles.bannerCloseBtn}>
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* 指标卡片概览 */}
       <StatsOverview
         stats={stats}
         activeStatus={status}
-        onSelectStatus={(st) => {
-          setStatus(st);
-          setPage(1);
-        }}
+        onSelectStatus={handleStatusChange}
       />
 
-      {/* 审计日志列表主体 */}
-      <main>
+      {/* 审计日志列表展示 */}
+      <div>
         {isLoading && logs.length === 0 ? (
-          <div
-            style={{
-              padding: "48px 24px",
-              textAlign: "center",
-              color: "var(--color-text-secondary)",
-              fontSize: "14px",
-            }}
-          >
-            正在拉取审计日志...
+          <div className={styles.loadingBox}>
+            <span>🔄 正在加载审计记录...</span>
           </div>
         ) : logs.length === 0 ? (
-          <div
-            style={{
-              backgroundColor: "var(--color-surface)",
-              borderRadius: "var(--radius-xl)",
-              border: "1px dashed var(--color-border)",
-              padding: "60px 24px",
-              textAlign: "center",
-              color: "var(--color-text-secondary)",
-            }}
-          >
-            <div style={{ fontSize: "40px", marginBottom: "12px" }}>📭</div>
-            <div style={{ fontSize: "16px", fontWeight: 600, color: "var(--color-text)" }}>
-              暂无匹配的审计记录
-            </div>
-            <div style={{ fontSize: "13px", marginTop: "6px" }}>
-              尝试调整搜索词、过滤条件，或让大模型调用网页工具产生调用记录
+          <div className={styles.emptyBox}>
+            <div className={styles.emptyIcon}>📭</div>
+            <div className={styles.emptyTitle}>暂无匹配的审计记录</div>
+            <div className={styles.emptySubtitle}>
+              没有检索到符合当前筛选条件或关键词的 Playwright 工具调用记录
             </div>
           </div>
         ) : (
-          <div>
-            {logs.map((item) => (
-              <AuditCard
-                key={item.id}
-                item={item}
-                isSelected={selectedItem?.id === item.id}
-                onClick={(it) => setSelectedItem(it)}
-              />
-            ))}
-          </div>
+          logs.map((item) => (
+            <AuditCard
+              key={item.id}
+              item={item}
+              onClick={(clickedItem) => setSelectedItem(clickedItem)}
+              isSelected={selectedItem?.id === item.id}
+            />
+          ))
         )}
+      </div>
 
-        {/* 分页控制栏 */}
-        {total > 0 && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              flexWrap: "wrap",
-              gap: "12px",
-              marginTop: "24px",
-              padding: "12px 16px",
-              backgroundColor: "var(--color-surface)",
-              borderRadius: "var(--radius-xl)",
-              border: "1px solid var(--color-border)",
-            }}
-          >
-            <div style={{ fontSize: "13px", color: "var(--color-text-secondary)" }}>
-              第 <strong>{page}</strong> / <strong>{totalPages}</strong> 页，共 <strong>{total}</strong> 条记录
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-              <select
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setPage(1);
-                }}
-                style={{
-                  padding: "6px 10px",
-                  borderRadius: "var(--radius-sm)",
-                  border: "1px solid var(--color-border)",
-                  backgroundColor: "var(--color-surface-container)",
-                  color: "var(--color-text)",
-                  fontSize: "12px",
-                }}
-              >
-                <option value={10}>每页 10 条</option>
-                <option value={20}>每页 20 条</option>
-                <option value={50}>每页 50 条</option>
-                <option value={100}>每页 100 条</option>
-              </select>
-
-              <button
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: "var(--radius-full)",
-                  fontSize: "13px",
-                  backgroundColor: page <= 1 ? "var(--color-surface-container)" : "var(--color-primary)",
-                  color: page <= 1 ? "var(--color-text-secondary)" : "var(--color-on-primary)",
-                  cursor: page <= 1 ? "not-allowed" : "pointer",
-                  fontWeight: 500,
-                }}
-              >
-                上一页
-              </button>
-
-              <button
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: "var(--radius-full)",
-                  fontSize: "13px",
-                  backgroundColor: page >= totalPages ? "var(--color-surface-container)" : "var(--color-primary)",
-                  color: page >= totalPages ? "var(--color-text-secondary)" : "var(--color-on-primary)",
-                  cursor: page >= totalPages ? "not-allowed" : "pointer",
-                  fontWeight: 500,
-                }}
-              >
-                下一页
-              </button>
-            </div>
+      {/* 分页控制栏 */}
+      {total > 0 && (
+        <div className={styles.paginationBar}>
+          <div className={styles.paginationSummary}>
+            共 <strong>{total}</strong> 条记录，当前第 {page} / {totalPages} 页
           </div>
-        )}
-      </main>
+          <div className={styles.paginationControls}>
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className={styles.pageBtn}
+            >
+              ← 上一页
+            </button>
+            <span className={styles.pageIndicator}>
+              {page} / {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className={styles.pageBtn}
+            >
+              下一页 →
+            </button>
 
-      {/* 右侧滑出长文本检视抽屉 */}
-      <SideDrawer
-        item={selectedItem}
-        onClose={() => setSelectedItem(null)}
-      />
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setPage(1);
+              }}
+              className={styles.pageSizeSelect}
+            >
+              <option value={10}>10 条/页</option>
+              <option value={15}>15 条/页</option>
+              <option value={20}>20 条/页</option>
+              <option value={50}>50 条/页</option>
+            </select>
+          </div>
+        </div>
+      )}
 
-      {/* 清空二次确认弹窗 */}
+      {/* 详情与快照侧边展开抽屉 */}
+      <SideDrawer item={selectedItem} onClose={() => setSelectedItem(null)} />
+
+      {/* 清空确认弹窗 */}
       <ConfirmDialog
         isOpen={isClearModalOpen}
-        title="确认清空所有审计记录？"
-        message="此操作将永久删除全部历史工具调用的审计记录，包含所有多租户会话与历史结果快照，该操作不可逆。"
+        title="清空历史审计记录"
+        message="此操作将永久删除数据库中记录的所有工具调用审计日志及快照信息，且无法撤销恢复。确认继续清空吗？"
         confirmText="确认清空"
         cancelText="取消"
         isDestructive={true}
