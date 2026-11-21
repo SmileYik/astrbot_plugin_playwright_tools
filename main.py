@@ -33,12 +33,21 @@ class PlaywrightToolPlugin(Star):
         self.context = context
         self.config = config or {}
 
-        # 1. 解析配置
-        admin_only = bool(self.config.get("admin_only", False))
-        extra_admins_raw = str(self.config.get("extra_admin_uids", ""))
-        extra_admins = [u.strip() for u in extra_admins_raw.split(",") if u.strip()]
+        # 1. 解析业务分组配置（支持原生分组读取及简写平退回退）
+        sec_cfg = self.config.get("security", {}) if isinstance(self.config.get("security"), dict) else {}
+        rt_cfg = self.config.get("runtime", {}) if isinstance(self.config.get("runtime"), dict) else {}
+        med_cfg = self.config.get("media", {}) if isinstance(self.config.get("media"), dict) else {}
+        store_cfg = self.config.get("storage_audit", {}) if isinstance(self.config.get("storage_audit"), dict) else {}
 
-        raw_rules = self.config.get("whitelist_rules", "[]")
+        # 安全与权限
+        admin_only = bool(sec_cfg.get("admin_only", self.config.get("admin_only", False)))
+        extra_admins_raw = sec_cfg.get("extra_admin_uids", self.config.get("extra_admin_uids", []))
+        if isinstance(extra_admins_raw, list):
+            extra_admins = [str(u).strip() for u in extra_admins_raw if str(u).strip()]
+        else:
+            extra_admins = [u.strip() for u in str(extra_admins_raw).split(",") if u.strip()]
+
+        raw_rules = sec_cfg.get("whitelist_rules", self.config.get("whitelist_rules", []))
         if isinstance(raw_rules, str):
             try:
                 whitelist_rules = json.loads(raw_rules)
@@ -47,26 +56,30 @@ class PlaywrightToolPlugin(Star):
         else:
             whitelist_rules = list(raw_rules)
 
-        allow_screenshot_to_ai = bool(self.config.get("allow_screenshot_to_ai", False))
-        enable_close_tool = bool(self.config.get("enable_close_tool", True))
-        context_mode = str(self.config.get("context_mode", "personal"))
-        idle_timeout = int(self.config.get("idle_timeout_minutes", 10))
-        storage_state_path = str(self.config.get("storage_state_path", ""))
-        retention_days = int(self.config.get("audit_retention_days", 30))
-        audit_max_output_chars = int(self.config.get("audit_max_output_chars", 0))
-        audit_save_screenshots = bool(self.config.get("audit_save_screenshots", True))
-        element_multiline_separator = str(self.config.get("element_multiline_separator", " | "))
+        storage_state_path = str(sec_cfg.get("storage_state_path", self.config.get("storage_state_path", "")))
 
-        tool_timeout = int(self.config.get("tool_execution_timeout_seconds", 30))
-        screenshot_max_height = int(self.config.get("screenshot_max_height_px", 8000))
-        screenshot_timeout = int(self.config.get("screenshot_timeout_seconds", 15))
-        self.system_prompt_injection = str(self.config.get("system_prompt_injection", "")).strip()
+        # 会话与运行时
+        context_mode = str(rt_cfg.get("context_mode", self.config.get("context_mode", "personal")))
+        idle_timeout = int(rt_cfg.get("idle_timeout_minutes", self.config.get("idle_timeout_minutes", 10)))
+        tool_timeout = int(rt_cfg.get("tool_execution_timeout_seconds", self.config.get("tool_execution_timeout_seconds", 30)))
+        enable_close_tool = bool(rt_cfg.get("enable_close_tool", self.config.get("enable_close_tool", True)))
+        self.system_prompt_injection = str(rt_cfg.get("system_prompt_injection", self.config.get("system_prompt_injection", ""))).strip()
 
-        screenshot_format = str(self.config.get("screenshot_format", "png")).lower()
-        screenshot_quality = int(self.config.get("screenshot_quality", 80))
-        download_save_path = str(self.config.get("download_save_path", "data/downloads"))
-        screenshot_save_path = str(self.config.get("screenshot_save_path", "data/screenshots"))
-        file_retention_days = int(self.config.get("file_retention_days", 7))
+        # 截图与多媒体
+        screenshot_format = str(med_cfg.get("screenshot_format", self.config.get("screenshot_format", "png"))).lower()
+        screenshot_quality = int(med_cfg.get("screenshot_quality", self.config.get("screenshot_quality", 80)))
+        screenshot_max_height = int(med_cfg.get("screenshot_max_height_px", self.config.get("screenshot_max_height_px", 8000)))
+        screenshot_timeout = int(med_cfg.get("screenshot_timeout_seconds", self.config.get("screenshot_timeout_seconds", 15)))
+        allow_screenshot_to_ai = bool(med_cfg.get("allow_screenshot_to_ai", self.config.get("allow_screenshot_to_ai", False)))
+        element_multiline_separator = str(med_cfg.get("element_multiline_separator", self.config.get("element_multiline_separator", " | ")))
+
+        # 存储与审计
+        download_save_path = str(store_cfg.get("download_save_path", self.config.get("download_save_path", "data/downloads")))
+        screenshot_save_path = str(store_cfg.get("screenshot_save_path", self.config.get("screenshot_save_path", "data/screenshots")))
+        file_retention_days = int(store_cfg.get("file_retention_days", self.config.get("file_retention_days", 7)))
+        retention_days = int(store_cfg.get("audit_retention_days", self.config.get("audit_retention_days", 30)))
+        audit_max_output_chars = int(store_cfg.get("audit_max_output_chars", self.config.get("audit_max_output_chars", 0)))
+        audit_save_screenshots = bool(store_cfg.get("audit_save_screenshots", self.config.get("audit_save_screenshots", True)))
 
         # 2. 初始化核心服务
         audit_db_path = str(self.config.get("audit_db_path", "data/audit.db"))

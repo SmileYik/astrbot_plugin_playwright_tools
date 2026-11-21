@@ -83,12 +83,11 @@ class TestPluginMain(unittest.TestCase):
         self.assertTrue(schema_path.exists(), "_conf_schema.json must exist")
         with open(schema_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        self.assertIn("admin_only", data)
-        self.assertIn("allow_screenshot_to_ai", data)
-        self.assertIn("context_mode", data)
-        self.assertIn("whitelist_rules", data)
-        self.assertIn("idle_timeout_minutes", data)
-        self.assertIn("audit_retention_days", data)
+        self.assertIn("security", data)
+        self.assertIn("runtime", data)
+        self.assertIn("browser", data)
+        self.assertIn("media", data)
+        self.assertIn("storage_audit", data)
 
     def test_metadata_synced(self):
         meta_path = Path("metadata.yaml")
@@ -102,10 +101,10 @@ class TestPluginMain(unittest.TestCase):
     def test_conf_schema_v2_fields(self):
         with open("_conf_schema.json", "r", encoding="utf-8") as f:
             data = json.load(f)
-        self.assertIn("tool_execution_timeout_seconds", data)
-        self.assertIn("screenshot_max_height_px", data)
-        self.assertIn("screenshot_timeout_seconds", data)
-        self.assertIn("system_prompt_injection", data)
+        self.assertIn("tool_execution_timeout_seconds", data["runtime"]["items"])
+        self.assertIn("screenshot_max_height_px", data["media"]["items"])
+        self.assertIn("screenshot_timeout_seconds", data["media"]["items"])
+        self.assertIn("system_prompt_injection", data["runtime"]["items"])
 
     def test_plugin_init_and_tool_registration(self):
         TEMP_DIR.mkdir(parents=True, exist_ok=True)
@@ -296,14 +295,20 @@ class TestPluginMain(unittest.TestCase):
 
         cfg = {
             "audit_db_path": db_file,
-            "browser_adapter": "playwright",
-            "playwright_browser_type": "firefox",
-            "browser_headless": True,
-            "screenshot_format": "jpeg",
-            "screenshot_quality": 85,
-            "download_save_path": "data/custom_downloads",
-            "screenshot_save_path": "data/custom_screenshots",
-            "file_retention_days": 14,
+            "browser": {
+                "browser_adapter": "playwright",
+                "playwright_browser_type": "firefox",
+                "browser_headless": True,
+            },
+            "media": {
+                "screenshot_format": "jpeg",
+                "screenshot_quality": 85,
+            },
+            "storage_audit": {
+                "download_save_path": "data/custom_downloads",
+                "screenshot_save_path": "data/custom_screenshots",
+                "file_retention_days": 14,
+            },
         }
         plugin = main.PlaywrightToolPlugin(mock_ctx, config=cfg)
 
