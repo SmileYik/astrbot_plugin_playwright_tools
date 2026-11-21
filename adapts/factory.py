@@ -9,15 +9,30 @@ class AdapterFactory:
     @staticmethod
     def create(config: dict | None = None) -> BrowserAdapterBase:
         config = config or {}
-        adapter_type = str(config.get("browser_adapter", "camoufox")).lower()
-        headless = bool(config.get("browser_headless", True))
-        user_agent = str(config.get("browser_user_agent", "") or "")
-        window_width = int(config.get("browser_window_width", 1280))
-        window_height = int(config.get("browser_window_height", 720))
-        browser_executable_path = str(config.get("browser_executable_path", "") or "").strip()
+        browser_cfg = (
+            config.get("browser", config)
+            if isinstance(config.get("browser"), dict)
+            else config
+        )
+        adapter_type = str(browser_cfg.get("browser_adapter", "camoufox")).lower()
+        headless = bool(browser_cfg.get("browser_headless", True))
+        user_agent = str(browser_cfg.get("browser_user_agent", "") or "")
+        window_width = int(browser_cfg.get("browser_window_width", 1280))
+        window_height = int(browser_cfg.get("browser_window_height", 720))
+        browser_executable_path = str(
+            browser_cfg.get("browser_executable_path", "") or ""
+        ).strip()
 
         if adapter_type == "playwright":
-            browser_type = str(config.get("playwright_browser_type", "chromium")).lower()
+            browser_type = str(
+                browser_cfg.get("playwright_browser_type", "chromium")
+            ).lower()
+            if browser_type == "custom":
+                if not browser_executable_path:
+                    raise ValueError(
+                        "Playwright 原生浏览器类型选择'其他'时，必须指定可执行文件路径 (browser_executable_path)！"
+                    )
+                browser_type = "chromium"
             return PlaywrightAdapter(
                 browser_type=browser_type,
                 headless=headless,
@@ -27,7 +42,7 @@ class AdapterFactory:
                 executable_path=browser_executable_path,
             )
         elif adapter_type == "camoufox":
-            geoip = bool(config.get("camoufox_geoip", False))
+            geoip = bool(browser_cfg.get("camoufox_geoip", False))
             return CamoufoxAdapter(
                 headless=headless,
                 geoip=geoip,

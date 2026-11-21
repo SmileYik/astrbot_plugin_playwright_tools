@@ -105,6 +105,43 @@ class TestAdapterFactory(unittest.TestCase):
     def test_adapter_factory_create_playwright(self):
         test_adapter_factory_create_playwright()
 
+    def test_adapter_factory_grouped_browser_config(self):
+        config = {
+            "browser": {
+                "browser_adapter": "playwright",
+                "playwright_browser_type": "webkit",
+                "browser_headless": True,
+            }
+        }
+        adapter = AdapterFactory.create(config)
+        self.assertIsInstance(adapter, PlaywrightAdapter)
+        self.assertEqual(adapter.browser_type, "webkit")
+
+    def test_adapter_factory_custom_browser_without_path_raises(self):
+        config = {
+            "browser": {
+                "browser_adapter": "playwright",
+                "playwright_browser_type": "custom",
+                "browser_executable_path": "",
+            }
+        }
+        with self.assertRaises(ValueError) as ctx:
+            AdapterFactory.create(config)
+        self.assertIn("必须指定可执行文件路径", str(ctx.exception))
+
+    def test_adapter_factory_custom_browser_with_path_maps_chromium(self):
+        config = {
+            "browser": {
+                "browser_adapter": "playwright",
+                "playwright_browser_type": "custom",
+                "browser_executable_path": "C:/Browser/chrome.exe",
+            }
+        }
+        adapter = AdapterFactory.create(config)
+        self.assertIsInstance(adapter, PlaywrightAdapter)
+        self.assertEqual(adapter.browser_type, "chromium")
+        self.assertEqual(adapter.executable_path, "C:/Browser/chrome.exe")
+
     def test_adapter_factory_default(self):
         adapter = AdapterFactory.create({})
         self.assertIsInstance(adapter, CamoufoxAdapter)
