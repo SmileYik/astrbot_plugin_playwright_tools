@@ -19,7 +19,7 @@ except ImportError:
 
 
 def clean_playwright_error(e: Exception) -> str:
-    """提取 Playwright 异常核心原因，彻底去除冗长的底层 Call log 与调用栈。"""
+    """提取 Playwright 异常核心原因，去除冗长的底层 Call log 与调用栈。"""
     raw = str(e)
     # 检查是否为遮挡错误 (intercepts pointer events)
     if "intercepts pointer events" in raw:
