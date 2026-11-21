@@ -27,15 +27,25 @@ class BrowserSessionContext:
     last_active_time: float = field(default_factory=time.time)
     session_name: str = ""
     owner_name: str = ""
-    ref_map: dict[int, dict] = field(default_factory=dict)
+    ref_map: dict[Any, dict] = field(default_factory=dict)
     dialog_action: dict | None = None
     last_dialog_message: str | None = None
     current_snapshot: Any = None
     is_snapshot_dirty: bool = False
+    next_ref_id: int = 1
 
     def touch(self) -> None:
         """更新最后活跃时间。"""
         self.last_active_time = time.time()
+
+    def allocate_ref_id(self) -> str:
+        """分配单调递增的 ref_id 字符串，当达到 1,000,000 时回滚为 0。"""
+        current = self.next_ref_id
+        if current >= 1_000_000:
+            self.next_ref_id = 0
+        else:
+            self.next_ref_id += 1
+        return str(current)
 
 # 别名
 ManagedContext = BrowserSessionContext
@@ -219,77 +229,118 @@ class ContextManager:
         if self.security.is_admin(owner_id) and self.storage_state_path:
             state_to_inject = self.storage_state_path
 
-        browser_ctx = await self.adapter.create_context(storage_state_path=state_to_inject)
+        browser_ctx = None
+        try:
+            browser_ctx = await self.adapter.create_context(storage_state_path=state_to_inject)
 
-        # 挂载顶层导航路由拦截守卫 (Navigation Guard)
-        async def _route_guard(route, request):
-            try:
-                is_nav = request.is_navigation_request() if hasattr(request, "is_navigation_request") else False
-                if is_nav:
-                    allowed, _ = self.security.is_url_allowed_navigation(owner_id, request.url)
-                    if not allowed:
-                        await route.abort()
-                        return
-                await route.continue_()
-            except Exception:
+            # 挂载顶层导航路由拦截守卫 (Navigation Guard)
+            async def _route_guard(route, request):
                 try:
+                    is_nav = request.is_navigation_request() if hasattr(request, "is_navigation_request") else False
+                    if is_nav:
+                        allowed, _ = self.security.is_url_allowed_navigation(owner_id, request.url)
+                        if not allowed:
+                            await route.abort()
+                            return
                     await route.continue_()
+                except Exception:
+                    try:
+                        await route.continue_()
+                    except Exception:
+                        pass
+
+            if hasattr(browser_ctx, "route"):
+                try:
+                    res_route = browser_ctx.route("**/*", _route_guard)
+                    if hasattr(res_route, "__await__"):
+                        await res_route
                 except Exception:
                     pass
 
-        if hasattr(browser_ctx, "route"):
-            try:
-                res_route = browser_ctx.route("**/*", _route_guard)
-                if hasattr(res_route, "__await__"):
-                    await res_route
-            except Exception:
-                pass
+            first_page = await browser_ctx.new_page()
 
-        first_page = await browser_ctx.new_page()
+            ctx = BrowserSessionContext(
+                session_id=session_id,
+                owner_id=owner_id,
+                browser_context=browser_ctx,
+                current_page=first_page,
+                pages=[first_page],
+                allowed_users={owner_id},
+                session_name=session_name,
+                owner_name=owner_name,
+            )
 
-        ctx = BrowserSessionContext(
-            session_id=session_id,
-            owner_id=owner_id,
-            browser_context=browser_ctx,
-            current_page=first_page,
-            pages=[first_page],
-            allowed_users={owner_id},
-            session_name=session_name,
-            owner_name=owner_name,
-        )
+            def _setup_page_listeners(page):
+                def _on_frame_nav(frame):
+                    try:
+                        is_main = False
+                        if hasattr(frame, "parent_frame") and frame.parent_frame is None:
+                            is_main = True
+                        elif hasattr(page, "main_frame") and frame == page.main_frame:
+                            is_main = True
+                        elif not hasattr(frame, "parent_frame") and not hasattr(page, "main_frame"):
+                            is_main = True
 
-        # 挂载新标签页 (popup) 监听器
-        def _on_popup(new_page):
-            if new_page not in ctx.pages:
-                ctx.pages.append(new_page)
-                ctx.current_page = new_page
+                        if is_main:
+                            ctx.is_snapshot_dirty = True
+                            ctx.current_snapshot = None
+                            ctx.ref_map = {}
+                    except Exception:
+                        pass
 
-        if hasattr(browser_ctx, "on"):
-            try:
-                browser_ctx.on("page", _on_popup)
-            except Exception:
-                pass
+                if hasattr(page, "on"):
+                    try:
+                        page.on("framenavigated", _on_frame_nav)
+                    except Exception:
+                        pass
 
-        if self.audit_logger:
-            try:
-                key = self._get_context_key(session_id, owner_id)
-                res = self.audit_logger.log_lifecycle(
-                    session_id=session_id,
-                    context_key=self._format_context_key(key),
-                    owner_id=owner_id,
-                    event_type="create",
-                    operator_id=owner_id,
-                    session_name=session_name,
-                    operator_name=owner_name,
-                    owner_name=owner_name,
-                    details={"mode": self.mode},
-                )
-                if hasattr(res, "__await__"):
-                    await res
-            except Exception:
-                pass
+            _setup_page_listeners(first_page)
 
-        return ctx
+            # 挂载新标签页 (popup) 监听器
+            def _on_popup(new_page):
+                try:
+                    if new_page not in ctx.pages:
+                        ctx.pages.append(new_page)
+                        ctx.current_page = new_page
+                        _setup_page_listeners(new_page)
+                except Exception:
+                    pass
+
+            if hasattr(browser_ctx, "on"):
+                try:
+                    browser_ctx.on("page", _on_popup)
+                except Exception:
+                    pass
+
+            if self.audit_logger:
+                try:
+                    key = self._get_context_key(session_id, owner_id)
+                    res = self.audit_logger.log_lifecycle(
+                        session_id=session_id,
+                        context_key=self._format_context_key(key),
+                        owner_id=owner_id,
+                        event_type="create",
+                        operator_id=owner_id,
+                        session_name=session_name,
+                        operator_name=owner_name,
+                        owner_name=owner_name,
+                        details={"mode": self.mode},
+                    )
+                    if hasattr(res, "__await__"):
+                        await res
+                except Exception:
+                    pass
+
+            return ctx
+        except Exception as e:
+            if browser_ctx is not None:
+                try:
+                    res_close = browser_ctx.close()
+                    if hasattr(res_close, "__await__"):
+                        await res_close
+                except Exception:
+                    pass
+            raise e
 
     def invite_user(self, session_id: str, owner_id: str, target_user_id: str) -> tuple[bool, str]:
         """邀请目标用户加入所有者当前的个人上下文。"""

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
-from astrbot_plugin_playwright_tools.core.context_manager import ContextManager
+from astrbot_plugin_playwright_tools.core.context_manager import ContextManager, BrowserSessionContext
 from astrbot_plugin_playwright_tools.core.security_manager import SecurityManager
 
 def run_coro(coro):
@@ -15,7 +15,7 @@ def run_coro(coro):
     except StopIteration as e:
         return e.value
 
-class TestContextManager(unittest.TestCase):
+class TestContextManager(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.mock_adapter = MagicMock()
         self.mock_ctx = MagicMock()
@@ -255,6 +255,100 @@ class TestContextManager(unittest.TestCase):
         ok_fail, msg_fail = run_coro(mgr.force_kill_context("non_existent", operator_id="admin_user"))
         self.assertFalse(ok_fail)
         self.assertIn("未找到上下文: non_existent", msg_fail)
+
+    def test_allocate_ref_id_monotonic_and_rollover(self):
+        ctx = BrowserSessionContext(session_id="s1", owner_id="u1", browser_context=MagicMock(), current_page=MagicMock())
+        self.assertEqual(ctx.allocate_ref_id(), "1")
+        ctx.next_ref_id = 1_000_000
+        self.assertEqual(ctx.allocate_ref_id(), "1000000")
+        self.assertEqual(ctx.allocate_ref_id(), "0")
+
+    async def test_create_context_cleans_up_on_failure(self):
+        mock_adapter = MagicMock()
+        mock_browser_ctx = AsyncMock()
+        mock_adapter.create_context = AsyncMock(return_value=mock_browser_ctx)
+        mock_browser_ctx.new_page = AsyncMock(side_effect=RuntimeError("New page failed"))
+        mgr = ContextManager(adapter=mock_adapter, security=MagicMock())
+        with self.assertRaises(RuntimeError):
+            await mgr._create_new_context("s1", "u1")
+        mock_browser_ctx.close.assert_awaited_once()
+
+    async def test_frame_navigation_invalidates_snapshot_and_ref_map(self):
+        mock_adapter = MagicMock()
+        mock_browser_ctx = MagicMock()
+        mock_page = MagicMock()
+        mock_adapter.create_context = AsyncMock(return_value=mock_browser_ctx)
+        mock_browser_ctx.new_page = AsyncMock(return_value=mock_page)
+
+        callbacks = {}
+        def mock_page_on(event, cb):
+            callbacks[event] = cb
+        mock_page.on = mock_page_on
+
+        mgr = ContextManager(adapter=mock_adapter, security=MagicMock())
+        ctx = await mgr._create_new_context("s1", "u1")
+
+        # verify listener attached
+        self.assertIn("framenavigated", callbacks)
+        on_frame_nav = callbacks["framenavigated"]
+
+        # set some snapshot and ref_map
+        ctx.is_snapshot_dirty = False
+        ctx.current_snapshot = "fake_snapshot"
+        ctx.ref_map = {"1": {}}
+
+        # subframe navigation should not invalidate
+        sub_frame = MagicMock()
+        sub_frame.parent_frame = MagicMock()
+        on_frame_nav(sub_frame)
+        self.assertFalse(ctx.is_snapshot_dirty)
+        self.assertEqual(ctx.current_snapshot, "fake_snapshot")
+        self.assertEqual(ctx.ref_map, {"1": {}})
+
+        # main frame navigation should invalidate
+        main_frame = MagicMock()
+        main_frame.parent_frame = None
+        on_frame_nav(main_frame)
+        self.assertTrue(ctx.is_snapshot_dirty)
+        self.assertIsNone(ctx.current_snapshot)
+        self.assertEqual(ctx.ref_map, {})
+
+    async def test_popup_page_frame_navigation_listener(self):
+        mock_adapter = MagicMock()
+        mock_browser_ctx = MagicMock()
+        mock_page = MagicMock()
+        mock_adapter.create_context = AsyncMock(return_value=mock_browser_ctx)
+        mock_browser_ctx.new_page = AsyncMock(return_value=mock_page)
+
+        ctx_callbacks = {}
+        mock_browser_ctx.on = lambda evt, cb: ctx_callbacks.update({evt: cb})
+
+        mgr = ContextManager(adapter=mock_adapter, security=MagicMock())
+        ctx = await mgr._create_new_context("s1", "u1")
+
+        self.assertIn("page", ctx_callbacks)
+        on_page = ctx_callbacks["page"]
+
+        popup_page = MagicMock()
+        popup_callbacks = {}
+        popup_page.on = lambda evt, cb: popup_callbacks.update({evt: cb})
+
+        on_page(popup_page)
+        self.assertIn(popup_page, ctx.pages)
+        self.assertEqual(ctx.current_page, popup_page)
+        self.assertIn("framenavigated", popup_callbacks)
+
+        # Main frame nav on popup invalidates
+        ctx.is_snapshot_dirty = False
+        ctx.current_snapshot = "popup_snapshot"
+        ctx.ref_map = {"1": {}}
+
+        main_frame = MagicMock()
+        main_frame.parent_frame = None
+        popup_callbacks["framenavigated"](main_frame)
+        self.assertTrue(ctx.is_snapshot_dirty)
+        self.assertIsNone(ctx.current_snapshot)
+        self.assertEqual(ctx.ref_map, {})
 
 if __name__ == "__main__":
     unittest.main()
