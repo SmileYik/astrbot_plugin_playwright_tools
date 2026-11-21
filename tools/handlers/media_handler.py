@@ -63,6 +63,16 @@ class MediaHandler:
         except OSError:
             pass
 
+    async def _resolve_context(
+        self, session_id: str, sender_id: str, session_name: str = "", sender_name: str = ""
+    ):
+        try:
+            return await self.context_mgr.resolve_context(
+                session_id, sender_id, session_name=session_name, sender_name=sender_name
+            )
+        except TypeError:
+            return await self.context_mgr.resolve_context(session_id, sender_id)
+
     def _is_jpeg(self) -> bool:
         return self.screenshot_format in ("jpeg", "jpg")
 
@@ -146,7 +156,7 @@ class MediaHandler:
         except Exception as clean_err:
             logger.warning(f"[PlaywrightTool] 被动清理过期文件失败: {clean_err}")
 
-        ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
+        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
         if ctx is None:
             return "截图失败: 无法获取浏览器上下文"
 
@@ -223,7 +233,7 @@ class MediaHandler:
         except Exception as clean_err:
             logger.warning(f"[PlaywrightTool] 被动清理过期文件失败: {clean_err}")
 
-        ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
+        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
         if ctx is None:
             return "长截图失败: 无法获取浏览器上下文"
 
@@ -341,7 +351,7 @@ class MediaHandler:
         except Exception as clean_err:
             logger.warning(f"[PlaywrightTool] 被动清理过期文件失败: {clean_err}")
 
-        ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
+        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
         if ctx is None:
             return "下载失败: 无法获取浏览器上下文"
 

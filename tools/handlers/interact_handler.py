@@ -63,6 +63,16 @@ class InteractHandler:
         self.security_mgr = security_mgr
         self.audit_logger = audit_logger
 
+    async def _resolve_context(
+        self, session_id: str, sender_id: str, session_name: str = "", sender_name: str = ""
+    ):
+        try:
+            return await self.context_mgr.resolve_context(
+                session_id, sender_id, session_name=session_name, sender_name=sender_name
+            )
+        except TypeError:
+            return await self.context_mgr.resolve_context(session_id, sender_id)
+
     async def click(
         self,
         session_id: str,
@@ -72,7 +82,7 @@ class InteractHandler:
         sender_name: str = "",
     ) -> str:
         """点击目标元素。"""
-        ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
+        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
         if ctx is None:
             return "操作失败: 无法获取浏览器上下文"
 
@@ -134,7 +144,7 @@ class InteractHandler:
         sender_name: str = "",
     ) -> str:
         """在表单输入框中填入指定内容。"""
-        ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
+        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
         if ctx is None:
             return "操作失败: 无法获取浏览器上下文"
 
@@ -187,7 +197,7 @@ class InteractHandler:
         sender_name: str = "",
     ) -> str:
         """在下拉选择框中选取指定的值。"""
-        ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
+        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
         if ctx is None:
             return "操作失败: 无法获取浏览器上下文"
 
@@ -243,7 +253,7 @@ class InteractHandler:
         sender_name: str = "",
     ) -> str:
         """将鼠标悬停在目标元素上。"""
-        ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
+        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
         if ctx is None:
             return "操作失败: 无法获取浏览器上下文"
 
@@ -294,7 +304,7 @@ class InteractHandler:
         sender_name: str = "",
     ) -> str:
         """将焦点聚集到目标元素。"""
-        ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
+        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
         if ctx is None:
             return "操作失败: 无法获取浏览器上下文"
 
@@ -344,7 +354,7 @@ class InteractHandler:
         sender_name: str = "",
     ) -> str:
         """使目标元素失去焦点。"""
-        ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
+        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
         if ctx is None:
             return "操作失败: 无法获取浏览器上下文"
 
@@ -395,7 +405,7 @@ class InteractHandler:
         sender_name: str = "",
     ) -> str:
         """将源元素拖拽至目标元素位置。"""
-        ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
+        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
         if ctx is None:
             return "操作失败: 无法获取浏览器上下文"
 
@@ -451,7 +461,7 @@ class InteractHandler:
         sender_name: str = "",
     ) -> str:
         """向当前页面或已聚焦元素发送键盘按键。"""
-        ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
+        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
         if ctx is None:
             return "操作失败: 无法获取浏览器上下文"
 
@@ -504,7 +514,7 @@ class InteractHandler:
         sender_name: str = "",
     ) -> str:
         """垂直滚动当前页面。"""
-        ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
+        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
         if ctx is None:
             return "滚动失败: 无法获取浏览器上下文"
 

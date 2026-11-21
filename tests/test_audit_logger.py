@@ -289,6 +289,27 @@ class TestAuditLogger(unittest.TestCase):
         self.assertEqual(total, 1)
         self.assertIn("Traceback (most recent call last):", items[0]["error_message"])
 
+    def test_log_lifecycle_with_names_and_ids(self):
+        run_coro(self.logger.log_lifecycle(
+            session_id="s123",
+            context_key="s123:u456",
+            owner_id="u456",
+            event_type="create",
+            operator_id="u456",
+            session_name="测试群聊",
+            operator_name="管理员张三",
+            owner_name="管理员张三",
+            details={"mode": "personal"}
+        ))
+        items, total = run_coro(self.logger.query_lifecycle_logs(keyword="张三"))
+        self.assertEqual(total, 1)
+        item = items[0]
+        self.assertEqual(item["session_name"], "测试群聊")
+        self.assertEqual(item["session_id"], "s123")
+        self.assertEqual(item["operator_name"], "管理员张三")
+        self.assertEqual(item["operator_id"], "u456")
+        self.assertEqual(item["owner_name"], "管理员张三")
+
     def test_lifecycle_logs_crud(self):
         # 记录生命周期事件
         run_coro(self.logger.log_lifecycle(

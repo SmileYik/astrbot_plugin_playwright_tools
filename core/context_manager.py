@@ -25,6 +25,8 @@ class BrowserSessionContext:
     allowed_users: set[str] = field(default_factory=set)
     created_time: float = field(default_factory=time.time)
     last_active_time: float = field(default_factory=time.time)
+    session_name: str = ""
+    owner_name: str = ""
     ref_map: dict[int, dict] = field(default_factory=dict)
     dialog_action: dict | None = None
     last_dialog_message: str | None = None
@@ -76,6 +78,8 @@ class ContextManager:
         event_type: str,
         operator_id: str,
         session_name: str = "",
+        operator_name: str = "",
+        owner_name: str = "",
         details: dict | list | str | None = None,
     ) -> Any:
         """非阻塞或安全派发生命周期审计记录。"""
@@ -89,6 +93,8 @@ class ContextManager:
                 event_type=event_type,
                 operator_id=operator_id,
                 session_name=session_name,
+                operator_name=operator_name,
+                owner_name=owner_name,
                 details=details,
             )
             if hasattr(res, "__await__"):
@@ -110,7 +116,12 @@ class ContextManager:
             return None
 
     async def resolve_context(
-        self, session_id: str, sender_id: str, peek: bool = False
+        self,
+        session_id: str,
+        sender_id: str,
+        peek: bool = False,
+        session_name: str = "",
+        sender_name: str = "",
     ) -> tuple[BrowserSessionContext | None, str]:
         """为当前发送者解析目标浏览器上下文，并返回提示前缀（若非本人拥有）。
 
@@ -118,6 +129,8 @@ class ContextManager:
             session_id: 会话 ID
             sender_id: 发送者 UID
             peek: 是否仅查看而不新建上下文 (用于 /browser status 等指令)
+            session_name: 会话展示名称
+            sender_name: 发送者用户展示名称
         """
         sender_id = str(sender_id)
         session_id = str(session_id)
@@ -129,9 +142,13 @@ class ContextManager:
                     return None, ""
                 if self.security.admin_only and not self.security.is_admin(sender_id):
                     return None, "拒绝访问：当前插件已配置为仅管理员可用"
-                ctx = await self._create_new_context(session_id, sender_id)
+                ctx = await self._create_new_context(session_id, sender_id, session_name=session_name, owner_name=sender_name)
                 self.contexts[key] = ctx
             context = self.contexts[key]
+            if session_name and not getattr(context, "session_name", ""):
+                context.session_name = session_name
+            if sender_name and (not getattr(context, "owner_name", "") or context.owner_id == sender_id):
+                context.owner_name = sender_name
             context.touch()
             return context, ""
 
@@ -143,6 +160,10 @@ class ContextManager:
             if target_key in self.contexts:
                 ctx = self.contexts[target_key]
                 if sender_id in ctx.allowed_users or sender_id == ctx.owner_id:
+                    if session_name and not getattr(ctx, "session_name", ""):
+                        ctx.session_name = session_name
+                    if sender_name and sender_id == ctx.owner_id and not getattr(ctx, "owner_name", ""):
+                        ctx.owner_name = sender_name
                     ctx.touch()
                     hint = f"[当前操作上下文: 用户 {ctx.owner_id} 的浏览器]" if ctx.owner_id != sender_id else ""
                     return ctx, hint
@@ -151,6 +172,10 @@ class ContextManager:
         own_key = (session_id, sender_id)
         if own_key in self.contexts:
             ctx = self.contexts[own_key]
+            if session_name and not getattr(ctx, "session_name", ""):
+                ctx.session_name = session_name
+            if sender_name and not getattr(ctx, "owner_name", ""):
+                ctx.owner_name = sender_name
             ctx.touch()
             return ctx, ""
 
@@ -163,6 +188,8 @@ class ContextManager:
         if invited_contexts:
             invited_contexts.sort(key=lambda c: c.last_active_time, reverse=True)
             chosen = invited_contexts[0]
+            if session_name and not getattr(chosen, "session_name", ""):
+                chosen.session_name = session_name
             chosen.touch()
             return chosen, f"[当前操作上下文: 用户 {chosen.owner_id} 的浏览器]"
 
@@ -175,12 +202,18 @@ class ContextManager:
             return None, "拒绝访问：当前插件已配置为仅管理员可用"
 
         # 4. 自身新建个人上下文
-        new_ctx = await self._create_new_context(session_id, sender_id)
+        new_ctx = await self._create_new_context(session_id, sender_id, session_name=session_name, owner_name=sender_name)
         self.contexts[own_key] = new_ctx
         new_ctx.touch()
         return new_ctx, ""
 
-    async def _create_new_context(self, session_id: str, owner_id: str) -> BrowserSessionContext:
+    async def _create_new_context(
+        self,
+        session_id: str,
+        owner_id: str,
+        session_name: str = "",
+        owner_name: str = "",
+    ) -> BrowserSessionContext:
         """根据所有者权限创建底层 BrowserContext、路由守卫与首个 Page。"""
         state_to_inject = None
         if self.security.is_admin(owner_id) and self.storage_state_path:
@@ -221,6 +254,8 @@ class ContextManager:
             current_page=first_page,
             pages=[first_page],
             allowed_users={owner_id},
+            session_name=session_name,
+            owner_name=owner_name,
         )
 
         # 挂载新标签页 (popup) 监听器
@@ -244,6 +279,9 @@ class ContextManager:
                     owner_id=owner_id,
                     event_type="create",
                     operator_id=owner_id,
+                    session_name=session_name,
+                    operator_name=owner_name,
+                    owner_name=owner_name,
                     details={"mode": self.mode},
                 )
                 if hasattr(res, "__await__"):
@@ -333,6 +371,9 @@ class ContextManager:
                     owner_id=ctx.owner_id,
                     event_type="close",
                     operator_id=sender_id,
+                    session_name=getattr(ctx, "session_name", ""),
+                    operator_name=getattr(ctx, "owner_name", "") if sender_id == ctx.owner_id else "",
+                    owner_name=getattr(ctx, "owner_name", ""),
                 )
                 if hasattr(res, "__await__"):
                     await res
@@ -380,6 +421,9 @@ class ContextManager:
                             owner_id=getattr(ctx, "owner_id", ""),
                             event_type="timeout",
                             operator_id="system",
+                            session_name=getattr(ctx, "session_name", ""),
+                            operator_name="system",
+                            owner_name=getattr(ctx, "owner_name", ""),
                             details={"idle_minutes": self.idle_timeout_minutes},
                         )
                         if hasattr(res, "__await__"):
@@ -429,6 +473,9 @@ class ContextManager:
                     owner_id=owner_id,
                     event_type="force_kill",
                     operator_id=operator_id,
+                    session_name=getattr(target_ctx, "session_name", ""),
+                    operator_name=operator_id,
+                    owner_name=getattr(target_ctx, "owner_name", ""),
                     details={"operator": operator_id},
                 )
                 if hasattr(res, "__await__"):
@@ -505,7 +552,9 @@ class ContextManager:
             item = {
                 "context_key": key_str,
                 "session_id": getattr(ctx, "session_id", ""),
+                "session_name": getattr(ctx, "session_name", ""),
                 "owner_id": getattr(ctx, "owner_id", ""),
+                "owner_name": getattr(ctx, "owner_name", ""),
                 "allowed_users": list(getattr(ctx, "allowed_users", set())),
                 "created_time": getattr(ctx, "created_time", getattr(ctx, "last_active_time", 0.0)),
                 "last_active_time": getattr(ctx, "last_active_time", 0.0),

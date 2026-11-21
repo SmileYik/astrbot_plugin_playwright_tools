@@ -115,8 +115,13 @@ class TestContextManager(unittest.TestCase):
         )
 
         # 1. create lifecycle event
-        ctx, _ = run_coro(mgr.resolve_context(session_id="s1", sender_id="user_a"))
+        ctx, _ = run_coro(mgr.resolve_context(
+            session_id="s1", sender_id="user_a",
+            session_name="测试群", sender_name="用户张三"
+        ))
         self.assertIsNotNone(ctx)
+        self.assertEqual(ctx.session_name, "测试群")
+        self.assertEqual(ctx.owner_name, "用户张三")
         mock_audit.log_lifecycle.assert_called()
         calls = mock_audit.log_lifecycle.call_args_list
         create_call = calls[-1]
@@ -125,6 +130,9 @@ class TestContextManager(unittest.TestCase):
         self.assertEqual(create_call.kwargs["owner_id"], "user_a")
         self.assertEqual(create_call.kwargs["event_type"], "create")
         self.assertEqual(create_call.kwargs["operator_id"], "user_a")
+        self.assertEqual(create_call.kwargs["session_name"], "测试群")
+        self.assertEqual(create_call.kwargs["operator_name"], "用户张三")
+        self.assertEqual(create_call.kwargs["owner_name"], "用户张三")
         self.assertEqual(create_call.kwargs["details"], {"mode": "personal"})
 
         # 2. join lifecycle event (invite)

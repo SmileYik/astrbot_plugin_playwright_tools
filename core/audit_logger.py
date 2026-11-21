@@ -60,9 +60,19 @@ class AuditLogger:
                         context_key TEXT NOT NULL,
                         owner_id TEXT NOT NULL,
                         operator_id TEXT NOT NULL,
+                        operator_name TEXT DEFAULT '',
+                        owner_name TEXT DEFAULT '',
                         details TEXT DEFAULT '{}'
                     )
                 """)
+                try:
+                    conn.execute("ALTER TABLE context_lifecycle_logs ADD COLUMN operator_name TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass
+                try:
+                    conn.execute("ALTER TABLE context_lifecycle_logs ADD COLUMN owner_name TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass
         finally:
             conn.close()
 
@@ -302,6 +312,8 @@ class AuditLogger:
         event_type: str,
         operator_id: str,
         session_name: str = "",
+        operator_name: str = "",
+        owner_name: str = "",
         details: dict | list | str | None = None,
         custom_timestamp: str | None = None,
     ) -> None:
@@ -321,12 +333,12 @@ class AuditLogger:
                     """
                     INSERT INTO context_lifecycle_logs (
                         timestamp, event_type, session_id, session_name,
-                        context_key, owner_id, operator_id, details
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        context_key, owner_id, operator_id, operator_name, owner_name, details
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         ts, event_type, session_id, session_name,
-                        context_key, owner_id, operator_id, details_str
+                        context_key, owner_id, operator_id, operator_name, owner_name, details_str
                     )
                 )
         finally:
@@ -359,9 +371,9 @@ class AuditLogger:
         if keyword and keyword.strip():
             kw = f"%{keyword.strip()}%"
             conditions.append(
-                "(session_id LIKE ? OR session_name LIKE ? OR context_key LIKE ? OR owner_id LIKE ? OR operator_id LIKE ? OR details LIKE ?)"
+                "(session_id LIKE ? OR session_name LIKE ? OR context_key LIKE ? OR owner_id LIKE ? OR operator_id LIKE ? OR operator_name LIKE ? OR owner_name LIKE ? OR details LIKE ?)"
             )
-            params.extend([kw] * 6)
+            params.extend([kw] * 8)
 
         where_sql = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 

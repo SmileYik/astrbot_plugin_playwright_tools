@@ -37,6 +37,16 @@ class PageHandler:
         self.page_extractor = page_extractor or actual_reader
         self.enable_close_tool = enable_close_tool
 
+    async def _resolve_context(
+        self, session_id: str, sender_id: str, session_name: str = "", sender_name: str = ""
+    ):
+        try:
+            return await self.context_mgr.resolve_context(
+                session_id, sender_id, session_name=session_name, sender_name=sender_name
+            )
+        except TypeError:
+            return await self.context_mgr.resolve_context(session_id, sender_id)
+
     def _setup_page_listeners(self, context, page):
         """为页面附加原生弹窗自动应答监听器。"""
         async def on_dialog(dialog):
@@ -78,7 +88,7 @@ class PageHandler:
             )
             return f"打开失败: {reason}"
 
-        ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
+        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
         if ctx is None:
             return "打开失败: 无法获取浏览器上下文"
 
@@ -137,7 +147,7 @@ class PageHandler:
         **kwargs,
     ) -> str:
         """读取当前页面的内容与可交互操作元素（支持懒加载快照缓存、脏标记失效与关键词定位）。"""
-        ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
+        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
         if ctx is None:
             return "读取失败: 无法获取浏览器上下文"
 
@@ -216,7 +226,7 @@ class PageHandler:
         sender_name: str = "",
     ) -> str:
         """切换当前控制的浏览器标签页。"""
-        ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
+        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
         if ctx is None:
             return "切换失败: 无法获取浏览器上下文"
 
@@ -247,7 +257,7 @@ class PageHandler:
         sender_name: str = "",
     ) -> str:
         """预先配置下一次触发的浏览器原生弹窗 (alert/confirm/prompt) 响应策略。"""
-        ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
+        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
         if ctx is None:
             return "配置失败: 无法获取浏览器上下文"
 
