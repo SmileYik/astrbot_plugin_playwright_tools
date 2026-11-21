@@ -31,8 +31,10 @@
 3. **支持白名单多域名集合**：
    - 配置项从 `domain: string` 升级为 `domains: list[str]`，允许一个权限规则绑定一组域名/通配符；
    - 后端 `SecurityManager` 适配多域名集合匹配，并保持对旧配置单个 `domain` 的向下兼容。
-4. **页面提取策略模式与专属分页阅读工具**：
+4. **页面提取策略模式、密码安全开关与专属分页阅读工具**：
    - 配置文件增加 `content_extraction_mode`（`inline_markdown` vs `aria_snapshot`）；
+   - 配置文件增加 `mask_password_inputs: bool` 开关，控制表单内 `type="password"` 组件的明文显示或星号脱敏；
+   - 配置文件增加 `page_chunk_char_limit: int`（带滑块 500~8000），允许用户自定义长页面流式切分的单页字符/Token 预算；
    - 从 `pw_page` 中彻底剥离正文阅读逻辑，`pw_page` 精简为专注于页面生命周期控制（open, switch_tab, dialog, close）；
    - 独立抽象并注册专门的流式分页阅读工具 `pw_read`，根据配置分别由 `InlineMarkdownReader`（语义块分页，内联控件与图片）与 `AriaSnapshotReader`（区域树分页，祖先路径回填）驱动。
 
@@ -150,9 +152,51 @@
        return any(self._is_domain_match(host, str(d)) for d in domains if str(d).strip())
    ```
 
-### 5.4 页面提取策略模式与独立流式分页阅读工具 `pw_read` (Problem 3)
+### 5.4 配置增强：密码脱敏开关与分页字符预算
 
-#### 5.4.1 策略基类抽象 (`core/readers/base.py`)
+1. **配置 Schema 调整** (`_conf_schema.json`)：
+   - **安全与隐私配置**（`security` 分组内追加）：
+     ```json
+     "mask_password_inputs": {
+       "type": "bool",
+       "description": "脱敏密码输入框",
+       "hint": "开启后，页面中 type='password' 的表单组件内容将被脱敏为 ******，防止敏感密码泄露给大模型；关闭后将输出实际明文内容",
+       "default": true
+     }
+     ```
+   - **运行时与阅读配置**（`runtime` 分组内追加）：
+     ```json
+     "content_extraction_mode": {
+       "type": "string",
+       "description": "页面正文提炼模式",
+       "hint": "选择大模型阅读网页时使用的正文提取与结构化策略",
+       "default": "inline_markdown",
+       "options": ["inline_markdown", "aria_snapshot"],
+       "labels": [
+         "内联交互 Markdown (Inline Markdown) [推荐]",
+         "无障碍语义树快照 (ARIA Snapshot)"
+       ],
+       "subtitles": [
+         "将正文排版、嵌入图片与带 Ref 编号的可交互元素内联融合成一篇结构化文档，所见即所得",
+         "基于浏览器原生 Accessibility Tree 生成角色层级树，结构严密但呈树状层级"
+       ]
+     },
+     "page_chunk_char_limit": {
+       "type": "int",
+       "description": "分页字符预算",
+       "hint": "单页正文提炼的最大字符预算（建议 1000 ~ 4000），超过此预算将在保持语义块完整性的前提下自动切分至下一页",
+       "default": 2000,
+       "slider": {
+         "min": 500,
+         "max": 8000,
+         "step": 100
+       }
+     }
+     ```
+
+### 5.5 页面提取策略模式与独立流式分页阅读工具 `pw_read` (Problem 3)
+
+#### 5.5.1 策略基类抽象 (`core/readers/base.py`)
 ```python
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -169,6 +213,10 @@ class PageSnapshot:
 
 class BasePageReader(ABC):
     """网页正文提取与流式分页抽象策略基类。"""
+
+    def __init__(self, chunk_char_limit: int = 2000, mask_passwords: bool = True):
+        self.chunk_char_limit = chunk_char_limit
+        self.mask_passwords = mask_passwords
 
     @abstractmethod
     async def extract_snapshot(self, page: Any, url: str) -> PageSnapshot:
@@ -191,30 +239,32 @@ class BasePageReader(ABC):
         pass
 ```
 
-#### 5.4.2 策略实现 A：`InlineMarkdownReader` (`core/readers/markdown_reader.py`)
+#### 5.5.2 策略实现 A：`InlineMarkdownReader` (`core/readers/markdown_reader.py`)
 - **注入提取逻辑**：
   - 单遍阅读顺序深度遍历 DOM；
   - 遇到标题提取为 `# ## ###`，段落提取为文本，列表提取为 `- `，表格提取为 Markdown 表格；
   - 遇到 `<img>` 提取为 `![alt](src)`；
   - 遇到可交互元素（button, a, input, select, textarea, [role=button]）即时嵌入上下文，生成 `[Ref: X] [按钮: 文本]` 或 `[Ref: X] [链接: 文本]`，并为其绑定唯一自增 `Ref ID`；
+  - **密码框脱敏判定**：检查 `input[type="password"]`，若 `mask_passwords == True`，则其渲染形式为 `[Ref: X] [输入框 (type="password", value="******")]`；若为 False 则如实输出其明文 value；
   - 生成 `list[SemanticBlock]`（标题块、段落块、列表块、卡片块）。
 - **分页模型**：
-  - 累加 Block 长度至 `max_chunk_chars`（默认约 2000 字符），仅在 Block 边界处切断；
+  - 累加 Block 长度至配置的 `self.chunk_char_limit`，仅在 Block 边界处切断；
   - 切断处若处在某级标题下，下页首部追加上下文提示行：`提示: 接上页内容（当前位置: 父章节标题）`；
   - 尾部附带明确状态：`[分页: 1/N，共 N 页。若需交互调用 pw_interact(ref=...)，翻页调用 pw_read(page=2)]`。
 
-#### 5.4.3 策略实现 B：`AriaSnapshotReader` (`core/readers/aria_reader.py`)
+#### 5.5.3 策略实现 B：`AriaSnapshotReader` (`core/readers/aria_reader.py`)
 - **提取与定位绑定机制 (架构决议)**：
   - 为确保 `pw_interact` 底层 `page.locator('[data-astr-ref="{ref}"]')` 无需任何侵入性改动，`AriaSnapshotReader` 采用**客户端 DOM 语义映射器 (Client-side ARIA DOM Walker)**：
     1. 在浏览器端通过 JavaScript 递归计算节点计算属性（Computed Role, Accessible Name, Level, State）；
     2. 遍历过程中，对所有可交互角色节点（button, link, textbox, combobox, checkbox 等）直接在真实 DOM 节点上注入 `data-astr-ref="{ref}"` 自增属性；
-    3. 同步生成与 Playwright 原生 ARIA Snapshot 兼容的 YAML 格式层级树文本，并在节点行后标注 `[ref=X]`。
+    3. **密码框处理**：对于 `textbox` 且底层为 password 输入框的组件，当 `mask_passwords == True` 时其 value 或 text 均替换为 `******`；
+    4. 同步生成与 Playwright 原生 ARIA Snapshot 兼容的 YAML 格式层级树文本，并在节点行后标注 `[ref=X]`。
 - **分页模型**：
   - 以 Landmark / Region / Section 为顶层分块单元；
-  - 在分块行数达到阈值时切断，并在下一页首部回填祖先树桩路径（Ancestor Breadcrumbs），确保每个分页都是自闭合、无孤儿节点的层级树；
+  - 在分块行数或字符数达到 `self.chunk_char_limit` 预算阈值时切断，并在下一页首部回填祖先树桩路径（Ancestor Breadcrumbs），确保每个分页都是自闭合、无孤儿节点的层级树；
   - 尾部附带树遍历进度与翻页提示。
 
-#### 5.4.4 工具解耦、快照缓存与流式阅读 (`tools/tools.py`)
+#### 5.5.4 工具解耦、快照缓存与流式阅读 (`tools/tools.py`)
 1. **快照生命周期与缓存更新策略 (架构决议)**：
    - **快照缓存绑定在会话上下文 (ContextItem) 中**，包含：`current_snapshot: PageSnapshot | None`、`snapshot_url: str` 与 `is_snapshot_dirty: bool`。
    - **脏标记失效时机**：
