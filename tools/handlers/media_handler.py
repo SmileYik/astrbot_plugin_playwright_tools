@@ -9,11 +9,7 @@ from ...core.context_manager import ContextManager
 from ...core.security_manager import SecurityManager
 from ...core.audit_logger import AuditLogger
 
-try:
-    from astrbot.api import logger
-except ImportError:
-    import logging
-    logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 class MediaHandler:
     """媒体与截图双重熔断处理器。"""
@@ -24,12 +20,12 @@ class MediaHandler:
         security_mgr: SecurityManager,
         audit_logger: AuditLogger,
         allow_screenshot_to_ai: bool = False,
-        download_dir: str = "data/downloads",
+        download_dir: str = "data/plugin_data/astrbot_plugin_playwright_tools/downloads",
         audit_save_screenshots: bool = True,
-        audit_screenshots_dir: str = "data/audit_screenshots",
+        audit_screenshots_dir: str = "data/plugin_data/astrbot_plugin_playwright_tools/audit_screenshots",
         screenshot_format: str = "png",
         screenshot_quality: int = 80,
-        screenshot_dir: str = "data/screenshots",
+        screenshot_dir: str = "data/plugin_data/astrbot_plugin_playwright_tools/screenshots",
         file_retention_days: int = 7,
     ):
         self.context_mgr = context_mgr

@@ -102,6 +102,31 @@ class TestConfSchema(unittest.TestCase):
         self.assertEqual(schema["runtime"]["items"]["page_chunk_char_limit"]["default"], 2000)
         self.assertTrue(schema["security"]["items"]["mask_password_inputs"]["default"])
 
+    def test_storage_paths_default_in_schema(self):
+        with open("_conf_schema.json", "r", encoding="utf-8") as f:
+            schema = json.load(f)
+        storage_items = schema["storage_audit"]["items"]
+        self.assertEqual(
+            storage_items["download_save_path"]["default"],
+            "data/plugin_data/astrbot_plugin_playwright_tools/downloads",
+        )
+        self.assertEqual(
+            storage_items["screenshot_save_path"]["default"],
+            "data/plugin_data/astrbot_plugin_playwright_tools/screenshots",
+        )
+
+    def test_no_logging_import_in_tools(self):
+        from pathlib import Path
+        tools_dir = Path(__file__).resolve().parent.parent / "tools"
+        for py_file in tools_dir.rglob("*.py"):
+            content = py_file.read_text(encoding="utf-8")
+            self.assertNotIn(
+                "import logging",
+                content,
+                f"File {py_file} must not contain 'import logging'. Use 'from astrbot.api import logger' instead.",
+            )
+
+
 
 if __name__ == "__main__":
     unittest.main()

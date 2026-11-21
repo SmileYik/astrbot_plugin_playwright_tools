@@ -5,11 +5,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Any
 
-try:
-    from astrbot.api import logger
-except ImportError:
-    import logging
-    logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 try:
     from astrbot.api.all import FunctionTool, AstrAgentContext

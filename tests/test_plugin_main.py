@@ -5,7 +5,7 @@ import sys
 import tempfile
 import yaml
 from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock, patch
 
 TEMP_DIR = Path(tempfile.gettempdir()) / "astrbot_test_plugin_main"
 
@@ -109,6 +109,44 @@ class TestPluginMain(unittest.TestCase):
         self.assertIn("mask_password_inputs", data["security"]["items"])
         self.assertIn("content_extraction_mode", data["runtime"]["items"])
         self.assertIn("page_chunk_char_limit", data["runtime"]["items"])
+
+    def test_storage_paths_default_to_plugin_data(self):
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        mock_ctx = MagicMock()
+        mock_ctx.add_llm_tools = MagicMock()
+        with patch.object(main.AuditLogger, "_ensure_db", return_value=None):
+            self.plugin = main.PlaywrightToolPlugin(mock_ctx, config={})
+        self.assertEqual(
+            self.plugin.download_save_path,
+            "data/plugin_data/astrbot_plugin_playwright_tools/downloads",
+        )
+        self.assertEqual(
+            self.plugin.screenshot_save_path,
+            "data/plugin_data/astrbot_plugin_playwright_tools/screenshots",
+        )
+        self.assertEqual(
+            self.plugin.audit_db_path,
+            "data/plugin_data/astrbot_plugin_playwright_tools/audit.db",
+        )
+        self.assertEqual(
+            self.plugin.media_handler.download_dir,
+            "data/plugin_data/astrbot_plugin_playwright_tools/downloads",
+        )
+        self.assertEqual(
+            self.plugin.media_handler.screenshot_dir,
+            "data/plugin_data/astrbot_plugin_playwright_tools/screenshots",
+        )
+        self.assertEqual(
+            self.plugin.media_handler.audit_screenshots_dir,
+            "data/plugin_data/astrbot_plugin_playwright_tools/audit_screenshots",
+        )
+
+    def test_requirements_playwright_version(self):
+        req_path = Path("requirements.txt")
+        self.assertTrue(req_path.exists())
+        content = req_path.read_text(encoding="utf-8")
+        self.assertIn("playwright>=1.62.0", content)
+
 
     def test_plugin_init_and_tool_registration(self):
         TEMP_DIR.mkdir(parents=True, exist_ok=True)

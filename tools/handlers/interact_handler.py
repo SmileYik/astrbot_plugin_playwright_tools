@@ -11,11 +11,7 @@ else:
     Page = Any
     Locator = Any
 
-try:
-    from astrbot.api import logger
-except ImportError:
-    import logging
-    logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 
 def clean_playwright_error(e: Exception) -> str:

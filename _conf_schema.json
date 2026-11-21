@@ -351,13 +351,13 @@
         "type": "string",
         "description": "下载保存路径",
         "hint": "浏览器下载文件保存的本地目录",
-        "default": "data/downloads"
+        "default": "data/plugin_data/astrbot_plugin_playwright_tools/downloads"
       },
       "screenshot_save_path": {
         "type": "string",
         "description": "截图保存路径",
         "hint": "截图文件保存的本地目录",
-        "default": "data/screenshots"
+        "default": "data/plugin_data/astrbot_plugin_playwright_tools/screenshots"
       },
       "file_retention_days": {
         "type": "int",

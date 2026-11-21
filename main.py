@@ -78,16 +78,16 @@ class PlaywrightToolPlugin(Star):
         element_multiline_separator = str(med_cfg.get("element_multiline_separator", self.config.get("element_multiline_separator", " | ")))
 
         # 存储与审计
-        download_save_path = str(store_cfg.get("download_save_path", self.config.get("download_save_path", "data/downloads")))
-        screenshot_save_path = str(store_cfg.get("screenshot_save_path", self.config.get("screenshot_save_path", "data/screenshots")))
+        self.download_save_path = str(store_cfg.get("download_save_path", self.config.get("download_save_path", "data/plugin_data/astrbot_plugin_playwright_tools/downloads")))
+        self.screenshot_save_path = str(store_cfg.get("screenshot_save_path", self.config.get("screenshot_save_path", "data/plugin_data/astrbot_plugin_playwright_tools/screenshots")))
         file_retention_days = int(store_cfg.get("file_retention_days", self.config.get("file_retention_days", 7)))
         retention_days = int(store_cfg.get("audit_retention_days", self.config.get("audit_retention_days", 30)))
         audit_max_output_chars = int(store_cfg.get("audit_max_output_chars", self.config.get("audit_max_output_chars", 0)))
         audit_save_screenshots = bool(store_cfg.get("audit_save_screenshots", self.config.get("audit_save_screenshots", True)))
 
         # 2. 初始化核心服务与阅读器
-        audit_db_path = str(self.config.get("audit_db_path", "data/audit.db"))
-        self.audit_logger = AuditLogger(audit_db_path, max_output_chars=audit_max_output_chars)
+        self.audit_db_path = str(self.config.get("audit_db_path", "data/plugin_data/astrbot_plugin_playwright_tools/audit.db"))
+        self.audit_logger = AuditLogger(self.audit_db_path, max_output_chars=audit_max_output_chars)
         self.security_manager = SecurityManager(
             admin_only=admin_only,
             admin_uids=extra_admins,
@@ -135,11 +135,11 @@ class PlaywrightToolPlugin(Star):
             self.security_manager,
             self.audit_logger,
             allow_screenshot_to_ai=allow_screenshot_to_ai,
-            download_dir=download_save_path,
+            download_dir=self.download_save_path,
             audit_save_screenshots=audit_save_screenshots,
             screenshot_format=screenshot_format,
             screenshot_quality=screenshot_quality,
-            screenshot_dir=screenshot_save_path,
+            screenshot_dir=self.screenshot_save_path,
             file_retention_days=file_retention_days,
         )
 
