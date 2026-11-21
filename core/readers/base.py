@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import time
 from typing import Any
 
 
@@ -9,9 +10,10 @@ class PageSnapshot:
     title: str
     url: str
     raw_content: Any
-    ref_map: dict[int, dict]
+    ref_map: dict[str, dict]
     total_pages: int
     chunks: list[str]
+    timestamp: float = field(default_factory=time.time)
 
 
 class BasePageReader(ABC):

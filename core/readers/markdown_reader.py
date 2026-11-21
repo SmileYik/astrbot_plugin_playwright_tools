@@ -404,14 +404,15 @@ class InlineMarkdownReader(BasePageReader):
             blocks = [str(blocks)] if blocks else []
 
         raw_elements = data.get("elements", [])
-        ref_map: dict[int, dict] = {}
+        ref_map: dict[str, dict] = {}
         if isinstance(raw_elements, list):
             for el in raw_elements:
                 if isinstance(el, dict) and "ref" in el:
-                    try:
-                        ref_map[int(el["ref"])] = el
-                    except (ValueError, TypeError):
-                        pass
+                    ref_str = str(el["ref"]).strip()
+                    if ref_str:
+                        el_copy = dict(el)
+                        el_copy["ref"] = ref_str
+                        ref_map[ref_str] = el_copy
 
         chunks = self._chunk_blocks(blocks, page_url, title)
         total_pages = len(chunks)
