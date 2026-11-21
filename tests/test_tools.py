@@ -47,7 +47,7 @@ async def timeout_wait_for(fut, timeout):
     raise TimeoutError()
 
 
-class TestToolsV2(unittest.TestCase):
+class TestTools(unittest.TestCase):
     def setUp(self):
         self.mock_page_handler = MagicMock()
         self.mock_interact_handler = MagicMock()
