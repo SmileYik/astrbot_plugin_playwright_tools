@@ -69,18 +69,53 @@
 
 ## WebUI 配置说明 (`_conf_schema.json`)
 
+配置已划分为 5 大业务分组，支持在 AstrBot WebUI 中折叠与展开：
+
+### 1. 安全与权限 (`security`)
 | 配置项 | 类型 | 默认值 | 作用描述 |
 |---|---|---|---|
-| `admin_only` | bool | `false` | 是否仅允许管理员使用本插件 |
-| `extra_admin_uids` | string | `""` | 额外管理员 UID 列表 (逗号分隔) |
-| `context_mode` | string | `"personal"` | 隔离模式：`personal`(个人隔离) 或 `session`(会话共享) |
-| `idle_timeout_minutes` | int | `10` | 浏览器上下文空闲自动销毁分钟数 |
-| `tool_execution_timeout_seconds` | int | `30` | 单个工具调用的执行超时时间 (秒) |
-| `screenshot_max_height_px` | int | `8000` | 长截图最大允许高度 (像素)，超出自动截断 |
-| `screenshot_timeout_seconds` | int | `15` | 长截图超时时间 (秒)，超时自动降级为视口截图 |
-| `allow_screenshot_to_ai` | bool | `false` | 是否允许将截图发送给大模型视觉分析 |
-| `system_prompt_injection` | text | `""` | 动态注入大模型的系统提示词，留空则不注入 |
-| `storage_state_path` | string | `""` | 管理员 Cookie/StorageState JSON 文件路径 |
-| `whitelist_rules` | text | `"[]"` | 域名与权限规则 JSON 字符串 |
-| `audit_retention_days` | int | `30` | SQLite 审计记录保留天数 |
-| `enable_close_tool` | bool | `true` | 是否向 AI 开放主动关闭浏览器上下文的功能 |
+| `admin_only` | bool | `false` | 仅管理员可用 |
+| `extra_admin_uids` | list (`sender_id`) | `[]` | 额外管理员 UID 列表（支持平台用户选择器） |
+| `storage_state_path` | string | `""` | 管理员 Cookie/StorageState 凭据文件路径 |
+| `whitelist_rules` | template_list | `[]` | 网站白名单与权限集合（可视化添加，支持通配域名与权限多选） |
+
+### 2. 会话与运行时 (`runtime`)
+| 配置项 | 类型 | 默认值 | 作用描述 |
+|---|---|---|---|
+| `context_mode` | string (select) | `"personal"` | 隔离模式：`personal` (个人隔离) 或 `session` (会话共享) |
+| `idle_timeout_minutes` | int (slider) | `10` | 空闲自动销毁分钟数 (1~120 分钟) |
+| `tool_execution_timeout_seconds` | int (slider) | `30` | 单个工具执行超时时间 (5~180 秒) |
+| `enable_close_tool` | bool | `true` | 是否向 AI 注册主动关闭浏览器上下文的工具 |
+| `system_prompt_injection` | text | `""` | 自定义系统提示词注入，留空则不注入 |
+
+### 3. 浏览器引擎 (`browser`)
+| 配置项 | 类型 | 默认值 | 作用描述 |
+|---|---|---|---|
+| `browser_adapter` | string (select) | `"camoufox"` | 浏览器适配器：`camoufox` (防检测) 或 `playwright` (原生引擎) |
+| `playwright_browser_type` | string (select) | `"chromium"` | Playwright 核心类型：`chromium`, `firefox`, `webkit`, `custom` (选自定义时必填路径) |
+| `browser_executable_path` | string | `""` | 自定义浏览器二进制文件绝对路径 |
+| `camoufox_geoip` | bool | `false` | Camoufox 适配器是否开启 GeoIP 定位防检 |
+| `browser_headless` | bool | `true` | 是否以无头模式运行浏览器 |
+| `browser_window_width` | int (slider) | `1280` | 浏览器初始视口宽度 (800~3840 像素) |
+| `browser_window_height` | int (slider) | `720` | 浏览器初始视口高度 (600~2160 像素) |
+| `browser_user_agent` | string | `""` | 自定义 User-Agent，留空使用内置默认值 |
+
+### 4. 截图与多媒体 (`media`)
+| 配置项 | 类型 | 默认值 | 作用描述 |
+|---|---|---|---|
+| `screenshot_format` | string (select) | `"png"` | 截图输出格式：`png` (无损高清) 或 `jpeg` (压缩优化) |
+| `screenshot_quality` | int (slider) | `80` | JPEG 压缩质量 (1~100，仅当格式为 jpeg 时显示) |
+| `screenshot_max_height_px` | int (slider) | `8000` | 长截图最大允许高度 (1000~30000 像素)，超出自动截断 |
+| `screenshot_timeout_seconds` | int (slider) | `15` | 长截图超时时间 (5~120 秒)，超时降级为视口截图 |
+| `allow_screenshot_to_ai` | bool | `false` | 是否允许将网页截图发送给大模型进行视觉分析 |
+| `element_multiline_separator` | string | `" \| "` | 页面元素内部换行分隔替换符 |
+
+### 5. 存储与审计管理 (`storage_audit`, 默认折叠)
+| 配置项 | 类型 | 默认值 | 作用描述 |
+|---|---|---|---|
+| `download_save_path` | string | `"data/downloads"` | 浏览器下载文件保存路径 |
+| `screenshot_save_path` | string | `"data/screenshots"` | 截图文件保存路径 |
+| `file_retention_days` | int (slider) | `7` | 下载与截图文件保留天数 (1~90 天) |
+| `audit_retention_days` | int (slider) | `30` | 审计记录保存天数 (1~365 天) |
+| `audit_max_output_chars` | int | `0` | 审计单条工具输出最大字符上限 (0 表示不限长度) |
+| `audit_save_screenshots` | bool | `true` | 是否在审计数据库中关联持久化截图文件 |
