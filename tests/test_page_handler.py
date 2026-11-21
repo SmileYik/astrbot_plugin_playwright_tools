@@ -1,6 +1,8 @@
 import unittest
 import os
 import sys
+import time
+import asyncio
 from unittest.mock import MagicMock, AsyncMock
 
 if "astrbot" not in sys.modules:
@@ -14,10 +16,7 @@ from astrbot_plugin_playwright_tools.tools.handlers.page_handler import PageHand
 from astrbot_plugin_playwright_tools.core.readers.base import PageSnapshot
 
 def run_coro(coro):
-    try:
-        coro.send(None)
-    except StopIteration as e:
-        return e.value
+    return asyncio.run(coro)
 
 class TestPageHandler(unittest.TestCase):
     def setUp(self):
@@ -36,9 +35,10 @@ class TestPageHandler(unittest.TestCase):
             title="Test Page",
             url="https://example.com",
             raw_content="页面正文内容",
-            ref_map={1: {"tag": "button", "text": "点击"}},
+            ref_map={"1": {"tag": "button", "text": "点击"}},
             total_pages=1,
-            chunks=["=== 页面内容 [分页: 1/1] ===\n页面正文内容"]
+            chunks=["=== 页面内容 [分页: 1/1] ===\n页面正文内容"],
+            timestamp=time.time(),
         )
         self.mock_reader.extract_snapshot = AsyncMock(return_value=self.fake_snapshot)
         self.mock_reader.format_chunk = MagicMock(return_value="格式化切片内容 [第 1 页]")
@@ -48,6 +48,7 @@ class TestPageHandler(unittest.TestCase):
         self.mock_page.url = "https://example.com"
         self.mock_page.goto = AsyncMock()
         self.mock_page.title = AsyncMock(return_value="Test Page")
+        self.mock_page.wait_for_load_state = AsyncMock()
 
         self.mock_context = MagicMock()
         self.mock_context.owner_id = "u1"
@@ -58,7 +59,7 @@ class TestPageHandler(unittest.TestCase):
         self.mock_context.current_snapshot = None
         self.mock_context.is_snapshot_dirty = False
 
-        async def mock_resolve(session_id, sender_id):
+        async def mock_resolve(session_id, sender_id, **kwargs):
             return self.mock_context, ""
         self.mock_mgr.resolve_context = mock_resolve
 
@@ -111,6 +112,21 @@ class TestPageHandler(unittest.TestCase):
         res4 = run_coro(self.handler.read_page("s1", "u1", page=1))
         self.assertEqual(self.mock_reader.extract_snapshot.call_count, 3)
         self.assertFalse(self.mock_context.is_snapshot_dirty)
+
+        # 5. 快照 TTL 超时失效：超过 60 秒自动失效重新提取
+        self.fake_snapshot.timestamp = time.time() - 65
+        res5 = run_coro(self.handler.read_page("s1", "u1", page=1))
+        self.assertEqual(self.mock_reader.extract_snapshot.call_count, 4)
+
+        # 6. URL 变化失效：当前页面 URL 与快照 URL 不一致，自动重新提取
+        self.fake_snapshot.timestamp = time.time()
+        self.mock_page.url = "https://example.com/subpage"
+        res6 = run_coro(self.handler.read_page("s1", "u1", page=1))
+        self.assertEqual(self.mock_reader.extract_snapshot.call_count, 5)
+
+    def test_read_page_calls_wait_page_stable(self):
+        run_coro(self.handler.read_page("s1", "u1", page=1))
+        self.mock_page.wait_for_load_state.assert_called()
 
     def test_read_page_with_keyword(self):
         res = run_coro(self.handler.read_page("s1", "u1", keyword="搜索词"))

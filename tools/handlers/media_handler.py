@@ -1,17 +1,27 @@
 import asyncio
 import base64
+import inspect
 import os
+import re
 import time
-import traceback
 import uuid
 from pathlib import Path
-from ...core.context_manager import ContextManager
+from typing import TYPE_CHECKING, Any
+
+from ...core.context_manager import ContextManager, BrowserSessionContext
 from ...core.security_manager import SecurityManager
 from ...core.audit_logger import AuditLogger
+from .base_handler import BaseActionHandler
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
+else:
+    Page = Any
 
 from astrbot.api import logger
 
-class MediaHandler:
+
+class MediaHandler(BaseActionHandler):
     """媒体与截图双重熔断处理器。"""
 
     def __init__(
@@ -27,10 +37,15 @@ class MediaHandler:
         screenshot_quality: int = 80,
         screenshot_dir: str = "data/plugin_data/astrbot_plugin_playwright_tools/screenshots",
         file_retention_days: int = 7,
+        mask_password_inputs: bool = True,
+        **kwargs,
     ):
-        self.context_mgr = context_mgr
-        self.security_mgr = security_mgr
-        self.audit_logger = audit_logger
+        super().__init__(
+            context_mgr,
+            security_mgr,
+            audit_logger,
+            mask_password_inputs=mask_password_inputs,
+        )
         self.allow_screenshot_to_ai = allow_screenshot_to_ai
         self.download_dir = download_dir
         self.audit_save_screenshots = audit_save_screenshots
@@ -58,16 +73,6 @@ class MediaHandler:
             Path(self.audit_screenshots_dir).mkdir(parents=True, exist_ok=True)
         except OSError:
             pass
-
-    async def _resolve_context(
-        self, session_id: str, sender_id: str, session_name: str = "", sender_name: str = ""
-    ):
-        try:
-            return await self.context_mgr.resolve_context(
-                session_id, sender_id, session_name=session_name, sender_name=sender_name
-            )
-        except TypeError:
-            return await self.context_mgr.resolve_context(session_id, sender_id)
 
     def _is_jpeg(self) -> bool:
         return self.screenshot_format in ("jpeg", "jpg")
@@ -130,7 +135,9 @@ class MediaHandler:
                                         os.remove(entry.path)
                                         deleted_count += 1
                                     except OSError as rem_err:
-                                        logger.warning(f"[PlaywrightTool] 删除过期文件失败 {entry.path}: {rem_err}")
+                                        logger.warning(
+                                            f"[PlaywrightTool] 删除过期文件失败 {entry.path}: {rem_err}"
+                                        )
                         except OSError:
                             pass
             except OSError as dir_err:
@@ -152,31 +159,30 @@ class MediaHandler:
         except Exception as clean_err:
             logger.warning(f"[PlaywrightTool] 被动清理过期文件失败: {clean_err}")
 
-        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
-        if ctx is None:
-            return "截图失败: 无法获取浏览器上下文"
-
-        page = ctx.current_page
-        url = getattr(page, "url", "")
-        allowed, reason = self.security_mgr.check_permission(ctx.owner_id, url, "screenshot")
-        if not allowed:
-            await self.audit_logger.log_action(
-                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "screenshot_viewport", url, {"target": target}, reason, is_permitted=False, deny_reason=reason,
-                session_name=session_name, sender_name=sender_name
-            )
-            return f"截图失败: {reason}"
-
         if target.lower() == "ai" and not self.allow_screenshot_to_ai:
             deny_msg = "拒绝操作：管理员配置中未开启将截图发送给大模型（allow_screenshot_to_ai=False）。如需向用户展示，请使用 target='chat'。"
-            await self.audit_logger.log_action(
-                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "screenshot_viewport", url, {"target": target}, deny_msg, is_permitted=False, deny_reason=deny_msg,
-                session_name=session_name, sender_name=sender_name
+            ctx, _ = await self._resolve_context(
+                session_id, sender_id, session_name=session_name, sender_name=sender_name
+            )
+            owner_id = ctx.owner_id if ctx else sender_id
+            page = getattr(ctx, "current_page", None)
+            url = getattr(page, "url", "") if page else ""
+            await self._log_audit(
+                session_id=session_id,
+                context_key=f"{session_id}:{owner_id}",
+                sender_id=sender_id,
+                tool_name="screenshot_viewport",
+                url=url,
+                input_args={"target": target},
+                output_result=deny_msg,
+                is_permitted=False,
+                deny_reason=deny_msg,
+                session_name=session_name,
+                sender_name=sender_name,
             )
             return deny_msg
 
-        try:
+        async def _viewport_shot(ctx: BrowserSessionContext, page: Page):
             shot_opts = self._get_screenshot_options()
             image_bytes = await page.screenshot(full_page=False, **shot_opts)
             res = self._save_or_encode(image_bytes, target)
@@ -190,28 +196,26 @@ class MediaHandler:
                     shot_file = audit_dir / shot_name
                     with open(shot_file, "wb") as f:
                         f.write(image_bytes)
-                    screenshot_path = str(Path(self.audit_screenshots_dir) / shot_name).replace("\\", "/")
+                    screenshot_path = str(Path(self.audit_screenshots_dir) / shot_name).replace(
+                        "\\", "/"
+                    )
                 except Exception as shot_err:
                     logger.warning(f"[PlaywrightTool] 保存视口截图审计文件失败: {shot_err}")
-            await self.audit_logger.log_action(
-                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "screenshot_viewport", url, {"target": target}, res, is_permitted=True,
-                session_name=session_name, sender_name=sender_name,
-                screenshot_path=screenshot_path
-            )
-            return res
-        except Exception as e:
-            tb_str = traceback.format_exc()
-            logger.error(f"[PlaywrightTool] screenshot_viewport 异常: {e}\n{tb_str}")
-            err_msg = f"视口截图异常: {str(e)}"
-            full_error = f"{type(e).__name__}: {str(e)}\n\n{tb_str}" if tb_str else str(e)
-            await self.audit_logger.log_action(
-                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "screenshot_viewport", url, {"target": target}, err_msg, is_permitted=True,
-                is_error=True, error_message=full_error,
-                session_name=session_name, sender_name=sender_name
-            )
-            return err_msg
+
+            return res, {"screenshot_path": screenshot_path}
+
+        return await self.execute_action(
+            session_id=session_id,
+            sender_id=sender_id,
+            action_name="screenshot_viewport",
+            target_resource="",
+            action_coro_fn=_viewport_shot,
+            input_args={"target": target},
+            required_permission="screenshot",
+            session_name=session_name,
+            sender_name=sender_name,
+            action_desc="截图",
+        )
 
     async def screenshot_full(
         self,
@@ -229,115 +233,112 @@ class MediaHandler:
         except Exception as clean_err:
             logger.warning(f"[PlaywrightTool] 被动清理过期文件失败: {clean_err}")
 
-        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
-        if ctx is None:
-            return "长截图失败: 无法获取浏览器上下文"
-
-        page = ctx.current_page
-        url = getattr(page, "url", "")
-        allowed, reason = self.security_mgr.check_permission(ctx.owner_id, url, "screenshot")
-        if not allowed:
-            await self.audit_logger.log_action(
-                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "screenshot_full", url, {"target": target}, reason, is_permitted=False, deny_reason=reason,
-                session_name=session_name, sender_name=sender_name
-            )
-            return f"长截图失败: {reason}"
-
         if target.lower() == "ai" and not self.allow_screenshot_to_ai:
             deny_msg = "拒绝操作：管理员配置中未开启将截图发送给大模型（allow_screenshot_to_ai=False）。"
-            await self.audit_logger.log_action(
-                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "screenshot_full", url, {"target": target}, deny_msg, is_permitted=False, deny_reason=deny_msg,
-                session_name=session_name, sender_name=sender_name
+            ctx, _ = await self._resolve_context(
+                session_id, sender_id, session_name=session_name, sender_name=sender_name
+            )
+            owner_id = ctx.owner_id if ctx else sender_id
+            page = getattr(ctx, "current_page", None)
+            url = getattr(page, "url", "") if page else ""
+            await self._log_audit(
+                session_id=session_id,
+                context_key=f"{session_id}:{owner_id}",
+                sender_id=sender_id,
+                tool_name="screenshot_full",
+                url=url,
+                input_args={"target": target},
+                output_result=deny_msg,
+                is_permitted=False,
+                deny_reason=deny_msg,
+                session_name=session_name,
+                sender_name=sender_name,
             )
             return deny_msg
 
-        # 检查高度熔断
-        try:
-            scroll_height = await page.evaluate(
-                "Math.max(document.body ? document.body.scrollHeight : 0, document.documentElement ? document.documentElement.scrollHeight : 0, 0)"
-            )
-        except Exception:
-            scroll_height = 0
-
-        is_clipped = False
-        clip_dict = None
-        note = ""
-        if scroll_height and scroll_height > max_height_px:
-            is_clipped = True
-            viewport_width = 1280
-            if hasattr(page, "viewport_size") and isinstance(page.viewport_size, dict):
-                viewport_width = page.viewport_size.get("width", 1280)
-            clip_dict = {"x": 0, "y": 0, "width": viewport_width, "height": max_height_px}
-            note = f"（页面高度 {scroll_height}px 超过最大限制 {max_height_px}px，已自动截断）"
-
-        shot_opts = self._get_screenshot_options()
-        try:
-            async def do_screenshot():
-                if is_clipped:
-                    return await page.screenshot(clip=clip_dict, full_page=False, **shot_opts)
-                return await page.screenshot(full_page=True, **shot_opts)
-
-            shot_coro = do_screenshot()
-            if timeout_sec and timeout_sec > 0:
-                image_bytes = await asyncio.wait_for(shot_coro, timeout=float(timeout_sec))
-            else:
-                image_bytes = await shot_coro
-        except asyncio.TimeoutError:
+        async def _full_shot(ctx: BrowserSessionContext, page: Page):
+            # 检查高度熔断
             try:
-                shot_coro.close()
+                scroll_height = await page.evaluate(
+                    "Math.max(document.body ? document.body.scrollHeight : 0, document.documentElement ? document.documentElement.scrollHeight : 0, 0)"
+                )
             except Exception:
-                pass
-            try:
-                image_bytes = await page.screenshot(full_page=False, **shot_opts)
-                note = f"（长截图耗时超过 {timeout_sec} 秒，已自动截断并降级为当前视口截图）"
-            except Exception as fb_err:
-                return f"长截图超时且降级失败: {str(fb_err)}"
-        except Exception as e:
-            tb_str = traceback.format_exc()
-            logger.error(f"[PlaywrightTool] screenshot_full 异常: {e}\n{tb_str}")
-            try:
-                shot_coro.close()
-            except Exception:
-                pass
-            err_msg = f"长截图异常: {str(e)}"
-            full_error = f"{type(e).__name__}: {str(e)}\n\n{tb_str}" if tb_str else str(e)
-            await self.audit_logger.log_action(
-                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "screenshot_full", url, {"target": target, "max_height_px": max_height_px}, err_msg, is_permitted=True,
-                is_error=True, error_message=full_error,
-                session_name=session_name, sender_name=sender_name
-            )
-            return err_msg
+                scroll_height = 0
 
-        res = self._save_or_encode(image_bytes, target, note)
-        screenshot_path = ""
-        if self.audit_save_screenshots:
+            is_clipped = False
+            clip_dict = None
+            note = ""
+            if scroll_height and scroll_height > max_height_px:
+                is_clipped = True
+                viewport_width = 1280
+                if hasattr(page, "viewport_size") and isinstance(page.viewport_size, dict):
+                    viewport_width = page.viewport_size.get("width", 1280)
+                clip_dict = {"x": 0, "y": 0, "width": viewport_width, "height": max_height_px}
+                note = f"（页面高度 {scroll_height}px 超过最大限制 {max_height_px}px，已自动截断）"
+
+            shot_opts = self._get_screenshot_options()
+            shot_coro = None
             try:
-                audit_dir = Path(self.audit_screenshots_dir)
-                audit_dir.mkdir(parents=True, exist_ok=True)
-                ext = ".jpg" if self._is_jpeg() else ".png"
-                shot_name = f"shot_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}{ext}"
-                shot_file = audit_dir / shot_name
-                with open(shot_file, "wb") as f:
-                    f.write(image_bytes)
-                screenshot_path = str(Path(self.audit_screenshots_dir) / shot_name).replace("\\", "/")
-            except Exception as shot_err:
-                logger.warning(f"[PlaywrightTool] 保存长截图审计文件失败: {shot_err}")
-        await self.audit_logger.log_action(
-            session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-            "screenshot_full", url, {"target": target, "max_height_px": max_height_px}, res, is_permitted=True,
-            session_name=session_name, sender_name=sender_name,
-            screenshot_path=screenshot_path
+
+                async def do_screenshot():
+                    if is_clipped:
+                        return await page.screenshot(clip=clip_dict, full_page=False, **shot_opts)
+                    return await page.screenshot(full_page=True, **shot_opts)
+
+                shot_coro = do_screenshot()
+                if timeout_sec and timeout_sec > 0:
+                    image_bytes = await asyncio.wait_for(shot_coro, timeout=float(timeout_sec))
+                else:
+                    image_bytes = await shot_coro
+            except asyncio.TimeoutError:
+                if shot_coro and hasattr(shot_coro, "close"):
+                    try:
+                        shot_coro.close()
+                    except Exception:
+                        pass
+                try:
+                    image_bytes = await page.screenshot(full_page=False, **shot_opts)
+                    note = f"（长截图耗时超过 {timeout_sec} 秒，已自动截断并降级为当前视口截图）"
+                except Exception as fb_err:
+                    return f"长截图超时且降级失败: {str(fb_err)}"
+
+            res = self._save_or_encode(image_bytes, target, note)
+            screenshot_path = ""
+            if self.audit_save_screenshots:
+                try:
+                    audit_dir = Path(self.audit_screenshots_dir)
+                    audit_dir.mkdir(parents=True, exist_ok=True)
+                    ext = ".jpg" if self._is_jpeg() else ".png"
+                    shot_name = f"shot_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}{ext}"
+                    shot_file = audit_dir / shot_name
+                    with open(shot_file, "wb") as f:
+                        f.write(image_bytes)
+                    screenshot_path = str(Path(self.audit_screenshots_dir) / shot_name).replace(
+                        "\\", "/"
+                    )
+                except Exception as shot_err:
+                    logger.warning(f"[PlaywrightTool] 保存长截图审计文件失败: {shot_err}")
+
+            return res, {"screenshot_path": screenshot_path}
+
+        return await self.execute_action(
+            session_id=session_id,
+            sender_id=sender_id,
+            action_name="screenshot_full",
+            target_resource="",
+            action_coro_fn=_full_shot,
+            input_args={"target": target, "max_height_px": max_height_px},
+            required_permission="screenshot",
+            session_name=session_name,
+            sender_name=sender_name,
+            action_desc="长截图",
         )
-        return res
 
     async def download_file(
         self,
         session_id: str,
         sender_id: str,
-        ref: int,
+        ref: str | int,
         session_name: str = "",
         sender_name: str = "",
     ) -> str:
@@ -347,56 +348,42 @@ class MediaHandler:
         except Exception as clean_err:
             logger.warning(f"[PlaywrightTool] 被动清理过期文件失败: {clean_err}")
 
-        ctx, hint = await self._resolve_context(session_id, sender_id, session_name=session_name, sender_name=sender_name)
-        if ctx is None:
-            return "下载失败: 无法获取浏览器上下文"
+        async def _download(ctx: BrowserSessionContext, page: Page) -> str:
+            ref_str = str(ref).strip()
+            if ref not in ctx.ref_map and ref_str not in ctx.ref_map:
+                return f"下载失败: 无效的元素引用 [{ref}]"
 
-        page = ctx.current_page
-        url = getattr(page, "url", "")
-        allowed, reason = self.security_mgr.check_permission(ctx.owner_id, url, "download")
-        if not allowed:
-            await self.audit_logger.log_action(
-                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "download_file", url, {"ref": ref}, reason,
-                is_permitted=False, deny_reason=reason,
-                session_name=session_name, sender_name=sender_name
-            )
-            return f"下载失败: {reason}"
+            if ref_str.startswith("e") or re.match(r"^(f\d+)?e\d+$", ref_str):
+                locator = page.locator(f"aria-ref={ref_str}")
+            else:
+                locator = page.locator(f'[data-astr-ref="{ref_str}"]')
 
-        if ref not in ctx.ref_map:
-            return f"下载失败: 无效的元素引用 [{ref}]"
-
-        try:
             async with page.expect_download(timeout=30000) as download_info:
-                script = f"""
-                (() => {{
-                    const target = document.querySelector('[data-astr-ref="{ref}"]');
-                    if (target) {{ target.click(); return true; }}
-                    return false;
-                }})()
-                """
-                await page.evaluate(script)
+                await locator.click()
 
-            download = await download_info.value
+            download_val = getattr(download_info, "value", None)
+            if inspect.isawaitable(download_val):
+                download = await download_val
+            elif callable(download_val):
+                res = download_val()
+                download = await res if inspect.isawaitable(res) else res
+            else:
+                download = download_val
+
             target_file_path = os.path.join(self.download_dir, download.suggested_filename)
             await download.save_as(target_file_path)
 
-            res = f"[FILE_PATH:{target_file_path}]\n已成功下载文件: {download.suggested_filename}"
-            await self.audit_logger.log_action(
-                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "download_file", url, {"ref": ref}, res, is_permitted=True,
-                session_name=session_name, sender_name=sender_name
-            )
-            return res
-        except Exception as e:
-            tb_str = traceback.format_exc()
-            logger.error(f"[PlaywrightTool] download_file 异常: {e}\n{tb_str}")
-            err_msg = f"下载异常: {str(e)}"
-            full_error = f"{type(e).__name__}: {str(e)}\n\n{tb_str}" if tb_str else str(e)
-            await self.audit_logger.log_action(
-                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "download_file", url, {"ref": ref}, err_msg, is_permitted=True,
-                is_error=True, error_message=full_error,
-                session_name=session_name, sender_name=sender_name
-            )
-            return err_msg
+            return f"[FILE_PATH:{target_file_path}]\n已成功下载文件: {download.suggested_filename}"
+
+        return await self.execute_action(
+            session_id=session_id,
+            sender_id=sender_id,
+            action_name="download_file",
+            target_resource="",
+            action_coro_fn=_download,
+            input_args={"ref": str(ref)},
+            required_permission="download",
+            session_name=session_name,
+            sender_name=sender_name,
+            action_desc="下载",
+        )

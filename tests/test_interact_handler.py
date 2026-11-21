@@ -1,6 +1,7 @@
 import unittest
 import os
 import sys
+import asyncio
 from unittest.mock import MagicMock, AsyncMock
 
 if "astrbot" not in sys.modules:
@@ -13,10 +14,7 @@ if parent_dir not in sys.path:
 from astrbot_plugin_playwright_tools.tools.handlers.interact_handler import InteractHandler, clean_playwright_error
 
 def run_coro(coro):
-    try:
-        coro.send(None)
-    except StopIteration as e:
-        return e.value
+    return asyncio.run(coro)
 
 class TestInteractHandler(unittest.TestCase):
     def setUp(self):
@@ -30,76 +28,121 @@ class TestInteractHandler(unittest.TestCase):
         self.mock_audit.log_action = mock_log
 
         self.mock_locator = AsyncMock()
+        self.mock_locator.get_attribute = AsyncMock(return_value="text")
         self.mock_page = MagicMock()
         self.mock_page.url = "https://example.com"
         self.mock_page.locator.return_value = self.mock_locator
         self.mock_page.keyboard = AsyncMock()
         self.mock_page.mouse = AsyncMock()
+        self.mock_page.wait_for_load_state = AsyncMock()
 
         self.mock_context = MagicMock()
         self.mock_context.owner_id = "u1"
         self.mock_context.current_page = self.mock_page
         self.mock_context.last_dialog_message = None
         self.mock_context.ref_map = {
+            "1": {"tag": "button", "text": "btn1"},
+            "2": {"tag": "div", "text": "target_bin"},
+            "3": {"tag": "input", "text": ""},
+            "4": {"tag": "select", "text": ""},
+            "p1": {"tag": "input", "type": "password", "text": ""},
+            "e1": {"ref": "e1", "tag": "button", "text": "aria_btn"},
+            "e2": {"ref": "e2", "tag": "div", "text": "aria_target"},
+            "f0e1": {"ref": "f0e1", "tag": "button", "text": "frame_btn"},
             1: {"tag": "button", "text": "btn1"},
             2: {"tag": "div", "text": "target_bin"},
             3: {"tag": "input", "text": ""},
-            4: {"tag": "select", "text": ""}
+            4: {"tag": "select", "text": ""},
         }
         self.mock_context.is_snapshot_dirty = False
 
-        async def mock_resolve(session_id, sender_id):
+        async def mock_resolve(session_id, sender_id, **kwargs):
             return self.mock_context, ""
         self.mock_mgr.resolve_context = mock_resolve
 
         self.handler = InteractHandler(self.mock_mgr, self.mock_sec, self.mock_audit)
 
     def test_click_element(self):
-        res = run_coro(self.handler.click("s1", "u1", ref=1))
+        res = run_coro(self.handler.click("s1", "u1", ref="1"))
         self.assertIn("已成功点击 [1]", res)
         self.assertIn("pw_read()", res)
         self.assertTrue(self.mock_context.is_snapshot_dirty)
         self.mock_page.locator.assert_called_with('[data-astr-ref="1"]')
         self.mock_locator.click.assert_called_once()
 
+    def test_click_element_aria_ref(self):
+        res = run_coro(self.handler.click("s1", "u1", ref="e1"))
+        self.assertIn("已成功点击 [e1]", res)
+        self.assertTrue(self.mock_context.is_snapshot_dirty)
+        self.mock_page.locator.assert_called_with("aria-ref=e1")
+        self.mock_locator.click.assert_called_once()
+
+    def test_click_element_frame_aria_ref(self):
+        res = run_coro(self.handler.click("s1", "u1", ref="f0e1"))
+        self.assertIn("已成功点击 [f0e1]", res)
+        self.mock_page.locator.assert_called_with("aria-ref=f0e1")
+
     def test_fill_form(self):
-        res = run_coro(self.handler.fill_form("s1", "u1", ref=3, text="Hello Playwright"))
+        res = run_coro(self.handler.fill_form("s1", "u1", ref="3", text="Hello Playwright"))
         self.assertIn("已成功在输入框 [3] 填入内容", res)
         self.assertTrue(self.mock_context.is_snapshot_dirty)
         self.mock_page.locator.assert_called_with('[data-astr-ref="3"]')
         self.mock_locator.fill.assert_called_with("Hello Playwright", timeout=10000)
 
+    def test_fill_form_aria_ref(self):
+        res = run_coro(self.handler.fill_form("s1", "u1", ref="e1", text="Search query"))
+        self.assertIn("已成功在输入框 [e1] 填入内容", res)
+        self.mock_page.locator.assert_called_with("aria-ref=e1")
+
+    def test_fill_form_password_masking(self):
+        mock_log = AsyncMock()
+        self.mock_audit.log_action = mock_log
+        res = run_coro(self.handler.fill_form("s1", "u1", ref="p1", text="secret_pass_123"))
+        self.assertNotIn("secret_pass_123", res)
+        self.assertIn("密码输入框", res)
+        mock_log.assert_called_once()
+        _, kwargs = mock_log.call_args
+        self.assertEqual(kwargs.get("input_args", {}).get("text"), "******")
+
     def test_select_option(self):
-        res = run_coro(self.handler.select_option("s1", "u1", ref=4, value="opt2"))
+        res = run_coro(self.handler.select_option("s1", "u1", ref="4", value="opt2"))
         self.assertIn("已在下拉框 [4] 成功选取 'opt2'", res)
         self.assertTrue(self.mock_context.is_snapshot_dirty)
         self.mock_page.locator.assert_called_with('[data-astr-ref="4"]')
         self.mock_locator.select_option.assert_called()
 
+    def test_select_option_aria_ref(self):
+        res = run_coro(self.handler.select_option("s1", "u1", ref="e1", value="opt2"))
+        self.mock_page.locator.assert_called_with("aria-ref=e1")
+
     def test_hover_element(self):
-        res = run_coro(self.handler.hover("s1", "u1", ref=1))
+        res = run_coro(self.handler.hover("s1", "u1", ref="1"))
         self.assertIn("已成功悬停在元素 [1]", res)
         self.mock_page.locator.assert_called_with('[data-astr-ref="1"]')
         self.mock_locator.hover.assert_called_once()
 
+    def test_hover_element_aria_ref(self):
+        res = run_coro(self.handler.hover("s1", "u1", ref="e1"))
+        self.mock_page.locator.assert_called_with("aria-ref=e1")
+
     def test_focus_and_blur(self):
-        res_focus = run_coro(self.handler.focus("s1", "u1", ref=3))
+        res_focus = run_coro(self.handler.focus("s1", "u1", ref="3"))
         self.assertIn("已聚焦到元素 [3]", res_focus)
         self.mock_locator.focus.assert_called_once()
 
-        res_blur = run_coro(self.handler.blur("s1", "u1", ref=3))
+        res_blur = run_coro(self.handler.blur("s1", "u1", ref="3"))
         self.assertIn("元素 [3] 已失焦", res_blur)
         self.mock_locator.evaluate.assert_called_with("el => el.blur()")
 
     def test_drag_element_missing_target(self):
-        res = run_coro(self.handler.drag("s1", "u1", ref=1, target_ref=99))
+        res = run_coro(self.handler.drag("s1", "u1", ref="1", target_ref="99"))
         self.assertIn("无效的拖拽目标", res)
 
     def test_drag_denied_logs_audit(self):
         self.mock_sec.check_permission.return_value = (False, "没有点击权限")
         mock_log = AsyncMock()
         self.mock_audit.log_action = mock_log
-        res = run_coro(self.handler.drag("s1", "u1", ref=1, target_ref=2, session_name="群1", sender_name="用户1"))
+        res = run_coro(self.handler.drag("s1", "u1", ref="1", target_ref="2", session_name="群1", sender_name="用户1"))
         self.assertIn("拖拽失败: 没有点击权限", res)
         mock_log.assert_called_once()
         _, kwargs = mock_log.call_args
@@ -111,14 +154,25 @@ class TestInteractHandler(unittest.TestCase):
     def test_drag_element_success(self):
         target_locator = AsyncMock()
         def mock_loc(sel):
-            if 'data-astr-ref="1"' in sel:
+            if 'data-astr-ref="1"' in sel or sel == "aria-ref=1":
                 return self.mock_locator
             return target_locator
         self.mock_page.locator.side_effect = mock_loc
 
-        res = run_coro(self.handler.drag("s1", "u1", ref=1, target_ref=2))
+        res = run_coro(self.handler.drag("s1", "u1", ref="1", target_ref="2"))
         self.assertIn("已成功将元素 [1] 拖拽至 [2]", res)
         self.mock_locator.drag_to.assert_called_with(target_locator, timeout=10000)
+
+    def test_drag_element_aria_ref(self):
+        loc_calls = []
+        def mock_loc(sel):
+            loc_calls.append(sel)
+            return AsyncMock()
+        self.mock_page.locator.side_effect = mock_loc
+
+        run_coro(self.handler.drag("s1", "u1", ref="e1", target_ref="e2"))
+        self.assertIn("aria-ref=e1", loc_calls)
+        self.assertIn("aria-ref=e2", loc_calls)
 
     def test_press_key(self):
         res = run_coro(self.handler.press_key("s1", "u1", key="Enter"))
@@ -138,7 +192,7 @@ class TestInteractHandler(unittest.TestCase):
 
     def test_permission_denied_focus_and_press(self):
         self.mock_sec.check_permission.return_value = (False, "没有权限")
-        res_focus = run_coro(self.handler.focus("s1", "u1", ref=1))
+        res_focus = run_coro(self.handler.focus("s1", "u1", ref="1"))
         self.assertIn("聚焦失败: 没有权限", res_focus)
 
         res_press = run_coro(self.handler.press_key("s1", "u1", key="Enter"))

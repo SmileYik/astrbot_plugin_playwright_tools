@@ -4,8 +4,9 @@ import sys
 import tempfile
 import base64
 import time
+import asyncio
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, AsyncMock, patch
 
 if "astrbot" not in sys.modules:
     sys.modules["astrbot"] = MagicMock()
@@ -19,10 +20,7 @@ from astrbot_plugin_playwright_tools.tools.handlers.media_handler import MediaHa
 TEMP_DIR = Path(tempfile.gettempdir()) / "astrbot_test_media_v2"
 
 def run_coro(coro):
-    try:
-        coro.send(None)
-    except StopIteration as e:
-        return e.value
+    return asyncio.run(coro)
 
 async def fake_wait_for(fut, timeout):
     return await fut
@@ -40,13 +38,18 @@ class TestMediaHandler(unittest.TestCase):
 
         self.mock_page = MagicMock()
         self.mock_page.url = "https://example.com"
+        self.mock_page.wait_for_load_state = AsyncMock()
         self.mock_context = MagicMock()
         self.mock_context.owner_id = "u1"
         self.mock_context.current_page = self.mock_page
         self.mock_context.pages = [self.mock_page]
-        self.mock_context.ref_map = {1: {"tag": "a", "text": "download-file"}}
+        self.mock_context.ref_map = {
+            "1": {"tag": "a", "text": "download-file"},
+            "e1": {"ref": "e1"},
+            1: {"tag": "a", "text": "download-file"}
+        }
 
-        async def mock_resolve(session_id, sender_id):
+        async def mock_resolve(session_id, sender_id, **kwargs):
             return self.mock_context, ""
         self.mock_mgr.resolve_context = mock_resolve
 
@@ -123,14 +126,14 @@ class TestMediaHandler(unittest.TestCase):
         self.assertIn("降级为当前视口截图", res)
 
     def test_download_file_invalid_ref(self):
-        res = run_coro(self.handler.download_file("s1", "u1", ref=99))
+        res = run_coro(self.handler.download_file("s1", "u1", ref="99"))
         self.assertIn("无效的元素引用", res)
 
     def test_download_file_denied_logs_audit(self):
         self.mock_sec.check_permission.return_value = (False, "黑名单拦截下载")
         mock_log = unittest.mock.AsyncMock()
         self.mock_audit.log_action = mock_log
-        res = run_coro(self.handler.download_file("s1", "u1", ref=1, session_name="群1", sender_name="用户1"))
+        res = run_coro(self.handler.download_file("s1", "u1", ref="1", session_name="群1", sender_name="用户1"))
         self.assertIn("下载失败: 黑名单拦截下载", res)
         mock_log.assert_called_once()
         _, kwargs = mock_log.call_args
@@ -138,6 +141,33 @@ class TestMediaHandler(unittest.TestCase):
         self.assertEqual(kwargs.get("deny_reason"), "黑名单拦截下载")
         self.assertEqual(kwargs.get("session_name"), "群1")
         self.assertEqual(kwargs.get("sender_name"), "用户1")
+
+    def test_download_file_aria_ref_locator(self):
+        mock_download = MagicMock()
+        mock_download.suggested_filename = "test.pdf"
+        mock_download.save_as = AsyncMock()
+
+        async def get_download():
+            return mock_download
+
+        class DummyEventInfo:
+            @property
+            def value(self):
+                return get_download()
+
+        class DummyExpectDownload:
+            async def __aenter__(self):
+                return DummyEventInfo()
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return None
+
+        self.mock_page.expect_download = MagicMock(return_value=DummyExpectDownload())
+        mock_loc = AsyncMock()
+        self.mock_page.locator = MagicMock(return_value=mock_loc)
+
+        res = run_coro(self.handler.download_file("s1", "u1", ref="e1"))
+        self.mock_page.locator.assert_called_with("aria-ref=e1")
+        self.assertIn("已成功下载文件: test.pdf", res)
 
     def test_passive_cleanup_removes_expired_files(self):
         clean_dir = TEMP_DIR / "cleanup_test"

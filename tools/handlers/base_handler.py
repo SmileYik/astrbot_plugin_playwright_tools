@@ -30,6 +30,9 @@ ACTION_DESC_MAP = {
     "scroll": "滚动",
     "open_url": "打开",
     "read_page": "读取",
+    "switch_tab": "切换",
+    "handle_dialog": "配置",
+    "close_browser": "关闭",
     "screenshot_viewport": "截图",
     "screenshot_full": "截图",
     "download_file": "下载",
@@ -100,13 +103,17 @@ class BaseActionHandler:
 
         timeout_ms = int(timeout * 1000)
         try:
-            await page.wait_for_load_state("domcontentloaded", timeout=10000)
+            ret = page.wait_for_load_state("domcontentloaded", timeout=10000)
+            if inspect.isawaitable(ret):
+                await ret
         except Exception as e:
             if not self._is_timeout_error(e):
                 logger.warning(f"[PlaywrightTool] wait_page_stable domcontentloaded 异常: {e}")
 
         try:
-            await page.wait_for_load_state("networkidle", timeout=timeout_ms)
+            ret = page.wait_for_load_state("networkidle", timeout=timeout_ms)
+            if inspect.isawaitable(ret):
+                await ret
         except Exception as e:
             if not self._is_timeout_error(e):
                 logger.warning(f"[PlaywrightTool] wait_page_stable networkidle 异常: {e}")
@@ -120,11 +127,15 @@ class BaseActionHandler:
     ) -> tuple[BrowserSessionContext | None, str]:
         """统一上下文寻址助手。"""
         try:
-            res = await self.context_mgr.resolve_context(
+            res = self.context_mgr.resolve_context(
                 session_id, sender_id, session_name=session_name, sender_name=sender_name
             )
+            if inspect.isawaitable(res):
+                res = await res
         except TypeError:
-            res = await self.context_mgr.resolve_context(session_id, sender_id)
+            res = self.context_mgr.resolve_context(session_id, sender_id)
+            if inspect.isawaitable(res):
+                res = await res
 
         if isinstance(res, tuple):
             return res
@@ -210,9 +221,16 @@ class BaseActionHandler:
 
         # 鉴权检查
         if required_permission:
-            allowed, reason = self.security_mgr.check_permission(
-                ctx.owner_id, current_url, required_permission
-            )
+            if (
+                required_permission == "navigate" or action_name == "open_url"
+            ) and hasattr(self.security_mgr, "is_url_allowed_navigation"):
+                allowed, reason = self.security_mgr.is_url_allowed_navigation(
+                    ctx.owner_id, current_url
+                )
+            else:
+                allowed, reason = self.security_mgr.check_permission(
+                    ctx.owner_id, current_url, required_permission
+                )
             if not allowed:
                 await self._log_audit(
                     session_id=session_id,
@@ -244,6 +262,9 @@ class BaseActionHandler:
                     coro = action_coro_fn()
 
             res = await coro if inspect.isawaitable(coro) else coro
+            extra_audit = {}
+            if isinstance(res, tuple) and len(res) == 2 and isinstance(res[1], dict):
+                res, extra_audit = res
             res = str(res)
 
             if hint and hint not in res:
@@ -263,6 +284,7 @@ class BaseActionHandler:
                 is_permitted=True,
                 session_name=session_name,
                 sender_name=sender_name,
+                **extra_audit,
             )
             return res
         except Exception as e:
