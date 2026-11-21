@@ -4,6 +4,24 @@
 
 ---
 
+## [v1.1.0] - 2026-11-22
+
+### 健壮性与架构重构 (Robustness & Architecture Refactor)
+- **Ref ID 字符串化与单调递增**：所有工具入参、内部数据结构及 Schema 中的 `ref` 全面统一为字符串类型（如 `'1'`, `'e1'`）；Markdown 模式由上下文统一管理单调递增计数器（递增上限 1,000,000 后安全回滚至 0），向 DOM 注入 `data-astr-ref`，避免历史元素序号冲突；ARIA 模式无缝对接官方 Ref。
+- **Playwright 官方 ARIA 引擎原生替换**：移除自定义 JavaScript 递归遍历 DOM 脚本，原生调用 `page.locator(':root').aria_snapshot(mode='ai')` 与 `aria-ref=` 选择器，大幅提升无障碍语义树快照提取的解析准确性与性能。
+- **全链路密码安全脱敏流水线**：表单填入敏感信息时，根据元素属性探测 `type == 'password'`，开启配置后在审计记录入参、调用日志与大模型返回结果中均将敏感密码值替换为 `******`，防止凭据泄露。
+- **BaseActionHandler 模板方法切面收敛**：抽取通用动作执行切面基类，通过统一的 `execute_action()` 模板方法收敛上下文寻址、权限预检、稳定等待、业务执行、密码脱敏、异常清洗及审计日志落库，消除各 Handler 中的模板代码冗余。
+- **历史死代码清理**：移除已废弃的 `core/page_extractor.py`（500+ 行）及过期单测，清理向后兼容的历史遗留别名与接口。
+- **页面就绪等待守卫 (Page Stabilization)**：在导航与页面读取前引入两阶段稳定等待，结合 `domcontentloaded` 与带有 1.5 秒超时熔断机制的 `networkidle` 状态检测，有效防止异步页面未渲染空白及长轮询挂起。
+- **四重快照自动失效机制**：实现主 Frame 导航监听（`framenavigated`）、URL 状态偏离比对、交互状态变更脏标记（`is_snapshot_dirty`）以及 60 秒 TTL 衰减，确保操作基于新鲜页面状态。
+- **上下文创建异常自动回滚**：`ContextManager` 在创建浏览器上下文过程中若遭遇路由绑定、页面创建或监听器注册失败，自动执行回滚清理关闭底层上下文，防止孤儿进程与内存泄漏。
+
+### 平台合规改进 (Platform Compliance)
+- **插件专属数据持久化路径规范**：将审计数据库（`audit.db`）、文件下载目录（`downloads/`）、临时截图（`screenshots/`）与审计截图（`audit_screenshots/`）全部收敛迁移至 AstrBot 插件规范目录 `data/plugin_data/astrbot_plugin_playwright_tools/`。
+- **统一 Logger 规范化治理**：移除所有模块中对标准库 `logging` 的回退导入，全插件严格遵循平台规范仅通过 `from astrbot.api import logger` 获取日志器。
+
+---
+
 ## [v1.0.0] - 2026-11-21 (正式公开发布)
 
 ### 核心亮点与全功能正式发布 (Official Public Release)

@@ -1,6 +1,6 @@
 # 插件系统架构设计 (Architecture)
 
-本文档阐明 `astrbot_plugin_playwright_tools` 的系统分层架构、并发与隔离模型、安全防护及扩展规范。
+本文档阐明 `astrbot_plugin_playwright_tools` 的系统分层架构、并发与隔离模型、元素定位、安全与稳定性机制以及平台合规规范。
 
 ---
 
@@ -31,18 +31,20 @@ flowchart TD
     end
 
     subgraph HandlerLayer [Modular Handlers Layer]
+        BaseActionHandler["BaseActionHandler: execute_action / wait_page_stable"]
         PageHandler[PageHandler]
         InteractHandler[InteractHandler]
         MediaHandler[MediaHandler]
+        BaseActionHandler --> PageHandler
+        BaseActionHandler --> InteractHandler
+        BaseActionHandler --> MediaHandler
     end
 
     subgraph CoreLayer [Core Services & Readers Layer]
         CtxMgr[ContextManager]
         SecMgr[SecurityManager]
         AuditLog[AuditLogger]
-        Extractor[PageExtractor]
         Readers["Readers: InlineMarkdownReader / AriaSnapshotReader"]
-        Extractor --> Readers
     end
 
     subgraph AdaptLayer [Browser Adapter Layer]
@@ -76,28 +78,34 @@ flowchart TD
 - **`PlaywrightAdapter`**: 封装 Playwright 原生驱动（Chromium / Firefox / WebKit / Custom），支持自定义二进制路径，负责底层进程生命周期。
 
 ### 1.2 核心服务与提炼层 (`core/`, `core/readers/`)
-- **`ContextManager`**: 管理多租户 `ManagedContext` 实例。负责个人模式与会话模式的上下文隔离路由、协作者授权、Cookie 注入以及空闲定时回收。
-- **`SecurityManager`**: 权限与白名单守卫。执行域名通配符匹配（如 `*.github.com`）、动作权限细粒度校验，以及在页面创建时拦截未授权顶层跳转、弹出新窗口与 iframe 导航。
+- **`ContextManager`**: 管理多租户 `BrowserSessionContext` 实例。负责个人模式与会话模式的上下文隔离路由、协作者授权、Cookie 注入、空闲定时回收、维护单调递增的 Ref 编号计数器，并在创建上下文异常时自动执行回滚清理。
+- **`SecurityManager`**: 权限与白名单守卫。执行域名通配符匹配（如 `*.github.com`）、动作权限细粒度校验，以及在页面创建和路由阶段拦截未授权顶层跳转、弹出新窗口与 iframe 导航。
 - **`AuditLogger`**: SQLite 审计记录器。异步记录全量调用（起止时间、会话、上下文、目标域名、入参与结果），并在初始化与周期轮询中自动清理超期数据。
-- **`PageExtractor` 与 `readers/`**: 
-  - `PageExtractor`: 提取器单例入口，无状态维护提取流程，为可交互 DOM 节点打上 `data-astr-ref="{idx}"` 属性，支持关键词检索过滤与快照缓存。
-  - `InlineMarkdownReader`: 将网页标题、段落、列表、表格及带 Ref ID 的控件融合成语义清晰的 Markdown 文档，支持字符预算（`page_chunk_char_limit`）平滑分页。
-  - `AriaSnapshotReader`: 基于浏览器无障碍树生成严密的语义角色层级快照。
+- **`readers/`（双阅读提炼器）**:
+  - **`InlineMarkdownReader`**: 将网页标题、段落、列表、表格及带 Ref ID 的控件融合成语义清晰的 Markdown 文档，向可交互 DOM 节点注入单调递增编号 `data-astr-ref="{ref}"`，支持字符预算（`page_chunk_char_limit`）平滑分页。
+  - **`AriaSnapshotReader`**: 原生调用 Playwright 官方 `page.locator(':root').aria_snapshot(mode='ai')` 生成标准化无障碍树快照，输出带有 `[ref=e1]` 等语义标识的 YAML 结构，并通过正则抽取映射到内部 `ref_map`。
 
 ### 1.3 处理器层 (`tools/handlers/`)
-- **`PageHandler`**: 页面生命周期与导航（打开 URL、标签页切换、原生对话框响应与上下文主动关闭）。
-- **`InteractHandler`**: 原生 Locator 交互逻辑（点击、输入、选择、鼠标悬停、焦点管理、元素拖拽、键盘按键及滚动），基于 `data-astr-ref` 定位并自动脱敏错误与生成下一步推荐指引。
-- **`MediaHandler`**: 视口与长截图生成及下载，实施双重熔断（最大高度限制与超时回退为视口截图），处理持久化审计截图。
+- **`BaseActionHandler`**: 动作执行切面基类。通过模板方法 `execute_action()` 统一收敛核心横切逻辑：
+  - 上下文寻址与活跃状态校验；
+  - 基于 `SecurityManager` 进行动作权限与域名白名单预检；
+  - 页面稳定等待保护（`wait_page_stable`）；
+  - 密码输入全链路脱敏（若 `mask_password_inputs=True`，探测 `type == 'password'` 并将入参脱敏为 `******` 记录审计和日志）；
+  - Playwright 底层错误清洗（`clean_playwright_error`），保留错误调用栈并记录错误审计；
+  - 审计日志全量落盘与返回结果格式化。
+- **`PageHandler`**: 页面生命周期与导航（打开 URL、标签页切换、原生对话框响应与上下文主动关闭），继承 `BaseActionHandler`。
+- **`InteractHandler`**: 原生 Locator 键鼠与表单交互（点击、输入、选择、鼠标悬停、焦点管理、元素拖拽、键盘按键及滚动），继承 `BaseActionHandler`，支持双定位策略及密码脱敏。
+- **`MediaHandler`**: 视口与长截图生成及下载，实施双重熔断（最大高度限制与超时回退为视口截图），处理持久化审计截图，继承 `BaseActionHandler`。
 
 ### 1.4 门面分发层 (`tools/tools.py`, `tools/schemas.py`)
 - **`PwPageTool` / `PwReadTool` / `PwInteractTool` / `PwMediaTool`**: 继承 `FunctionTool[AstrAgentContext]` 的类型化工具门面，面向大模型暴露四大独立复合工具。
-- 每个工具在初始化时维护 `_actions` 字典映射，移除 `if-elif-else` 分支；`call()` 统一设计为标准协程，并通过 `_execute_with_timeout` 施加全局单工具超时保护。
+- 每个工具在初始化时维护 `_actions` 字典映射，统一采用字符串格式 Ref ID 参数；`call()` 统一设计为标准协程，并通过 `_execute_with_timeout` 施加全局单工具超时保护。
 - 在发送聊天截图时，使用异步方法交付，避免后续文本消息覆盖聊天界面图片。
 
 ### 1.5 可视化视图与 Web API 层 (`views/browser/`, `web-src/`, `main.py`, `api/`)
 - **独立页面声明 (`metadata.yaml`)**：注册 `target: plugin_page` 视图 `browser`（网页工具控制台），由 WebUI 宿主统一加载展示。
 - **轻量 MD3 前端架构 (`web-src/`)**：基于 Vite + React 18 + TypeScript 构建，自适应宿主深浅色主题，遵循 Material Design 3 大圆角（16-24px）与表面色规范。基于内部内存路由无缝切换“操作审计”与“会话生命周期”面板，侧边抽屉支持检视全量 JSON 入参、DOM 快照与截图。
-- **后端模块化 Web API (`api/audit_api.py`, `api/lifecycle_api.py`)**：通过 `context.register_web_api` 注册 `/{PLUGIN_NAME}/audit/*`（多维条件检索、指标统计、导出、清空、截图预览）与 `/{PLUGIN_NAME}/lifecycle/*`（活跃上下文列表、生命周期日志检索、上下文强制终止、手动截图）。所有接口天然复用 AstrBot WebUI 原生登录鉴权。
+- **后端模块化 Web API (`api/audit_api.py`, `api/lifecycle_api.py`)**：通过 `context.register_web_api` 注册 `/{PLUGIN_NAME}/audit/*`（多维条件检索、指标统计、导出、清空、截图预览）与 `/{PLUGIN_NAME}/lifecycle/*`（活跃上下文列表、生命周期日志检索、上下文强制终止、手动截图）。所有接口复用 AstrBot WebUI 原生登录鉴权。
 
 ---
 
@@ -113,7 +121,7 @@ Session S1 ──> User U1 ──> Context (Owner: U1, SharedWith: [U2])
 Session S1 ──> All Users share Context (Owner: S1)
 ```
 
-1. **个人模式 (`personal`)**：默认以 `session_id:sender_id` 作为上下文标识，各用户数据、Cookie 与页面完全隔离。
+1. **个人模式 (`personal`)**：默认以 `session_id:sender_id` 作为上下文标识，各用户数据、Cookie 与页面隔离。
 2. **协作切换**：所有者可通过 `/browser invite <UID>` 授权好友；被授权用户可通过 `/browser use <UID>` 主动切换绑定目标上下文。
 3. **特权防护**：预配置的 Cookie / StorageState 仅对管理员创建的上下文生效，普通用户上下文保持纯净无凭据隔离。
 
@@ -121,15 +129,49 @@ Session S1 ──> All Users share Context (Owner: S1)
 
 ## 3. 元素定位与交互可靠性
 
-- **Ref ID 生成**：通过 `document.body` 遍历可操作节点（`a`, `button`, `input`, `select`, `textarea` 等），写入 `data-astr-ref="{idx}"`。
-- **元素查找**：所有交互操作（点击、悬停、聚焦、拖拽等）均基于 Playwright 原生定位器 `locator('[data-astr-ref="{ref}"]')` 执行，全面享受框架自带的可操作性检查与受控组件事件分发，避免传统裸 JS 注入匹配失败。
+- **Ref ID 字符串化与单调递增**：所有工具入参（`ref`、`target_ref`）、上下文 `ref_map` 均统一采用字符串类型。Markdown 模式采用单调递增计数器（递增上限 1,000,000 后安全回滚至 0），避免历史 Ref ID 冲突。
+- **双定位器策略**：
+  - **ARIA 快照模式**：当 Ref ID 为官方格式标识（如 `e1`）或由 ARIA 模式生成时，使用 Playwright 原生选择器 `page.locator(f"aria-ref={ref}")` 执行定位。
+  - **内联 Markdown 模式**：当 Ref ID 为数字编号（如 `'1'`）时，使用 `page.locator(f'[data-astr-ref="{ref}"]')` 执行定位。
+  - 两种方式均基于 Playwright 原生 Locator 体系，享有框架自带的可操作性检查与受控组件事件分发。
+- **全链路密码安全脱敏**：表单填入敏感信息时，根据元素属性探测 `type == 'password'`，开启配置后在审计记录、调用日志与大模型返回结果中均将敏感密码值替换为 `******`，防止凭据泄露。
 
 ---
 
-## 4. 扩展规范
+## 4. 页面稳定等待与四重快照失效机制
+
+- **页面就绪等待守卫 (`wait_page_stable`)**：在页面导航或关键交互后，依次执行两阶段等待：
+  1. 等待 `domcontentloaded`（超时 10s）；
+  2. 执行 `networkidle` 限时守卫（1.5s 超时熔断）。针对长轮询、WebSocket 或媒体流持续产生网络请求的现代网页，超时后平滑降级放行，避免流程卡死。
+- **四重快照失效机制**：
+  1. **路由导航监听**：监听主 Frame 的 `framenavigated` 事件，一旦主页面发生跳转，立即将上下文标记为 `is_snapshot_dirty = True` 并清空旧快照与 `ref_map`；
+  2. **URL 状态比对**：在 `read_page` 提炼前，比对当前 `page.url` 与快照 URL，若不一致则标记脏并重置；
+  3. **交互状态脏标记**：在 `InteractHandler` 中执行任何具有副作用的交互操作后，将 `ctx.is_snapshot_dirty = True`；
+  4. **TTL 时效衰减**：快照记录生成时间戳 `timestamp`，超过 60 秒有效期后自动失效重新提取。
+
+---
+
+## 5. 上下文创建回滚与资源安全
+
+`ContextManager._create_new_context` 采用生命周期安全保护：在申请底层 `BrowserContext` 之后，后续的路由守卫挂载、首页面创建、事件监听注册等步骤若发生任何异常，均在 `try...except` 中捕获并立即调用 `await browser_ctx.close()`，清理孤儿上下文，避免资源泄漏。
+
+---
+
+## 6. 平台合规设计 (Platform Compliance)
+
+- **专属数据持久化路径**：遵循 AstrBot 插件持久化规范，所有产生的文件统一收敛至 `data/plugin_data/astrbot_plugin_playwright_tools/`：
+  - 审计数据库：`data/plugin_data/astrbot_plugin_playwright_tools/audit.db`
+  - 文件下载目录：`data/plugin_data/astrbot_plugin_playwright_tools/downloads/`
+  - 临时截图目录：`data/plugin_data/astrbot_plugin_playwright_tools/screenshots/`
+  - 审计截图目录：`data/plugin_data/astrbot_plugin_playwright_tools/audit_screenshots/`
+- **统一 Logger 规范**：全插件模块严格使用 AstrBot 官方标准的 `from astrbot.api import logger` 获取日志器，移除标准库 `logging` 的回退引入，保证与宿主运行环境的日志格式和输出通道一致。
+
+---
+
+## 7. 扩展规范
 
 若需为现有工具扩展动作（Action）或新增复合工具：
-1. **Schema 扩展**：在 `tools/schemas.py` 中更新对应工具的 `action` 枚举及字段定义。
-2. **Handler 实现**：在 `tools/handlers/` 相应模块中编写底层逻辑，并在执行前后记录 `audit_logger.log_action`。
+1. **Schema 扩展**：在 `tools/schemas.py` 中更新对应工具的 `action` 枚举及字段定义，`ref` 字段统一为 `string` 类型。
+2. **Handler 实现**：在 `tools/handlers/` 相应模块中编写动作逻辑，统一继承 `BaseActionHandler` 并通过 `execute_action()` 分发调度。
 3. **门面转发**：在 `tools/tools.py` 对应工具中实现私有动作方法，并注册进 `self._actions` 映射表中。
 4. **单测覆盖**：在 `tests/` 中编写针对新动作的单元测试。
