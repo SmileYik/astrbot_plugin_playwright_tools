@@ -12,7 +12,6 @@ from .api.lifecycle_api import LifecycleApiHandler
 
 from .core.audit_logger import AuditLogger
 from .core.security_manager import SecurityManager
-from .core.page_extractor import PageExtractor
 from .core.readers import InlineMarkdownReader, AriaSnapshotReader
 from .core.context_manager import ContextManager
 from .adapts.factory import AdapterFactory
@@ -94,10 +93,6 @@ class PlaywrightToolPlugin(Star):
             whitelist_rules=whitelist_rules,
             admin_bypass=True,
         )
-        self.page_extractor = PageExtractor(
-            max_page_char_length=2500,
-            multiline_separator=element_multiline_separator,
-        )
         if self.content_extraction_mode == "aria_snapshot":
             self.reader = AriaSnapshotReader(
                 chunk_char_limit=self.page_chunk_char_limit,
@@ -124,7 +119,6 @@ class PlaywrightToolPlugin(Star):
             self.security_manager,
             self.audit_logger,
             reader=self.reader,
-            page_extractor=self.page_extractor,
             enable_close_tool=enable_close_tool,
         )
         self.interact_handler = InteractHandler(

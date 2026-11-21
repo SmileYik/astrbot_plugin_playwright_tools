@@ -5,7 +5,6 @@ from ...core.context_manager import ContextManager
 from ...core.security_manager import SecurityManager
 from ...core.audit_logger import AuditLogger
 from ...core.readers.base import BasePageReader
-from ...core.page_extractor import PageExtractor
 
 from astrbot.api import logger
 
@@ -19,18 +18,13 @@ class PageHandler:
         security_mgr: SecurityManager,
         audit_logger: AuditLogger,
         reader: BasePageReader | None = None,
-        page_extractor: PageExtractor | None = None,
         enable_close_tool: bool = True,
         **kwargs,
     ):
         self.context_mgr = context_mgr
         self.security_mgr = security_mgr
         self.audit_logger = audit_logger
-        actual_reader = reader if reader is not None else page_extractor
-        if actual_reader is None and "page_extractor" in kwargs:
-            actual_reader = kwargs["page_extractor"]
-        self.reader = actual_reader
-        self.page_extractor = page_extractor or actual_reader
+        self.reader = reader
         self.enable_close_tool = enable_close_tool
 
     async def _resolve_context(
@@ -191,27 +185,6 @@ class PageHandler:
                 session_name=session_name, sender_name=sender_name
             )
             return err_msg
-
-    async def search_page(
-        self,
-        session_id: str,
-        sender_id: str,
-        keyword: str,
-        target: str = "all",
-        session_name: str = "",
-        sender_name: str = "",
-        **kwargs,
-    ) -> str:
-        """在当前页面中快速定位并检索包含关键词的内容（向后兼容）。"""
-        return await self.read_page(
-            session_id=session_id,
-            sender_id=sender_id,
-            page=1,
-            keyword=keyword,
-            refresh=False,
-            session_name=session_name,
-            sender_name=sender_name,
-        )
 
     async def switch_tab(
         self,

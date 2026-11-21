@@ -117,11 +117,6 @@ class TestPageHandler(unittest.TestCase):
         self.mock_reader.search.assert_called_once_with(self.fake_snapshot, "搜索词")
         self.assertIn("检索结果: 找到 1 处匹配", res)
 
-    def test_search_page_backward_compatibility(self):
-        res = run_coro(self.handler.search_page("s1", "u1", keyword="搜索关键词"))
-        self.mock_reader.search.assert_called_with(self.fake_snapshot, "搜索关键词")
-        self.assertIn("检索结果: 找到 1 处匹配", res)
-
     def test_handle_dialog_action(self):
         res = run_coro(self.handler.handle_dialog("s1", "u1", action="dismiss"))
         self.assertEqual(self.mock_context.dialog_action, {"action": "dismiss", "prompt_text": None})

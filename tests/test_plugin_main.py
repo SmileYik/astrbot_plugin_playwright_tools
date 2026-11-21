@@ -350,7 +350,6 @@ class TestPluginMain(unittest.TestCase):
             "element_multiline_separator": " / "
         }
         plugin = main.PlaywrightToolPlugin(mock_ctx, config=cfg)
-        self.assertEqual(plugin.page_extractor.multiline_separator, " / ")
         self.assertEqual(plugin.audit_logger.max_output_chars, 5000)
         self.assertFalse(plugin.media_handler.audit_save_screenshots)
 
