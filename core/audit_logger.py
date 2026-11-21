@@ -352,7 +352,7 @@ class AuditLogger:
             conditions.append("session_id = ?")
             params.append(session_id.strip())
 
-        if event_type and event_type.strip():
+        if event_type and event_type.strip() and event_type.strip().lower() != "all":
             conditions.append("event_type = ?")
             params.append(event_type.strip())
 

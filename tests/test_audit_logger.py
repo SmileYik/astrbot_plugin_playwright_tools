@@ -329,6 +329,16 @@ class TestAuditLogger(unittest.TestCase):
         self.assertEqual(len(items_p2), 1)
         self.assertNotEqual(items_p1[0]["id"], items_p2[0]["id"])
 
+    def test_query_lifecycle_logs_event_type_all_returns_all(self):
+        run_coro(self.logger.log_lifecycle("s1", "c1", "u1", "created", "u1"))
+        run_coro(self.logger.log_lifecycle("s1", "c1", "u1", "closed", "u1"))
+        logs, total = run_coro(self.logger.query_lifecycle_logs(event_type="all"))
+        self.assertEqual(total, 2)
+        logs_empty, total_empty = run_coro(self.logger.query_lifecycle_logs(event_type=""))
+        self.assertEqual(total_empty, 2)
+        logs_specific, total_specific = run_coro(self.logger.query_lifecycle_logs(event_type="created"))
+        self.assertEqual(total_specific, 1)
+
 try:
     import pytest
 except ImportError:

@@ -8,16 +8,16 @@ import type {
 } from "../types";
 
 export async function fetchActiveContexts(
-  includeAll: boolean = false
+  _includeAll: boolean = false
 ): Promise<ActiveContextItem[]> {
-  const endpoint = includeAll ? "lifecycle/contexts/all" : "lifecycle/contexts";
+  const endpoint = "lifecycle/active";
   try {
-    const res = await apiGet<ApiResponse<ActiveContextsResponseData>>(endpoint);
-    if (res && res.code === 0 && res.data?.items) {
-      return res.data.items;
+    const res = await apiGet<ApiResponse<ActiveContextsResponseData> | any>(endpoint);
+    if (res && Array.isArray(res.items)) {
+      return res.items;
     }
-    if (res && Array.isArray((res as any).items)) {
-      return (res as any).items;
+    if (res && res.data && Array.isArray(res.data.items)) {
+      return res.data.items;
     }
   } catch (err) {
     console.warn(`[LifecycleAPI] ${endpoint} error:`, err);
