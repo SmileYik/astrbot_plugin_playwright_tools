@@ -93,6 +93,15 @@ class TestConfSchema(unittest.TestCase):
         # 验证分组 5 默认折叠
         self.assertTrue(schema["storage_audit"].get("collapsed", False))
 
+    def test_new_extraction_and_security_config_schema(self):
+        with open("_conf_schema.json", "r", encoding="utf-8") as f:
+            schema = json.load(f)
+        self.assertIn("mask_password_inputs", schema["security"]["items"])
+        self.assertIn("content_extraction_mode", schema["runtime"]["items"])
+        self.assertIn("page_chunk_char_limit", schema["runtime"]["items"])
+        self.assertEqual(schema["runtime"]["items"]["page_chunk_char_limit"]["default"], 2000)
+        self.assertTrue(schema["security"]["items"]["mask_password_inputs"]["default"])
+
 
 if __name__ == "__main__":
     unittest.main()

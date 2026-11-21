@@ -67,6 +67,12 @@
             }
           }
         }
+      },
+      "mask_password_inputs": {
+        "type": "bool",
+        "description": "脱敏密码输入框",
+        "hint": "开启后，页面中 type='password' 的表单组件内容将被脱敏为 ******，防止敏感密码泄露给大模型；关闭后将输出实际明文内容",
+        "default": true
       }
     }
   },
@@ -126,6 +132,35 @@
         "description": "系统提示词注入",
         "hint": "注入大模型的自定义系统提示词，留空则不注入",
         "default": ""
+      },
+      "content_extraction_mode": {
+        "type": "string",
+        "description": "页面正文提炼模式",
+        "hint": "选择大模型阅读网页时使用的正文提取与结构化策略",
+        "default": "inline_markdown",
+        "options": [
+          "inline_markdown",
+          "aria_snapshot"
+        ],
+        "labels": [
+          "内联交互 Markdown (Inline Markdown) [推荐]",
+          "无障碍语义树快照 (ARIA Snapshot)"
+        ],
+        "subtitles": [
+          "将正文排版、嵌入图片与带 Ref 编号的可交互元素内联融合成一篇结构化文档，所见即所得",
+          "基于浏览器原生 Accessibility Tree 生成角色层级树，结构严密但呈树状层级"
+        ]
+      },
+      "page_chunk_char_limit": {
+        "type": "int",
+        "description": "分页字符预算",
+        "hint": "单页正文提炼的最大字符预算（建议 1000 ~ 4000），超过此预算将在保持语义块完整性的前提下自动切分至下一页",
+        "default": 2000,
+        "slider": {
+          "min": 500,
+          "max": 8000,
+          "step": 100
+        }
       }
     }
   },

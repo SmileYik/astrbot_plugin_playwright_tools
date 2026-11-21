@@ -57,6 +57,7 @@ class PlaywrightToolPlugin(Star):
             whitelist_rules = list(raw_rules)
 
         storage_state_path = str(sec_cfg.get("storage_state_path", self.config.get("storage_state_path", "")))
+        self.mask_password_inputs = bool(sec_cfg.get("mask_password_inputs", self.config.get("mask_password_inputs", True)))
 
         # 会话与运行时
         context_mode = str(rt_cfg.get("context_mode", self.config.get("context_mode", "personal")))
@@ -64,6 +65,8 @@ class PlaywrightToolPlugin(Star):
         tool_timeout = int(rt_cfg.get("tool_execution_timeout_seconds", self.config.get("tool_execution_timeout_seconds", 30)))
         enable_close_tool = bool(rt_cfg.get("enable_close_tool", self.config.get("enable_close_tool", True)))
         self.system_prompt_injection = str(rt_cfg.get("system_prompt_injection", self.config.get("system_prompt_injection", ""))).strip()
+        self.content_extraction_mode = str(rt_cfg.get("content_extraction_mode", self.config.get("content_extraction_mode", "inline_markdown"))).strip().lower()
+        self.page_chunk_char_limit = int(rt_cfg.get("page_chunk_char_limit", self.config.get("page_chunk_char_limit", 2000)))
 
         # 截图与多媒体
         screenshot_format = str(med_cfg.get("screenshot_format", self.config.get("screenshot_format", "png"))).lower()

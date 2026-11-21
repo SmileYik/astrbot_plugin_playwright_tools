@@ -105,6 +105,9 @@ class TestPluginMain(unittest.TestCase):
         self.assertIn("screenshot_max_height_px", data["media"]["items"])
         self.assertIn("screenshot_timeout_seconds", data["media"]["items"])
         self.assertIn("system_prompt_injection", data["runtime"]["items"])
+        self.assertIn("mask_password_inputs", data["security"]["items"])
+        self.assertIn("content_extraction_mode", data["runtime"]["items"])
+        self.assertIn("page_chunk_char_limit", data["runtime"]["items"])
 
     def test_plugin_init_and_tool_registration(self):
         TEMP_DIR.mkdir(parents=True, exist_ok=True)
@@ -116,6 +119,9 @@ class TestPluginMain(unittest.TestCase):
             "tool_execution_timeout_seconds": 25,
             "system_prompt_injection": "你是一个网页浏览助手。",
         })
+        self.assertTrue(plugin.mask_password_inputs)
+        self.assertEqual(plugin.content_extraction_mode, "inline_markdown")
+        self.assertEqual(plugin.page_chunk_char_limit, 2000)
         mock_ctx.add_llm_tools.assert_called_once()
         tools_registered = mock_ctx.add_llm_tools.call_args[0]
         self.assertEqual(len(tools_registered), 3)
@@ -123,6 +129,24 @@ class TestPluginMain(unittest.TestCase):
         self.assertIn("pw_page", tool_names)
         self.assertIn("pw_interact", tool_names)
         self.assertIn("pw_media", tool_names)
+
+    def test_plugin_init_custom_extraction_and_security_configs(self):
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / "custom_cfg_test.db")
+        mock_ctx = MagicMock()
+        plugin = main.PlaywrightToolPlugin(mock_ctx, config={
+            "audit_db_path": db_file,
+            "security": {
+                "mask_password_inputs": False,
+            },
+            "runtime": {
+                "content_extraction_mode": "aria_snapshot",
+                "page_chunk_char_limit": 3500,
+            },
+        })
+        self.assertFalse(plugin.mask_password_inputs)
+        self.assertEqual(plugin.content_extraction_mode, "aria_snapshot")
+        self.assertEqual(plugin.page_chunk_char_limit, 3500)
 
     def test_on_llm_request_injection(self):
         TEMP_DIR.mkdir(parents=True, exist_ok=True)
