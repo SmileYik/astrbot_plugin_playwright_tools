@@ -58,6 +58,7 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({ item, onClose }) => {
       w.document.write(
         `<title>截图预览</title><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh;"><img src="${screenshotUrl}" style="max-width:98%;max-height:98%;object-fit:contain;border-radius:4px;box-shadow:0 4px 20px rgba(0,0,0,0.5);"/></body>`
       );
+      w.document.close();
     }
   };
 

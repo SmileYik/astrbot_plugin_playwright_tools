@@ -519,6 +519,7 @@ export const LifecycleView: React.FC<LifecycleViewProps> = ({
                     w.document.write(
                       `<title>截图预览</title><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh;"><img src="${previewScreenshotUrl}" style="max-width:98%;max-height:98%;object-fit:contain;"/></body>`
                     );
+                    w.document.close();
                   }
                 }}
                 className={styles.tabBtnSmall}
@@ -528,7 +529,7 @@ export const LifecycleView: React.FC<LifecycleViewProps> = ({
               </button>
               <a
                 href={previewScreenshotUrl}
-                download={`screenshot-${Date.now()}.png`}
+                download={`screenshot-${Date.now()}.${previewScreenshotUrl.startsWith("data:image/svg") ? "svg" : "png"}`}
                 className={styles.btnDownload}
               >
                 📥 下载截图
