@@ -1,4 +1,4 @@
-# PlaywrightTool (astrbot_plugin_playwright_tools)
+# PlaywrightTool 
 
 基于 Playwright (首选 Camoufox 驱动) 的 AstrBot 网页浏览与自动化操作插件。  
 为大模型提供低 Token 消耗、高精准度的元素编号（Ref ID）交互与长页面结构化阅读能力，具备完善的多租户隐私隔离、细粒度白名单防护与可视化运维审计。

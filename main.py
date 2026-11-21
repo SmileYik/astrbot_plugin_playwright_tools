@@ -25,7 +25,7 @@ from .tools.tools import PwPageTool, PwReadTool, PwInteractTool, PwMediaTool
 @register(
     "PlaywrightTool",
     "SmileYik",
-    "基于 Playwright 的大模型网页自动化工具插件，支持多租户隔离与权限白名单。",
+    "给大模型用的网页浏览器插件。支持打开网页、阅读文章与点击填表。采用元素编号避免乱点并减少 Token 消耗，同时自带防网站拦截与后台管理控制台。",
     "v1.0.0"
 )
 class PlaywrightToolPlugin(Star):
