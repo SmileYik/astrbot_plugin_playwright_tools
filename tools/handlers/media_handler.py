@@ -370,10 +370,11 @@ class MediaHandler(BaseActionHandler):
             else:
                 download = download_val
 
-            target_file_path = os.path.join(self.download_dir, download.suggested_filename)
+            safe_filename = Path(download.suggested_filename).name
+            target_file_path = os.path.join(self.download_dir, safe_filename)
             await download.save_as(target_file_path)
 
-            return f"[FILE_PATH:{target_file_path}]\n已成功下载文件: {download.suggested_filename}"
+            return f"[FILE_PATH:{target_file_path}]\n已成功下载文件: {safe_filename}"
 
         return await self.execute_action(
             session_id=session_id,

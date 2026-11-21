@@ -40,6 +40,8 @@ class PageHandler(BaseActionHandler):
 
     def _setup_page_listeners(self, context: BrowserSessionContext, page: Page) -> None:
         """为页面附加原生弹窗自动应答监听器。"""
+        if getattr(page, "_has_dialog_listener", False):
+            return
 
         async def on_dialog(dialog):
             msg = dialog.message
@@ -59,6 +61,7 @@ class PageHandler(BaseActionHandler):
         if hasattr(page, "on"):
             try:
                 page.on("dialog", on_dialog)
+                page._has_dialog_listener = True
             except Exception:
                 pass
 
