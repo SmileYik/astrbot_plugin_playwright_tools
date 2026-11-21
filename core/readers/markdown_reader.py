@@ -304,7 +304,7 @@ class InlineMarkdownReader(BasePageReader):
                 flushInline();
             }};
 
-            const root = document.querySelector('article, main, [role="main"]') || document.body;
+            const root = document.body || document.documentElement;
             if (root) {{
                 traverse(root);
             }}
