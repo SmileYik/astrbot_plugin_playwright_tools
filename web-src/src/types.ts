@@ -54,6 +54,7 @@ export interface ActiveContextItem {
   session_id: string;
   session_name?: string;
   owner_id: string;
+  owner_name?: string;
   allowed_users: string[];
   created_time?: number;
   last_active_time?: number;
@@ -70,7 +71,9 @@ export interface LifecycleLogItem {
   session_name?: string;
   context_key: string;
   owner_id: string;
+  owner_name?: string;
   operator_id: string;
+  operator_name?: string;
   details: string;
 }
 

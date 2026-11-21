@@ -103,7 +103,11 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({ item, onClose }) => {
           {item.is_error && (
             <div className={`${styles.banner} ${styles.bannerError}`}>
               <span className={styles.bannerTitle}>⚠️ 工具执行异常</span>
-              <span>{item.error_message || "执行期间发生未捕获异常"}</span>
+              <span>
+                {item.error_message
+                  ? item.error_message.split("\n")[0]
+                  : "执行期间发生未捕获异常"}
+              </span>
             </div>
           )}
 
@@ -174,6 +178,26 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({ item, onClose }) => {
                 )}
                 <div className={styles.screenshotHint}>点击可在大图窗口中查看原图</div>
               </div>
+            </div>
+          )}
+
+          {/* 异常调用堆栈 (Stack Trace) */}
+          {item.is_error && item.error_message && item.error_message.includes("\n") && (
+            <div>
+              <div className={styles.sectionHeaderRow}>
+                <span className={styles.sectionHeaderTitle} style={{ color: "var(--color-error)" }}>
+                  🚨 异常调用堆栈 (Stack Trace)
+                </span>
+                <button
+                  onClick={() => handleCopy(item.error_message, "traceback")}
+                  className={styles.copyBtn}
+                >
+                  {copiedType === "traceback" ? "✓ 已复制堆栈" : "📋 复制完整堆栈"}
+                </button>
+              </div>
+              <pre className={`${styles.codeBox} ${styles.stackTraceBox}`}>
+                {item.error_message}
+              </pre>
             </div>
           )}
 

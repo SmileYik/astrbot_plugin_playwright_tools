@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { ActiveContextItem, LifecycleLogItem } from "../types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useAutoStream } from "../hooks/useAutoStream";
 import {
   fetchActiveContexts,
   fetchLifecycleLogs,
@@ -22,6 +23,7 @@ export const LifecycleView: React.FC<LifecycleViewProps> = ({
   const [activeContexts, setActiveContexts] = useState<ActiveContextItem[]>([]);
   const [isActiveLoading, setIsActiveLoading] = useState<boolean>(false);
   const [includeAll, setIncludeAll] = useState<boolean>(false);
+  const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
 
   const [lifecycleLogs, setLifecycleLogs] = useState<LifecycleLogItem[]>([]);
   const [isLogsLoading, setIsLogsLoading] = useState<boolean>(false);
@@ -90,6 +92,45 @@ export const LifecycleView: React.FC<LifecycleViewProps> = ({
   useEffect(() => {
     loadLogs();
   }, [loadLogs]);
+
+  // 实时流式自动更新
+  useAutoStream({
+    enabled: autoRefresh,
+    intervalMs: 2500,
+    canStream: page === 1 && !previewScreenshotUrl && !killModalTarget,
+    onStreamUpdate: async () => {
+      try {
+        const [activeItems, logsData] = await Promise.all([
+          fetchActiveContexts(includeAll).catch(() => null),
+          fetchLifecycleLogs({
+            page: 1,
+            page_size: pageSize,
+            keyword: logKeyword.trim(),
+            event_type: eventTypeFilter,
+          }).catch(() => null),
+        ]);
+        if (activeItems !== null) {
+          setActiveContexts(activeItems);
+        }
+        if (logsData !== null && logsData.items) {
+          setLifecycleLogs(logsData.items);
+          setTotalLogs(logsData.total || 0);
+        }
+      } catch {
+        // 静默
+      }
+    },
+    onBackgroundSync: async () => {
+      try {
+        const activeItems = await fetchActiveContexts(includeAll);
+        if (activeItems) {
+          setActiveContexts(activeItems);
+        }
+      } catch {
+        // 静默
+      }
+    },
+  });
 
   // 手动截取某个活跃标签页或上下文
   const handleManualScreenshot = async (contextKey: string, tabIndex?: number) => {
@@ -183,24 +224,42 @@ export const LifecycleView: React.FC<LifecycleViewProps> = ({
           </div>
         </div>
 
-        <button
-          onClick={() => {
-            loadContexts();
-            loadLogs();
-          }}
-          disabled={isActiveLoading || isLogsLoading}
-          className={styles.refreshBtn}
-          title="刷新全部数据"
-        >
-          <span
-            className={`${styles.refreshIcon} ${
-              isActiveLoading || isLogsLoading ? styles.refreshRotating : ""
-            }`}
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          {/* 自动更新流式开关 */}
+          <label className={styles.autoRefreshLabel} title="以流的形式自动将最新的记录显示到页面中">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+              className={styles.autoRefreshCheckbox}
+            />
+            <span
+              className={`${styles.streamDot} ${
+                autoRefresh ? styles.streamDotActive : ""
+              }`}
+            />
+            <span className={styles.autoRefreshText}>自动更新</span>
+          </label>
+
+          <button
+            onClick={() => {
+              loadContexts();
+              loadLogs();
+            }}
+            disabled={isActiveLoading || isLogsLoading}
+            className={styles.refreshBtn}
+            title="刷新全部数据"
           >
-            🔄
-          </span>
-          刷新状态
-        </button>
+            <span
+              className={`${styles.refreshIcon} ${
+                isActiveLoading || isLogsLoading ? styles.refreshRotating : ""
+              }`}
+            >
+              🔄
+            </span>
+            刷新状态
+          </button>
+        </div>
       </header>
 
       {/* 消息反馈横幅 */}
@@ -267,11 +326,15 @@ export const LifecycleView: React.FC<LifecycleViewProps> = ({
                   <div>
                     <div className={styles.contextMetaGroup}>
                       <span className={styles.contextKeyBadge}>{ctx.context_key}</span>
-                      <span className={styles.sessionTag}>💬 {ctx.session_name || ctx.session_id}</span>
+                      <span className={styles.sessionTag}>
+                        💬 {ctx.session_name ? `${ctx.session_name} (${ctx.session_id})` : ctx.session_id}
+                      </span>
                       <span className={styles.tabCountTag}>📑 {ctx.tab_count} 个标签页</span>
                     </div>
                     <div className={styles.contextInfoRow}>
-                      <span>所有者: <strong>{ctx.owner_id}</strong></span>
+                      <span>
+                        所有者: <strong>{ctx.owner_name ? `${ctx.owner_name} (${ctx.owner_id})` : ctx.owner_id}</strong>
+                      </span>
                       <span>创建时间: {formatTime(ctx.created_time)}</span>
                       <span>最后活跃: {formatTime(ctx.last_active_time)}</span>
                       <span>当前活动 URL: <strong>{ctx.active_tab_url || "(空白页)"}</strong></span>
@@ -417,13 +480,15 @@ export const LifecycleView: React.FC<LifecycleViewProps> = ({
                           {log.context_key}
                         </div>
                         <div style={{ fontSize: "11px", color: "var(--color-text-secondary)" }}>
-                          {log.session_name || log.session_id}
+                          💬 {log.session_name ? `${log.session_name} (${log.session_id})` : log.session_id}
                         </div>
                       </td>
                       <td className={styles.td}>
-                        <div>所有者: <strong>{log.owner_id}</strong></div>
+                        <div>
+                          所有者: <strong>{log.owner_name ? `${log.owner_name} (${log.owner_id})` : log.owner_id}</strong>
+                        </div>
                         <div style={{ fontSize: "11px", color: "var(--color-text-secondary)" }}>
-                          操作人: {log.operator_id}
+                          操作人: {log.operator_name ? `${log.operator_name} (${log.operator_id})` : log.operator_id}
                         </div>
                       </td>
                       <td className={styles.td} style={{ fontFamily: "var(--font-mono)", fontSize: "12px", maxWidth: "260px", wordBreak: "break-all" }}>

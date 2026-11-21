@@ -69,6 +69,59 @@
   gap: 10px;
 }
 
+.autoRefreshLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-surface-container);
+  border: 1px solid var(--color-border);
+  font-size: 13px;
+  color: var(--color-text);
+  cursor: pointer;
+  user-select: none;
+  transition: all var(--transition-fast);
+}
+
+.autoRefreshCheckbox {
+  cursor: pointer;
+  accent-color: var(--color-primary);
+}
+
+.streamDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--color-text-secondary);
+  transition: background-color var(--transition-fast);
+}
+
+.streamDotActive {
+  background-color: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.8);
+  animation: pulseDot 2s infinite;
+}
+
+@keyframes pulseDot {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  }
+  70% {
+    transform: scale(1.1);
+    box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+.autoRefreshText {
+  font-weight: 500;
+}
+
 .refreshBtn {
   padding: 8px 14px;
   border-radius: var(--radius-full);

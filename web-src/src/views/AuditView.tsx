@@ -5,6 +5,7 @@ import { StatsOverview } from "../components/StatsOverview";
 import { AuditCard } from "../components/AuditCard";
 import { SideDrawer } from "../components/SideDrawer";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useAutoStream } from "../hooks/useAutoStream";
 import {
   fetchAuditLogs,
   fetchAuditStats,
@@ -40,6 +41,7 @@ export const AuditView: React.FC<AuditViewProps> = ({
   const [toolName, setToolName] = useState<string>("");
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
   const [selectedItem, setSelectedItem] = useState<AuditLogItem | null>(null);
   const [isClearModalOpen, setIsClearModalOpen] = useState<boolean>(false);
   const [banner, setBanner] = useState<{ msg: string; type: "info" | "error" } | null>(null);
@@ -107,6 +109,44 @@ export const AuditView: React.FC<AuditViewProps> = ({
     loadStats();
   }, [loadStats]);
 
+  // 实时流式自动更新
+  useAutoStream({
+    enabled: autoRefresh,
+    intervalMs: 2500,
+    canStream: page === 1 && !selectedItem,
+    onStreamUpdate: async () => {
+      try {
+        const [data, s] = await Promise.all([
+          fetchAuditLogs({
+            page: 1,
+            page_size: pageSize,
+            keyword: keyword.trim(),
+            status,
+            tool_name: toolName.trim(),
+          }),
+          fetchAuditStats().catch(() => null),
+        ]);
+        if (data && data.items) {
+          setLogs(data.items);
+          setTotal(data.total || 0);
+        }
+        if (s) {
+          setStats(s);
+        }
+      } catch {
+        // 静默
+      }
+    },
+    onBackgroundSync: async () => {
+      try {
+        const s = await fetchAuditStats();
+        if (s) setStats(s);
+      } catch {
+        // 静默
+      }
+    },
+  });
+
   // 导出日志
   const handleExport = async (format: "json" | "csv") => {
     try {
@@ -171,6 +211,8 @@ export const AuditView: React.FC<AuditViewProps> = ({
         }}
         isLoading={isLoading}
         isBridgeReady={externalBridgeReady !== undefined ? externalBridgeReady : isBridgeAvailable()}
+        autoRefresh={autoRefresh}
+        onAutoRefreshChange={setAutoRefresh}
       />
 
       {/* 横幅消息反馈 */}

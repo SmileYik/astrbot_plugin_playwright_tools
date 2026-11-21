@@ -13,6 +13,8 @@ interface TopAppBarProps {
   onRefresh: () => void;
   isLoading: boolean;
   isBridgeReady?: boolean;
+  autoRefresh?: boolean;
+  onAutoRefreshChange?: (val: boolean) => void;
 }
 
 export const TopAppBar: React.FC<TopAppBarProps> = ({
@@ -27,6 +29,8 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
   onRefresh,
   isLoading,
   isBridgeReady = false,
+  autoRefresh = false,
+  onAutoRefreshChange,
 }) => {
   const [searchInput, setSearchInput] = useState(keyword);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -69,6 +73,24 @@ export const TopAppBar: React.FC<TopAppBarProps> = ({
 
         {/* 运维按钮组 */}
         <div className={styles.buttonGroup}>
+          {/* 自动更新流式开关 */}
+          {onAutoRefreshChange && (
+            <label className={styles.autoRefreshLabel} title="以流的形式自动将最新的记录显示到页面中">
+              <input
+                type="checkbox"
+                checked={autoRefresh}
+                onChange={(e) => onAutoRefreshChange(e.target.checked)}
+                className={styles.autoRefreshCheckbox}
+              />
+              <span
+                className={`${styles.streamDot} ${
+                  autoRefresh ? styles.streamDotActive : ""
+                }`}
+              />
+              <span className={styles.autoRefreshText}>自动更新</span>
+            </label>
+          )}
+
           <button
             onClick={onRefresh}
             disabled={isLoading}
