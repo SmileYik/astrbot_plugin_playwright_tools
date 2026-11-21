@@ -1,16 +1,28 @@
 # AGENTS.md
 
-## 项目目录构
+## 项目目录结构
 
 - adapts: 浏览器适配器代码
 - api: 网页 Web API 路由与业务代码
-- core: 核心逻辑组件代码
-- tools: AI工具代码
-- docs: 项目文档
-- views: 可视化界面
-- web-src: 可视化界面源码
+- core: 核心逻辑组件代码（含 readers 页面阅读提炼器）
+- tools: AI 工具代码（handlers 与复合工具门面）
+- docs: 项目文档（架构设计与技术文档）
+- views: 可视化界面预构建静态资源
+- web-src: 可视化界面源码（React 18 + Vite + TS）
+- skills: AI 技能定义目录（playwright-tool 等）
+- tests: 单元测试套件
 - main.py: 插件入口
 - metadata.yaml: 插件元数据
+
+## 工具体系规范
+
+本插件面向大模型收敛并提供四大独立复合工具：
+1. `pw_page`: 页面级生命周期、标签页切换、原生弹窗预设与关闭释放
+2. `pw_read`: 结构化正文提炼（内联 Markdown / ARIA 树）、Ref ID 提取、分页与关键词定位
+3. `pw_interact`: 原生 Locator 键鼠与表单交互（点击、输入、选择、悬停、焦点、拖拽、按键、滚动）
+4. `pw_media`: 视口与长截图生成交付、持久化审计截图与文件下载
+
+所有工具必须统一维护 `_actions` 字典分发，禁止回退到多层 `if-elif-else` 分支；执行必须包含全局超时保护。
 
 ## 插件可视化界面
 
@@ -31,7 +43,7 @@
 
 ### playwright-tool SKILL
 
-该 SKILL 为本插件最基础的 SKILL, 其中包含本插件的工具用法和使用流程.
+该 SKILL 为本插件最基础的 SKILL, 其中包含本插件四大复合工具体系的用法和操作流程.
 其中内容仅包含需要让 AI 学会操作流程的(用户)内容, 避免暴露内部实现信息.
 
 ## 变更(Changelog)文档

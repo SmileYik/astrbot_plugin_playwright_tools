@@ -6,7 +6,7 @@
 
 ## 1. 系统分层架构
 
-系统遵循关注点分离原则，采用四层分层模型：
+系统遵循关注点分离原则，采用清晰的五层分层模型：
 
 ```mermaid
 flowchart TD
@@ -24,6 +24,7 @@ flowchart TD
 
     subgraph FacadeLayer [Facade & Dispatch Layer]
         PwPage[PwPageTool: pw_page]
+        PwRead[PwReadTool: pw_read]
         PwInteract[PwInteractTool: pw_interact]
         PwMedia[PwMediaTool: pw_media]
         TimeoutWrapper["Global Timeout Guard: asyncio.wait_for"]
@@ -35,11 +36,13 @@ flowchart TD
         MediaHandler[MediaHandler]
     end
 
-    subgraph CoreLayer [Core Services Layer]
+    subgraph CoreLayer [Core Services & Readers Layer]
         CtxMgr[ContextManager]
         SecMgr[SecurityManager]
         AuditLog[AuditLogger]
         Extractor[PageExtractor]
+        Readers["Readers: InlineMarkdownReader / AriaSnapshotReader"]
+        Extractor --> Readers
     end
 
     subgraph AdaptLayer [Browser Adapter Layer]
@@ -68,23 +71,26 @@ flowchart TD
 ```
 
 ### 1.1 适配器层 (`adapts/`)
-- **`AdapterFactory`**: 统一构建浏览器适配器实例，依据配置选择 `camoufox` 或原生 `playwright` 驱动，并负责校验自定义浏览器路径。
-- **`CamoufoxAdapter`**: 封装 Playwright 与 Camoufox 驱动的启动、销毁与高级反反爬指纹注入。负责底层 Browser 进程生命周期。
+- **`AdapterFactory`**: 统一构建浏览器适配器实例，依据配置选择 `camoufox` 或原生 `playwright` 驱动，并负责校验自定义浏览器二进制可执行路径。
+- **`CamoufoxAdapter`**: 封装 Playwright 与 Camoufox 驱动的启动、销毁与高级反反爬指纹伪装，支持可选的 GeoIP 定位防检。
 - **`PlaywrightAdapter`**: 封装 Playwright 原生驱动（Chromium / Firefox / WebKit / Custom），支持自定义二进制路径，负责底层进程生命周期。
 
-### 1.2 核心服务层 (`core/`)
+### 1.2 核心服务与提炼层 (`core/`, `core/readers/`)
 - **`ContextManager`**: 管理多租户 `ManagedContext` 实例。负责个人模式与会话模式的上下文隔离路由、协作者授权、Cookie 注入以及空闲定时回收。
 - **`SecurityManager`**: 权限与白名单守卫。执行域名通配符匹配（如 `*.github.com`）、动作权限细粒度校验，以及在页面创建时拦截未授权顶层跳转、弹出新窗口与 iframe 导航。
 - **`AuditLogger`**: SQLite 审计记录器。异步记录全量调用（起止时间、会话、上下文、目标域名、入参与结果），并在初始化与周期轮询中自动清理超期数据。
-- **`PageExtractor`**: DOM 精简与 Ref ID 编号生成器。在 DOM 节点打上 `data-astr-ref="{idx}"` 属性，构建语义化文本摘要，支持页码分页与关键词检索过滤。
+- **`PageExtractor` 与 `readers/`**: 
+  - `PageExtractor`: 提取器单例入口，无状态维护提取流程，为可交互 DOM 节点打上 `data-astr-ref="{idx}"` 属性，支持关键词检索过滤与快照缓存。
+  - `InlineMarkdownReader`: 将网页标题、段落、列表、表格及带 Ref ID 的控件融合成语义清晰的 Markdown 文档，支持字符预算（`page_chunk_char_limit`）平滑分页。
+  - `AriaSnapshotReader`: 基于浏览器无障碍树生成严密的语义角色层级快照。
 
 ### 1.3 处理器层 (`tools/handlers/`)
-- **`PageHandler`**: 页面级操作（打开 URL、读取快照、关键字检索、标签页切换、原生弹窗预设与上下文关闭）。
-- **`InteractHandler`**: DOM 交互逻辑（点击、输入、选择、鼠标悬停、焦点管理、元素拖拽、键盘按键及滚动），统一通过 `data-astr-ref` 定位元素。
-- **`MediaHandler`**: 视口与长截图生成及下载，实施双重熔断（最大高度限制与超时回退为视口截图）。
+- **`PageHandler`**: 页面生命周期与导航（打开 URL、标签页切换、原生对话框响应与上下文主动关闭）。
+- **`InteractHandler`**: 原生 Locator 交互逻辑（点击、输入、选择、鼠标悬停、焦点管理、元素拖拽、键盘按键及滚动），基于 `data-astr-ref` 定位并自动脱敏错误与生成下一步推荐指引。
+- **`MediaHandler`**: 视口与长截图生成及下载，实施双重熔断（最大高度限制与超时回退为视口截图），处理持久化审计截图。
 
 ### 1.4 门面分发层 (`tools/tools.py`, `tools/schemas.py`)
-- **`PwPageTool` / `PwInteractTool` / `PwMediaTool`**: 继承 `FunctionTool[AstrAgentContext]` 的类型化工具门面，面向大模型暴露 `pw_page`, `pw_interact`, `pw_media` 三大工具。
+- **`PwPageTool` / `PwReadTool` / `PwInteractTool` / `PwMediaTool`**: 继承 `FunctionTool[AstrAgentContext]` 的类型化工具门面，面向大模型暴露四大独立复合工具。
 - 每个工具在初始化时维护 `_actions` 字典映射，移除 `if-elif-else` 分支；`call()` 统一设计为标准协程，并通过 `_execute_with_timeout` 施加全局单工具超时保护。
 - 在发送聊天截图时，使用异步方法交付，避免后续文本消息覆盖聊天界面图片。
 
@@ -116,7 +122,7 @@ Session S1 ──> All Users share Context (Owner: S1)
 ## 3. 元素定位与交互可靠性
 
 - **Ref ID 生成**：通过 `document.body` 遍历可操作节点（`a`, `button`, `input`, `select`, `textarea` 等），写入 `data-astr-ref="{idx}"`。
-- **元素查找**：所有交互操作（点击、悬停、聚焦、拖拽等）均基于 `document.querySelector('[data-astr-ref="{ref}"]')` 执行，避免传统基于数组下标或动态 CSS 选择器的脆弱匹配。
+- **元素查找**：所有交互操作（点击、悬停、聚焦、拖拽等）均基于 Playwright 原生定位器 `locator('[data-astr-ref="{ref}"]')` 执行，全面享受框架自带的可操作性检查与受控组件事件分发，避免传统裸 JS 注入匹配失败。
 
 ---
 
