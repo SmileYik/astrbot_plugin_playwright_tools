@@ -390,7 +390,7 @@ class InlineMarkdownReader(BasePageReader):
         ]
         return chunks
 
-    async def extract_snapshot(self, page: Any, url: str) -> PageSnapshot:
+    async def extract_snapshot(self, page: Any, url: str = "") -> PageSnapshot:
         """在浏览器中执行 JS 提炼并构建 PageSnapshot。"""
         script = self.get_js_extractor_script()
         data = await page.evaluate(script)
@@ -398,7 +398,7 @@ class InlineMarkdownReader(BasePageReader):
             data = {}
 
         title = str(data.get("title") or "").strip()
-        page_url = str(data.get("url") or url).strip()
+        page_url = str(data.get("url") or url or getattr(page, "url", "")).strip()
         blocks = data.get("blocks", [])
         if not isinstance(blocks, list):
             blocks = [str(blocks)] if blocks else []

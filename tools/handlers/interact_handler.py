@@ -34,7 +34,7 @@ def clean_playwright_error(e: Exception) -> str:
     if "Timeout" in raw and "waiting for locator" in raw:
         return (
             "操作超时 (10秒): 未能定位到目标元素或元素不可见/不可点击。\n"
-            "[推荐操作: 页面可能已动态更新，请先调用 pw_page(action='read') 获取最新可用元素]"
+            "[推荐操作: 页面可能已动态更新，请先调用 pw_read() 获取最新可用元素]"
         )
 
     # 检查通用超时
@@ -88,7 +88,7 @@ class InteractHandler:
             return f"点击失败: {reason}"
 
         if ref not in ctx.ref_map:
-            return f"点击失败: 无效的元素引用 [{ref}]。页面可能已刷新，请先调用 pw_page(action='read') 查看最新元素。"
+            return f"点击失败: 无效的元素引用 [{ref}]。页面可能已刷新，请先调用 pw_read() 查看最新元素。"
 
         el_info = ctx.ref_map[ref]
         tag = el_info.get("tag", "")
@@ -97,13 +97,14 @@ class InteractHandler:
         try:
             locator: Locator = page.locator(f'[data-astr-ref="{ref}"]')
             await locator.click(timeout=10000)
+            ctx.is_snapshot_dirty = True
 
             dialog_info = ""
             if ctx.last_dialog_message:
                 dialog_info = f" (触发浏览器弹窗: '{ctx.last_dialog_message}'，已自动处理)"
                 ctx.last_dialog_message = None
 
-            res_msg = f"{hint}\n已成功点击 [{ref}] <{tag}> {text}{dialog_info}\n[推荐操作: 若点击引发了页面跳转或内容更新，建议调用 pw_page(action='read') 查看最新页面]".strip()
+            res_msg = f"{hint}\n已成功点击 [{ref}] <{tag}> {text}{dialog_info}\n[推荐操作: 若点击引发了页面跳转或内容更新，建议调用 pw_read() 查看最新页面]".strip()
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
                 "click", url, {"ref": ref}, res_msg, is_permitted=True,
@@ -152,6 +153,7 @@ class InteractHandler:
         try:
             locator: Locator = page.locator(f'[data-astr-ref="{ref}"]')
             await locator.fill(str(text), timeout=10000)
+            ctx.is_snapshot_dirty = True
 
             res_msg = f"{hint}\n已成功在输入框 [{ref}] 填入内容。\n[推荐操作: 表单输入完成，可查阅对应提交按钮 Ref 并调用 pw_interact(action='click') 进行提交]".strip()
             await self.audit_logger.log_action(
@@ -206,6 +208,7 @@ class InteractHandler:
                 await locator.select_option(value=value, timeout=5000)
             except Exception:
                 await locator.select_option(label=value, timeout=5000)
+            ctx.is_snapshot_dirty = True
 
             res_msg = f"{hint}\n已在下拉框 [{ref}] 成功选取 '{value}'。".strip()
             await self.audit_logger.log_action(
@@ -377,6 +380,7 @@ class InteractHandler:
             source: Locator = page.locator(f'[data-astr-ref="{ref}"]')
             target: Locator = page.locator(f'[data-astr-ref="{target_ref}"]')
             await source.drag_to(target, timeout=10000)
+            ctx.is_snapshot_dirty = True
 
             res_msg = f"{hint}\n已成功将元素 [{ref}] 拖拽至 [{target_ref}] 位置。".strip()
             await self.audit_logger.log_action(
@@ -419,6 +423,7 @@ class InteractHandler:
 
         try:
             await page.keyboard.press(key_name)
+            ctx.is_snapshot_dirty = True
 
             res_msg = f"{hint}\n已成功向页面发送按键 '{key_name}'。".strip()
             await self.audit_logger.log_action(

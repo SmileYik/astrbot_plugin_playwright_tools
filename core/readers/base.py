@@ -22,7 +22,7 @@ class BasePageReader(ABC):
         self.mask_passwords = mask_passwords
 
     @abstractmethod
-    async def extract_snapshot(self, page: Any, url: str) -> PageSnapshot:
+    async def extract_snapshot(self, page: Any, url: str = "") -> PageSnapshot:
         """从 Playwright 页面中提炼内容快照并分配 Ref ID。"""
         pass
 

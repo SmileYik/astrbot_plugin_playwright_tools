@@ -28,7 +28,7 @@ except (ImportError, AttributeError):
         class AstrAgentContext:
             pass
 
-from .schemas import PW_PAGE_SCHEMA, PW_INTERACT_SCHEMA, PW_MEDIA_SCHEMA
+from .schemas import PW_PAGE_SCHEMA, PW_READ_SCHEMA, PW_INTERACT_SCHEMA, PW_MEDIA_SCHEMA
 from .handlers.page_handler import PageHandler
 from .handlers.interact_handler import InteractHandler
 from .handlers.media_handler import MediaHandler
@@ -143,7 +143,7 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
     timeout_seconds: int = 30
     handler: Any = None
     name: str = "pw_page"
-    description: str = "管理浏览器页面的打开、内容读取、关键字搜索、标签页切换、弹窗响应与关闭。"
+    description: str = "管理浏览器页面的打开、标签页切换、弹窗响应与关闭。"
     parameters: dict = field(default_factory=lambda: PW_PAGE_SCHEMA)
 
     def __post_init__(self):
@@ -159,8 +159,6 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
         object.__setattr__(self, "timeout_seconds", timeout_seconds)
         self._actions = {
             "open": self._action_open,
-            "read": self._action_read,
-            "search": self._action_search,
             "switch_tab": self._action_switch_tab,
             "dialog": self._action_dialog,
             "close": self._action_close,
@@ -173,26 +171,6 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
         return await _invoke_handler(
             self.page_handler.open_url,
             session_id, sender_id, url=str(url),
-            session_name=session_name, sender_name=sender_name
-        )
-
-    async def _action_read(self, session_id: str, sender_id: str, session_name: str = "", sender_name: str = "", **kwargs) -> str:
-        page = kwargs.get("page", 1)
-        target = kwargs.get("target", "all")
-        return await _invoke_handler(
-            self.page_handler.read_page,
-            session_id, sender_id, page=int(page or 1), target=str(target or "all"),
-            session_name=session_name, sender_name=sender_name
-        )
-
-    async def _action_search(self, session_id: str, sender_id: str, session_name: str = "", sender_name: str = "", **kwargs) -> str:
-        keyword = kwargs.get("keyword")
-        target = kwargs.get("target", "all")
-        if not keyword:
-            return "参数错误: action='search' 时必须提供 keyword 参数"
-        return await _invoke_handler(
-            self.page_handler.search_page,
-            session_id, sender_id, keyword=str(keyword), target=str(target or "all"),
             session_name=session_name, sender_name=sender_name
         )
 
@@ -229,11 +207,68 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
         action = kwargs.get("action")
         handler = self._actions.get(action)
         if not handler:
-            return f"未知的动作: {action}。支持的动作包括: open, read, search, switch_tab, dialog, close"
+            return f"未知的动作: {action}。支持的动作包括: open, switch_tab, dialog, close"
 
         res = await _execute_with_timeout(
             handler(session_id, sender_id, session_name=session_name, sender_name=sender_name, **kwargs),
             self.timeout_seconds
+        )
+        return res
+
+
+@dataclass
+class PwReadTool(FunctionTool[AstrAgentContext]):
+    page_handler: PageHandler | None = None
+    timeout_seconds: int = 30
+    handler: Any = None
+    name: str = "pw_read"
+    description: str = "读取当前网页的内容与可交互操作元素，支持分页与关键词检索定位。"
+    parameters: dict = field(default_factory=lambda: PW_READ_SCHEMA)
+
+    def __post_init__(self):
+        if self.page_handler is None:
+            raise ValueError("PwReadTool 初始化必须传入 page_handler")
+        page_handler = self.page_handler
+        timeout_seconds = self.timeout_seconds
+
+        # 尝试从 page_handler.reader 动态读取工具描述
+        if hasattr(page_handler, "reader") and hasattr(page_handler.reader, "get_tool_metadata"):
+            try:
+                meta = page_handler.reader.get_tool_metadata()
+                if isinstance(meta, dict) and meta.get("description"):
+                    self.description = meta["description"]
+            except Exception:
+                pass
+
+        try:
+            super().__init__(name=self.name, description=self.description, parameters=self.parameters)
+        except Exception:
+            pass
+        object.__setattr__(self, "page_handler", page_handler)
+        object.__setattr__(self, "timeout_seconds", timeout_seconds)
+
+    async def call(self, context: AstrAgentContext, **kwargs) -> str:
+        event, session_id, sender_id, session_name, sender_name = _extract_event_and_metadata(context)
+        raw_page = kwargs.get("page", 1)
+        try:
+            page = int(raw_page) if raw_page is not None and str(raw_page).strip() != "" else 1
+        except (ValueError, TypeError):
+            page = 1
+        keyword = str(kwargs.get("keyword") or "")
+        refresh = bool(kwargs.get("refresh", False))
+
+        res = await _execute_with_timeout(
+            _invoke_handler(
+                self.page_handler.read_page,
+                session_id,
+                sender_id,
+                page=page,
+                keyword=keyword,
+                refresh=refresh,
+                session_name=session_name,
+                sender_name=sender_name,
+            ),
+            self.timeout_seconds,
         )
         return res
 

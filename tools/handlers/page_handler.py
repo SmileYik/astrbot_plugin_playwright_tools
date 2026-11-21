@@ -1,7 +1,10 @@
 import traceback
+import inspect
+from typing import Any
 from ...core.context_manager import ContextManager
 from ...core.security_manager import SecurityManager
 from ...core.audit_logger import AuditLogger
+from ...core.readers.base import BasePageReader
 from ...core.page_extractor import PageExtractor
 
 try:
@@ -9,6 +12,7 @@ try:
 except ImportError:
     import logging
     logger = logging.getLogger(__name__)
+
 
 class PageHandler:
     """页面导航、内容读取、快速检索与标签页/弹窗管理。"""
@@ -18,13 +22,19 @@ class PageHandler:
         context_mgr: ContextManager,
         security_mgr: SecurityManager,
         audit_logger: AuditLogger,
-        page_extractor: PageExtractor,
+        reader: BasePageReader | None = None,
+        page_extractor: PageExtractor | None = None,
         enable_close_tool: bool = True,
+        **kwargs,
     ):
         self.context_mgr = context_mgr
         self.security_mgr = security_mgr
         self.audit_logger = audit_logger
-        self.page_extractor = page_extractor
+        actual_reader = reader if reader is not None else page_extractor
+        if actual_reader is None and "page_extractor" in kwargs:
+            actual_reader = kwargs["page_extractor"]
+        self.reader = actual_reader
+        self.page_extractor = page_extractor or actual_reader
         self.enable_close_tool = enable_close_tool
 
     def _setup_page_listeners(self, context, page):
@@ -58,7 +68,7 @@ class PageHandler:
         session_name: str = "",
         sender_name: str = "",
     ) -> str:
-        """打开目标网页并返回第一页元素快照。"""
+        """打开目标网页。"""
         allowed, reason = self.security_mgr.is_url_allowed_navigation(sender_id, url)
         if not allowed:
             await self.audit_logger.log_action(
@@ -77,17 +87,25 @@ class PageHandler:
 
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            data = await page.evaluate(self.page_extractor.get_js_extractor_script())
-            md_text = data.get("markdownText", "") or data.get("text_blocks", "")
-            snapshot_data, ref_map = self.page_extractor.extract_snapshot(
-                data.get("title", ""), data.get("url", url),
-                data.get("elements", []), md_text
-            )
-            ctx.snapshot_data = snapshot_data
-            ctx.ref_map = ref_map
-            chunk_output = self.page_extractor.format_page_chunk(snapshot_data, target="all", page_index=1)
 
-            res = f"{hint}\n{chunk_output}\n\n[推荐操作: 可调用 pw_page(action='read', target='text') 阅读正文，或 target='elements' 查看控件列表]".strip()
+            title = ""
+            try:
+                if hasattr(page, "title") and callable(page.title):
+                    t_val = page.title()
+                    if inspect.isawaitable(t_val):
+                        title = await t_val
+                    else:
+                        title = str(t_val)
+                else:
+                    title = str(getattr(page, "title", ""))
+            except Exception:
+                title = ""
+
+            ctx.current_snapshot = None
+            ctx.is_snapshot_dirty = True
+            ctx.ref_map = {}
+
+            res = f"{hint}\n已成功打开网页: {url} (标题: {title})。\n[推荐操作: 请调用 pw_read() 查看页面内容与可操作元素]".strip()
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
                 "open_url", url, {"url": url}, res, is_permitted=True,
@@ -110,11 +128,13 @@ class PageHandler:
         session_id: str,
         sender_id: str,
         page: int = 1,
-        target: str = "all",
+        keyword: str = "",
+        refresh: bool = False,
         session_name: str = "",
         sender_name: str = "",
+        **kwargs,
     ) -> str:
-        """读取当前页面的内容（支持指定 target 为 all/text/elements 及独立分页）。"""
+        """读取当前页面的内容与可交互操作元素（支持懒加载快照缓存、脏标记失效与关键词定位）。"""
         ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
         if ctx is None:
             return "读取失败: 无法获取浏览器上下文"
@@ -124,26 +144,30 @@ class PageHandler:
         if not allowed:
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "read_page", current_url, {"page": page, "target": target}, reason, is_permitted=False, deny_reason=reason,
+                "read_page", current_url, {"page": page, "keyword": keyword, "refresh": refresh}, reason, is_permitted=False, deny_reason=reason,
                 session_name=session_name, sender_name=sender_name
             )
             return f"读取失败: {reason}"
 
         try:
-            data = await ctx.current_page.evaluate(self.page_extractor.get_js_extractor_script())
-            md_text = data.get("markdownText", "") or data.get("text_blocks", "")
-            snapshot_data, ref_map = self.page_extractor.extract_snapshot(
-                data.get("title", ""), data.get("url", current_url),
-                data.get("elements", []), md_text
-            )
-            ctx.snapshot_data = snapshot_data
-            ctx.ref_map = ref_map
-            chunk_output = self.page_extractor.format_page_chunk(snapshot_data, target=target, page_index=page)
+            if ctx.current_snapshot is None or ctx.is_snapshot_dirty or refresh:
+                try:
+                    snapshot = await self.reader.extract_snapshot(ctx.current_page, current_url)
+                except TypeError:
+                    snapshot = await self.reader.extract_snapshot(ctx.current_page)
+                ctx.current_snapshot = snapshot
+                ctx.ref_map = getattr(snapshot, "ref_map", {})
+                ctx.is_snapshot_dirty = False
 
-            res = f"{hint}\n{chunk_output}".strip()
+            if keyword and str(keyword).strip():
+                content = self.reader.search(ctx.current_snapshot, str(keyword).strip())
+            else:
+                content = self.reader.format_chunk(ctx.current_snapshot, page)
+
+            res = f"{hint}\n{content}".strip()
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "read_page", current_url, {"page": page, "target": target}, res, is_permitted=True,
+                "read_page", current_url, {"page": page, "keyword": keyword, "refresh": refresh}, res, is_permitted=True,
                 session_name=session_name, sender_name=sender_name
             )
             return res
@@ -152,7 +176,7 @@ class PageHandler:
             err_msg = f"读取页面异常: {str(e)}"
             await self.audit_logger.log_action(
                 session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "read_page", current_url, {"page": page, "target": target}, err_msg, is_permitted=True,
+                "read_page", current_url, {"page": page, "keyword": keyword, "refresh": refresh}, err_msg, is_permitted=True,
                 is_error=True, error_message=str(e),
                 session_name=session_name, sender_name=sender_name
             )
@@ -166,50 +190,18 @@ class PageHandler:
         target: str = "all",
         session_name: str = "",
         sender_name: str = "",
+        **kwargs,
     ) -> str:
-        """在当前页面中快速定位并检索包含关键词的内容与操作元素（支持指定 target）。"""
-        ctx, hint = await self.context_mgr.resolve_context(session_id, sender_id)
-        if ctx is None:
-            return "检索失败: 无法获取浏览器上下文"
-
-        current_url = getattr(ctx.current_page, "url", "")
-        allowed, reason = self.security_mgr.check_permission(ctx.owner_id, current_url, "read")
-        if not allowed:
-            await self.audit_logger.log_action(
-                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "search_page", current_url, {"keyword": keyword, "target": target}, reason, is_permitted=False, deny_reason=reason,
-                session_name=session_name, sender_name=sender_name
-            )
-            return f"检索失败: {reason}"
-
-        try:
-            data = await ctx.current_page.evaluate(self.page_extractor.get_js_extractor_script())
-            md_text = data.get("markdownText", "") or data.get("text_blocks", "")
-            snapshot_data, ref_map = self.page_extractor.extract_snapshot(
-                data.get("title", ""), data.get("url", current_url),
-                data.get("elements", []), md_text
-            )
-            ctx.snapshot_data = snapshot_data
-            ctx.ref_map = ref_map
-            search_output = self.page_extractor.search_snapshot(snapshot_data, keyword, target=target)
-
-            res = f"{hint}\n{search_output}".strip()
-            await self.audit_logger.log_action(
-                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "search_page", current_url, {"keyword": keyword, "target": target}, res, is_permitted=True,
-                session_name=session_name, sender_name=sender_name
-            )
-            return res
-        except Exception as e:
-            logger.error(f"[PlaywrightTool] search_page 异常: {e}\n{traceback.format_exc()}")
-            err_msg = f"检索页面异常: {str(e)}"
-            await self.audit_logger.log_action(
-                session_id, f"{session_id}:{ctx.owner_id}", sender_id,
-                "search_page", current_url, {"keyword": keyword, "target": target}, err_msg, is_permitted=True,
-                is_error=True, error_message=str(e),
-                session_name=session_name, sender_name=sender_name
-            )
-            return err_msg
+        """在当前页面中快速定位并检索包含关键词的内容（向后兼容）。"""
+        return await self.read_page(
+            session_id=session_id,
+            sender_id=sender_id,
+            page=1,
+            keyword=keyword,
+            refresh=False,
+            session_name=session_name,
+            sender_name=sender_name,
+        )
 
     async def switch_tab(
         self,
@@ -224,20 +216,22 @@ class PageHandler:
         if ctx is None:
             return "切换失败: 无法获取浏览器上下文"
 
-        pages = ctx.browser_context.pages
+        pages = getattr(ctx.browser_context, "pages", None) or getattr(ctx, "pages", [])
         if tab_index < 1 or tab_index > len(pages):
             return f"切换失败: 标签页索引 {tab_index} 超出范围 (当前共有 {len(pages)} 个标签页)"
 
         ctx.current_page = pages[tab_index - 1]
         ctx.pages = pages
         ctx.ref_map = {}
+        ctx.current_snapshot = None
+        ctx.is_snapshot_dirty = True
         await self.audit_logger.log_action(
             session_id, f"{session_id}:{ctx.owner_id}", sender_id,
             "switch_tab", ctx.current_page.url, {"tab_index": tab_index},
             f"已切换至标签页 {tab_index}", is_permitted=True,
             session_name=session_name, sender_name=sender_name
         )
-        return f"{hint}\n已成功切换至标签页 {tab_index} (URL: {ctx.current_page.url})。建议调用 read 查看页面元素。".strip()
+        return f"{hint}\n已成功切换至标签页 {tab_index} (URL: {ctx.current_page.url})。\n[推荐操作: 请调用 pw_read() 查看页面内容与可操作元素]".strip()
 
     async def handle_dialog(
         self,

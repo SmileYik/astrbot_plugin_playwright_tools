@@ -28,6 +28,8 @@ class BrowserSessionContext:
     ref_map: dict[int, dict] = field(default_factory=dict)
     dialog_action: dict | None = None
     last_dialog_message: str | None = None
+    current_snapshot: Any = None
+    is_snapshot_dirty: bool = False
 
     def touch(self) -> None:
         """更新最后活跃时间。"""

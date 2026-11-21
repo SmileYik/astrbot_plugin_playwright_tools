@@ -1,29 +1,16 @@
-"""大模型调用的 JSON Schema 定义，涵盖三大复合工具：pw_page, pw_interact, pw_media。"""
+"""大模型调用的 JSON Schema 定义，涵盖复合工具：pw_page, pw_read, pw_interact, pw_media。"""
 
 PW_PAGE_SCHEMA = {
     "type": "object",
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["open", "read", "search", "switch_tab", "dialog", "close"],
-            "description": "要执行的页面动作：open(打开网址), read(读取页面快照), search(关键词搜索), switch_tab(切换标签页), dialog(响应弹窗), close(关闭当前浏览器上下文)",
+            "enum": ["open", "switch_tab", "dialog", "close"],
+            "description": "要执行的页面动作：open(打开网址), switch_tab(切换标签页), dialog(响应弹窗), close(关闭当前浏览器上下文)",
         },
         "url": {
             "type": "string",
             "description": "网页地址 (action='open' 时必填)",
-        },
-        "page": {
-            "type": "integer",
-            "description": "分页查看时的页码编号，从1开始 (action='read' 时可选，默认为1)",
-        },
-        "target": {
-            "type": "string",
-            "enum": ["all", "text", "elements"],
-            "description": "查看或搜索的目标范围：'all'(全部正文与可交互元素), 'text'(仅正文段落), 'elements'(仅可交互操作元素) (action='read' 或 'search' 时可选，默认为'all')",
-        },
-        "keyword": {
-            "type": "string",
-            "description": "页面内容搜索关键词 (action='search' 时必填)",
         },
         "tab_index": {
             "type": "integer",
@@ -40,6 +27,24 @@ PW_PAGE_SCHEMA = {
         },
     },
     "required": ["action"],
+}
+
+PW_READ_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "page": {
+            "type": "integer",
+            "description": "分页查看时的页码编号，从1开始 (默认为 1)",
+        },
+        "keyword": {
+            "type": "string",
+            "description": "页面内容关键词定位检索，若提供则返回包含关键词的上下文片段与元素 (可选)",
+        },
+        "refresh": {
+            "type": "boolean",
+            "description": "是否强制重新获取当前网页快照（例如等待动态内容加载完成或确认页面有最新更新时使用，默认为 False）",
+        },
+    },
 }
 
 PW_INTERACT_SCHEMA = {

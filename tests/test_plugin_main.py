@@ -122,11 +122,14 @@ class TestPluginMain(unittest.TestCase):
         self.assertTrue(plugin.mask_password_inputs)
         self.assertEqual(plugin.content_extraction_mode, "inline_markdown")
         self.assertEqual(plugin.page_chunk_char_limit, 2000)
+        from astrbot_plugin_playwright_tools.core.readers import InlineMarkdownReader
+        self.assertIsInstance(plugin.reader, InlineMarkdownReader)
         mock_ctx.add_llm_tools.assert_called_once()
         tools_registered = mock_ctx.add_llm_tools.call_args[0]
-        self.assertEqual(len(tools_registered), 3)
+        self.assertEqual(len(tools_registered), 4)
         tool_names = [t.name for t in tools_registered]
         self.assertIn("pw_page", tool_names)
+        self.assertIn("pw_read", tool_names)
         self.assertIn("pw_interact", tool_names)
         self.assertIn("pw_media", tool_names)
 
@@ -147,6 +150,8 @@ class TestPluginMain(unittest.TestCase):
         self.assertFalse(plugin.mask_password_inputs)
         self.assertEqual(plugin.content_extraction_mode, "aria_snapshot")
         self.assertEqual(plugin.page_chunk_char_limit, 3500)
+        from astrbot_plugin_playwright_tools.core.readers import AriaSnapshotReader
+        self.assertIsInstance(plugin.reader, AriaSnapshotReader)
 
     def test_on_llm_request_injection(self):
         TEMP_DIR.mkdir(parents=True, exist_ok=True)

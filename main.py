@@ -13,13 +13,14 @@ from .api.lifecycle_api import LifecycleApiHandler
 from .core.audit_logger import AuditLogger
 from .core.security_manager import SecurityManager
 from .core.page_extractor import PageExtractor
+from .core.readers import InlineMarkdownReader, AriaSnapshotReader
 from .core.context_manager import ContextManager
 from .adapts.factory import AdapterFactory
 
 from .tools.handlers.page_handler import PageHandler
 from .tools.handlers.interact_handler import InteractHandler
 from .tools.handlers.media_handler import MediaHandler
-from .tools.tools import PwPageTool, PwInteractTool, PwMediaTool
+from .tools.tools import PwPageTool, PwReadTool, PwInteractTool, PwMediaTool
 
 @register(
     "PlaywrightTool",
@@ -84,7 +85,7 @@ class PlaywrightToolPlugin(Star):
         audit_max_output_chars = int(store_cfg.get("audit_max_output_chars", self.config.get("audit_max_output_chars", 0)))
         audit_save_screenshots = bool(store_cfg.get("audit_save_screenshots", self.config.get("audit_save_screenshots", True)))
 
-        # 2. 初始化核心服务
+        # 2. 初始化核心服务与阅读器
         audit_db_path = str(self.config.get("audit_db_path", "data/audit.db"))
         self.audit_logger = AuditLogger(audit_db_path, max_output_chars=audit_max_output_chars)
         self.security_manager = SecurityManager(
@@ -97,6 +98,16 @@ class PlaywrightToolPlugin(Star):
             max_page_char_length=2500,
             multiline_separator=element_multiline_separator,
         )
+        if self.content_extraction_mode == "aria_snapshot":
+            self.reader = AriaSnapshotReader(
+                chunk_char_limit=self.page_chunk_char_limit,
+                mask_passwords=self.mask_password_inputs,
+            )
+        else:
+            self.reader = InlineMarkdownReader(
+                chunk_char_limit=self.page_chunk_char_limit,
+                mask_passwords=self.mask_password_inputs,
+            )
         self.adapter = AdapterFactory.create(self.config)
         self.context_manager = ContextManager(
             adapter=self.adapter,
@@ -112,7 +123,8 @@ class PlaywrightToolPlugin(Star):
             self.context_manager,
             self.security_manager,
             self.audit_logger,
-            self.page_extractor,
+            reader=self.reader,
+            page_extractor=self.page_extractor,
             enable_close_tool=enable_close_tool,
         )
         self.interact_handler = InteractHandler(
@@ -132,6 +144,7 @@ class PlaywrightToolPlugin(Star):
         )
 
         self.pw_page_tool = PwPageTool(page_handler=self.page_handler, timeout_seconds=tool_timeout)
+        self.pw_read_tool = PwReadTool(page_handler=self.page_handler, timeout_seconds=tool_timeout)
         self.pw_interact_tool = PwInteractTool(interact_handler=self.interact_handler, timeout_seconds=tool_timeout)
         self.pw_media_tool = PwMediaTool(
             media_handler=self.media_handler,
@@ -142,7 +155,7 @@ class PlaywrightToolPlugin(Star):
 
         # 4. 面向对象注册 FunctionTool
         if hasattr(self.context, "add_llm_tools"):
-            self.context.add_llm_tools(self.pw_page_tool, self.pw_interact_tool, self.pw_media_tool)
+            self.context.add_llm_tools(self.pw_page_tool, self.pw_read_tool, self.pw_interact_tool, self.pw_media_tool)
 
         # 5. 初始化并注册 Web API 模块
         self.audit_api = AuditApiHandler(self.audit_logger)

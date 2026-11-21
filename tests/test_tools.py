@@ -9,10 +9,12 @@ if parent_dir not in sys.path:
 
 from astrbot_plugin_playwright_tools.tools.tools import (
     PwPageTool,
+    PwReadTool,
     PwInteractTool,
     PwMediaTool,
     _extract_event_and_metadata,
 )
+from astrbot_plugin_playwright_tools.tools.schemas import PW_PAGE_SCHEMA, PW_READ_SCHEMA
 from astrbot_plugin_playwright_tools.tools.handlers.page_handler import PageHandler
 from astrbot_plugin_playwright_tools.tools.handlers.interact_handler import InteractHandler
 from astrbot_plugin_playwright_tools.tools.handlers.media_handler import MediaHandler
@@ -58,13 +60,23 @@ class TestTools(unittest.TestCase):
         self.mock_context_wrapper.event.get_sender_id.return_value = "u1"
 
         self.page_tool = PwPageTool(self.mock_page_handler, timeout_seconds=5)
+        self.read_tool = PwReadTool(self.mock_page_handler, timeout_seconds=5)
         self.interact_tool = PwInteractTool(self.mock_interact_handler, timeout_seconds=5)
         self.media_tool = PwMediaTool(self.mock_media_handler, timeout_seconds=5)
 
     def test_page_tool_actions_map_exists(self):
         self.assertTrue(hasattr(self.page_tool, "_actions"))
-        for act in ["open", "read", "search", "switch_tab", "dialog", "close"]:
+        for act in ["open", "switch_tab", "dialog", "close"]:
             self.assertIn(act, self.page_tool._actions)
+        self.assertNotIn("read", self.page_tool._actions)
+        self.assertNotIn("search", self.page_tool._actions)
+
+    def test_pw_page_schema_actions(self):
+        actions = PW_PAGE_SCHEMA["properties"]["action"]["enum"]
+        self.assertEqual(actions, ["open", "switch_tab", "dialog", "close"])
+        self.assertNotIn("page", PW_PAGE_SCHEMA["properties"])
+        self.assertNotIn("target", PW_PAGE_SCHEMA["properties"])
+        self.assertNotIn("keyword", PW_PAGE_SCHEMA["properties"])
 
     def test_page_tool_call_is_coroutine(self):
         with patch("asyncio.wait_for", fake_wait_for):
@@ -75,7 +87,7 @@ class TestTools(unittest.TestCase):
     def test_page_tool_invalid_action(self):
         with patch("asyncio.wait_for", fake_wait_for):
             res = run_coro(self.page_tool.call(self.mock_context_wrapper, action="unknown_action"))
-        self.assertIn("未知的动作", res)
+        self.assertIn("未知的动作: unknown_action。支持的动作包括: open, switch_tab, dialog, close", res)
 
     def test_page_tool_dispatch_open(self):
         async def mock_open(s_id, u_id, url, **kwargs):
@@ -86,14 +98,43 @@ class TestTools(unittest.TestCase):
             res = run_coro(self.page_tool.call(self.mock_context_wrapper, action="open", url="https://example.com"))
         self.assertEqual(res, "打开成功: https://example.com")
 
-    def test_page_tool_dispatch_search(self):
-        async def mock_search(s_id, u_id, keyword, **kwargs):
-            return f"搜索结果: {keyword}"
-        self.mock_page_handler.search_page = mock_search
+    def test_read_tool_dispatch_read(self):
+        called_args = {}
+        async def mock_read(s_id, u_id, page=1, keyword="", refresh=False, **kwargs):
+            called_args["page"] = page
+            called_args["keyword"] = keyword
+            called_args["refresh"] = refresh
+            return f"页面内容第 {page} 页"
+        self.mock_page_handler.read_page = mock_read
 
         with patch("asyncio.wait_for", fake_wait_for):
-            res = run_coro(self.page_tool.call(self.mock_context_wrapper, action="search", keyword="关键词"))
-        self.assertEqual(res, "搜索结果: 关键词")
+            res = run_coro(self.read_tool.call(self.mock_context_wrapper, page=2, refresh=True))
+        self.assertEqual(called_args.get("page"), 2)
+        self.assertEqual(called_args.get("keyword"), "")
+        self.assertTrue(called_args.get("refresh"))
+        self.assertEqual(res, "页面内容第 2 页")
+
+    def test_read_tool_dispatch_search(self):
+        called_args = {}
+        async def mock_read(s_id, u_id, page=1, keyword="", refresh=False, **kwargs):
+            called_args["page"] = page
+            called_args["keyword"] = keyword
+            called_args["refresh"] = refresh
+            return f"搜索结果: {keyword}"
+        self.mock_page_handler.read_page = mock_read
+
+        with patch("asyncio.wait_for", fake_wait_for):
+            res = run_coro(self.read_tool.call(self.mock_context_wrapper, keyword="测试关键字"))
+        self.assertEqual(called_args.get("page"), 1)
+        self.assertEqual(called_args.get("keyword"), "测试关键字")
+        self.assertFalse(called_args.get("refresh"))
+        self.assertEqual(res, "搜索结果: 测试关键字")
+
+    def test_read_tool_schema(self):
+        props = PW_READ_SCHEMA["properties"]
+        self.assertIn("page", props)
+        self.assertIn("keyword", props)
+        self.assertIn("refresh", props)
 
     def test_page_tool_switch_tab_default_index(self):
         called_args = {}
@@ -233,8 +274,17 @@ class TestTools(unittest.TestCase):
 
     def test_tool_handler_attribute_is_none(self):
         self.assertIsNone(self.page_tool.handler)
+        self.assertIsNone(self.read_tool.handler)
         self.assertIsNone(self.interact_tool.handler)
         self.assertIsNone(self.media_tool.handler)
+
+    def test_read_tool_dynamic_description(self):
+        mock_handler = MagicMock()
+        mock_handler.reader.get_tool_metadata.return_value = {
+            "description": "自定义读取器描述内容"
+        }
+        tool = PwReadTool(mock_handler, timeout_seconds=10)
+        self.assertEqual(tool.description, "自定义读取器描述内容")
 
     def test_context_wrapper_unwrapping(self):
         nested_wrapper = MagicMock(spec=["context"])

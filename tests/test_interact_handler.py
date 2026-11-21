@@ -42,6 +42,7 @@ class TestInteractHandler(unittest.TestCase):
             3: {"tag": "input", "text": ""},
             4: {"tag": "select", "text": ""}
         }
+        self.mock_context.is_snapshot_dirty = False
 
         async def mock_resolve(session_id, sender_id):
             return self.mock_context, ""
@@ -52,18 +53,22 @@ class TestInteractHandler(unittest.TestCase):
     def test_click_element(self):
         res = run_coro(self.handler.click("s1", "u1", ref=1))
         self.assertIn("已成功点击 [1]", res)
+        self.assertIn("pw_read()", res)
+        self.assertTrue(self.mock_context.is_snapshot_dirty)
         self.mock_page.locator.assert_called_with('[data-astr-ref="1"]')
         self.mock_locator.click.assert_called_once()
 
     def test_fill_form(self):
         res = run_coro(self.handler.fill_form("s1", "u1", ref=3, text="Hello Playwright"))
         self.assertIn("已成功在输入框 [3] 填入内容", res)
+        self.assertTrue(self.mock_context.is_snapshot_dirty)
         self.mock_page.locator.assert_called_with('[data-astr-ref="3"]')
         self.mock_locator.fill.assert_called_with("Hello Playwright", timeout=10000)
 
     def test_select_option(self):
         res = run_coro(self.handler.select_option("s1", "u1", ref=4, value="opt2"))
         self.assertIn("已在下拉框 [4] 成功选取 'opt2'", res)
+        self.assertTrue(self.mock_context.is_snapshot_dirty)
         self.mock_page.locator.assert_called_with('[data-astr-ref="4"]')
         self.mock_locator.select_option.assert_called()
 
@@ -114,7 +119,13 @@ class TestInteractHandler(unittest.TestCase):
     def test_press_key(self):
         res = run_coro(self.handler.press_key("s1", "u1", key="Enter"))
         self.assertIn("已成功向页面发送按键", res)
+        self.assertTrue(self.mock_context.is_snapshot_dirty)
         self.mock_page.keyboard.press.assert_called_with("Enter")
+
+    def test_clean_playwright_error_recommends_pw_read(self):
+        err = Exception("Timeout 10000ms exceeded waiting for locator")
+        msg = clean_playwright_error(err)
+        self.assertIn("pw_read()", msg)
 
     def test_scroll(self):
         res = run_coro(self.handler.scroll("s1", "u1", direction="down", amount=300))
