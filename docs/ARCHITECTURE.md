@@ -15,11 +15,11 @@ flowchart TD
     PromptHook["Prompt Hook: @filter.on_llm_request"]
     Cmds["User Commands: /browser"]
     WebUI["AstrBot WebUI / Dashboard"]
-    AuditView["Plugin View: views/audit/ (Vite + React)"]
+    BrowserView["Plugin View: views/browser/ (Vite + React SPA)"]
     Bridge["AstrBotPluginView Bridge SDK"]
     
     subgraph ViewLayer [Visualization & Web API Layer]
-        WebAPI["Web APIs: /audit/logs, /stats, /export, /clear"]
+        WebAPI["Web APIs: /audit/*, /lifecycle/*"]
     end
 
     subgraph FacadeLayer [Facade & Dispatch Layer]
@@ -43,7 +43,11 @@ flowchart TD
     end
 
     subgraph AdaptLayer [Browser Adapter Layer]
-        Camoufox[CamoufoxAdapter / Playwright]
+        Factory[AdapterFactory]
+        Camoufox[CamoufoxAdapter]
+        Playwright[PlaywrightAdapter]
+        Factory --> Camoufox
+        Factory --> Playwright
     end
 
     AstrBot --> PluginEntry
@@ -56,14 +60,17 @@ flowchart TD
     HandlerLayer --> CoreLayer
     CoreLayer --> AdaptLayer
 
-    WebUI --> AuditView
-    AuditView --> Bridge
+    WebUI --> BrowserView
+    BrowserView --> Bridge
     Bridge --> WebAPI
     WebAPI --> AuditLog
+    WebAPI --> CtxMgr
 ```
 
 ### 1.1 适配器层 (`adapts/`)
+- **`AdapterFactory`**: 统一构建浏览器适配器实例，依据配置选择 `camoufox` 或原生 `playwright` 驱动，并负责校验自定义浏览器路径。
 - **`CamoufoxAdapter`**: 封装 Playwright 与 Camoufox 驱动的启动、销毁与高级反反爬指纹注入。负责底层 Browser 进程生命周期。
+- **`PlaywrightAdapter`**: 封装 Playwright 原生驱动（Chromium / Firefox / WebKit / Custom），支持自定义二进制路径，负责底层进程生命周期。
 
 ### 1.2 核心服务层 (`core/`)
 - **`ContextManager`**: 管理多租户 `ManagedContext` 实例。负责个人模式与会话模式的上下文隔离路由、协作者授权、Cookie 注入以及空闲定时回收。
@@ -78,13 +85,13 @@ flowchart TD
 
 ### 1.4 门面分发层 (`tools/tools.py`, `tools/schemas.py`)
 - **`PwPageTool` / `PwInteractTool` / `PwMediaTool`**: 继承 `FunctionTool[AstrAgentContext]` 的类型化工具门面，面向大模型暴露 `pw_page`, `pw_interact`, `pw_media` 三大工具。
-- 每个工具在初始化时维护 `_actions` 字典映射，彻底移除 `if-elif-else` 分支；`call()` 统一设计为异步生成器（AsyncGenerator），并通过 `_execute_with_timeout` 施加全局单工具超时保护。
-- 在发送聊天截图时，使用 `yield event.image_result(path)` 直接交付，随后立即终止退出，避免后续文本消息覆盖聊天界面图片。
+- 每个工具在初始化时维护 `_actions` 字典映射，移除 `if-elif-else` 分支；`call()` 统一设计为标准协程，并通过 `_execute_with_timeout` 施加全局单工具超时保护。
+- 在发送聊天截图时，使用异步方法交付，避免后续文本消息覆盖聊天界面图片。
 
-### 1.5 可视化视图与 Web API 层 (`views/audit/`, `web-src/`, `main.py`)
-- **独立页面声明 (`metadata.yaml`)**：注册 `target: plugin_page` 视图 `audit`，由 WebUI 宿主统一加载展示。
-- **轻量 MD3 前端架构 (`web-src/`)**：基于 Vite + React 18 + TypeScript 构建，自适应宿主深浅色主题，遵循 Material Design 3 大圆角（16-24px）与表面色规范。列表卡片展示两行截断预览，点击触发右侧平滑滑出的大圆角 Side Sheet 抽屉，检视全量 JSON 入参、DOM 快照与报错原因。
-- **后端原生 Web API (`main.py`)**：通过 `context.register_web_api` 注册 `/{PLUGIN_NAME}/audit/logs`（多维条件检索与分页）、`/stats`（调用指标统计）、`/export`（RFC 4180 CSV / JSON 文件导出）与 `/clear`（二次确认清空）。所有接口天然复用 AstrBot WebUI 原生登录鉴权。
+### 1.5 可视化视图与 Web API 层 (`views/browser/`, `web-src/`, `main.py`, `api/`)
+- **独立页面声明 (`metadata.yaml`)**：注册 `target: plugin_page` 视图 `browser`（网页工具控制台），由 WebUI 宿主统一加载展示。
+- **轻量 MD3 前端架构 (`web-src/`)**：基于 Vite + React 18 + TypeScript 构建，自适应宿主深浅色主题，遵循 Material Design 3 大圆角（16-24px）与表面色规范。基于内部内存路由无缝切换“操作审计”与“会话生命周期”面板，侧边抽屉支持检视全量 JSON 入参、DOM 快照与截图。
+- **后端模块化 Web API (`api/audit_api.py`, `api/lifecycle_api.py`)**：通过 `context.register_web_api` 注册 `/{PLUGIN_NAME}/audit/*`（多维条件检索、指标统计、导出、清空、截图预览）与 `/{PLUGIN_NAME}/lifecycle/*`（活跃上下文列表、生命周期日志检索、上下文强制终止、手动截图）。所有接口天然复用 AstrBot WebUI 原生登录鉴权。
 
 ---
 
@@ -109,7 +116,7 @@ Session S1 ──> All Users share Context (Owner: S1)
 ## 3. 元素定位与交互可靠性
 
 - **Ref ID 生成**：通过 `document.body` 遍历可操作节点（`a`, `button`, `input`, `select`, `textarea` 等），写入 `data-astr-ref="{idx}"`。
-- **元素查找**：所有交互操作（点击、悬停、聚焦、拖拽等）均基于 `document.querySelector('[data-astr-ref="{ref}"]')` 执行，杜绝传统基于数组下标或动态 CSS 选择器的脆弱匹配。
+- **元素查找**：所有交互操作（点击、悬停、聚焦、拖拽等）均基于 `document.querySelector('[data-astr-ref="{ref}"]')` 执行，避免传统基于数组下标或动态 CSS 选择器的脆弱匹配。
 
 ---
 
