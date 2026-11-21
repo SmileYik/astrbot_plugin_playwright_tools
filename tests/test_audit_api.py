@@ -166,7 +166,7 @@ class TestAuditApi(unittest.TestCase):
 
         try:
             audit_api_module.request = None
-            res = run_coro(self.handler.api_audit_screenshot(path=str(test_png)))
+            res = run_coro(self.handler.api_audit_screenshot(path=str(test_png), format="raw"))
             if isinstance(res, dict):
                 self.assertEqual(res.get("status_code", 200), 200)
                 self.assertEqual(res.get("media_type"), "image/png")
@@ -176,6 +176,38 @@ class TestAuditApi(unittest.TestCase):
                 self.assertEqual(getattr(res, "media_type", ""), "image/png")
                 if hasattr(res, "body"):
                     self.assertEqual(res.body, fake_png_data)
+        finally:
+            if test_png.exists():
+                test_png.unlink()
+
+    def test_screenshot_route_data_url_default(self):
+        import tempfile
+        import base64
+        import json
+        base_dir = Path(tempfile.gettempdir()) / "astrbot_test_audit_data"
+        base_dir.mkdir(parents=True, exist_ok=True)
+        self.handler.base_dir = base_dir
+
+        test_png = base_dir / "test_data_url.png"
+        fake_png_data = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDRtest_data_url"
+        with open(test_png, "wb") as f:
+            f.write(fake_png_data)
+
+        try:
+            audit_api_module.request = None
+            res = run_coro(self.handler.api_audit_screenshot(path=str(test_png)))
+            raw_payload = res.get("data", {}) if isinstance(res, dict) else json.loads(res.body)
+            # handle both real Starlette JSONResponse (raw_payload["data"]) and mock wrapper (raw_payload["data"]["data"])
+            if "data" in raw_payload and isinstance(raw_payload["data"], dict) and "data" in raw_payload["data"]:
+                data = raw_payload["data"]["data"]
+            elif "data" in raw_payload and isinstance(raw_payload["data"], dict) and "data_url" in raw_payload["data"]:
+                data = raw_payload["data"]
+            else:
+                data = raw_payload
+            expected_b64 = base64.b64encode(fake_png_data).decode("utf-8")
+            self.assertEqual(data["media_type"], "image/png")
+            self.assertEqual(data["data_url"], f"data:image/png;base64,{expected_b64}")
+            self.assertEqual(data["filename"], "test_data_url.png")
         finally:
             if test_png.exists():
                 test_png.unlink()
@@ -193,7 +225,7 @@ class TestAuditApi(unittest.TestCase):
 
         try:
             audit_api_module.request = None
-            res = run_coro(self.handler.api_audit_screenshot(path=str(test_jpg)))
+            res = run_coro(self.handler.api_audit_screenshot(path=str(test_jpg), format="raw"))
             if isinstance(res, dict):
                 self.assertEqual(res.get("status_code", 200), 200)
                 self.assertEqual(res.get("media_type"), "image/jpeg")

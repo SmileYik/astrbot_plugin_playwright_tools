@@ -1,4 +1,5 @@
 import os
+import base64
 from pathlib import Path
 from typing import Any
 
@@ -163,13 +164,17 @@ class AuditApiHandler:
         cleared = await self.audit_logger.clear_logs()
         return json_response({"code": 0, "data": {"cleared": cleared}})
 
-    async def api_audit_screenshot(self, path: str = ""):
-        """获取本地截图预览，带目录越界防护并直出二进制图片流。"""
+    async def api_audit_screenshot(self, path: str = "", format: str = ""):
+        """获取本地截图预览，带目录越界防护，支持 Base64 Data URL 或二进制直出。"""
         req = request
         if not path:
             path = extract_query_param(req, "path", "")
         if not path:
             return error_response("缺少 path 参数", status_code=400)
+
+        if not format:
+            format = extract_query_param(req, "format", extract_query_param(req, "fmt", "data_url"))
+        fmt = str(format or "data_url").lower().strip()
 
         # 目录越界防护：只允许访问 base_dir (默认 data/) 目录下的截图
         base_dir = getattr(self, "base_dir", None)
@@ -201,14 +206,28 @@ class AuditApiHandler:
         }
         media_type = mime_map.get(ext, "image/png")
 
-        try:
-            from starlette.responses import FileResponse
-            return FileResponse(str(target_path), media_type=media_type)
-        except ImportError:
+        if fmt in ("raw", "binary"):
             try:
-                from starlette.responses import Response
-                with open(target_path, "rb") as f:
-                    return Response(content=f.read(), media_type=media_type)
+                from starlette.responses import FileResponse
+                return FileResponse(str(target_path), media_type=media_type)
             except ImportError:
-                with open(target_path, "rb") as f:
-                    return {"data": f.read(), "media_type": media_type, "status_code": 200}
+                try:
+                    from starlette.responses import Response
+                    with open(target_path, "rb") as f:
+                        return Response(content=f.read(), media_type=media_type)
+                except ImportError:
+                    with open(target_path, "rb") as f:
+                        return {"data": f.read(), "media_type": media_type, "status_code": 200}
+
+        # 默认返回 Data URL JSON
+        with open(target_path, "rb") as f:
+            b64_content = base64.b64encode(f.read()).decode("utf-8")
+        data_url = f"data:{media_type};base64,{b64_content}"
+        return json_response({
+            "code": 0,
+            "data": {
+                "data_url": data_url,
+                "media_type": media_type,
+                "filename": target_path.name,
+            }
+        })
