@@ -46,6 +46,7 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 import astrbot_plugin_playwright_tools.main as main
 import astrbot_plugin_playwright_tools.api.audit_api as audit_api_module
+import astrbot_plugin_playwright_tools.api.lifecycle_api as lifecycle_api_module
 
 def run_coro(coro):
     result = None
@@ -531,6 +532,47 @@ class TestPluginMain(unittest.TestCase):
         self.assertIn("/browser list", help_msg)
         self.assertIn("/browser list-all", help_msg)
         self.assertIn("/browser kill", help_msg)
+
+    def test_api_traceback_and_lifecycle_metadata_integration(self):
+        import uuid
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / f"api_traceback_test_{uuid.uuid4().hex}.db")
+        mock_ctx = MagicMock()
+        mock_req = MagicMock()
+        mock_req.query.get.side_effect = lambda k, default=None, **kw: default
+        audit_api_module.request = mock_req
+        lifecycle_api_module.request = mock_req
+        main.request = mock_req
+
+        plugin = main.PlaywrightToolPlugin(mock_ctx, config={"audit_db_path": db_file})
+
+        # 1. 验证记录并拉取异常堆栈
+        traceback_content = "Exception: Page.evaluate failure\n\nTraceback (most recent call last):\n  File 'test.py', line 10\n"
+        run_coro(plugin.audit_logger.log_action(
+            session_id="s_err", context_key="s_err:u1", sender_id="u1",
+            tool_name="read_page", is_permitted=True, is_error=True,
+            error_message=traceback_content, session_name="异常会话", sender_name="用户A"
+        ))
+        res_logs = run_coro(plugin.api_audit_logs())
+        items = res_logs["data"]["items"]
+        self.assertEqual(len(items), 1)
+        self.assertIn("Traceback (most recent call last):", items[0]["error_message"])
+
+        # 2. 验证生命周期记录名称与ID完整返回
+        run_coro(plugin.audit_logger.log_lifecycle(
+            session_id="s_lc", context_key="s_lc:u2", owner_id="u2",
+            event_type="create", operator_id="u2",
+            session_name="开发群", operator_name="李四", owner_name="李四"
+        ))
+        res_lc = run_coro(plugin.lifecycle_api.api_lifecycle_logs())
+        lc_items = res_lc["data"]["items"]
+        self.assertEqual(len(lc_items), 1)
+        self.assertEqual(lc_items[0]["session_name"], "开发群")
+        self.assertEqual(lc_items[0]["session_id"], "s_lc")
+        self.assertEqual(lc_items[0]["operator_name"], "李四")
+        self.assertEqual(lc_items[0]["operator_id"], "u2")
+        self.assertEqual(lc_items[0]["owner_name"], "李四")
+        self.assertEqual(lc_items[0]["owner_id"], "u2")
 
 if __name__ == "__main__":
     unittest.main()
