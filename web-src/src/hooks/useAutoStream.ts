@@ -17,6 +17,13 @@ export function useAutoStream({
 }: AutoStreamOptions) {
   const [isLiveActive, setIsLiveActive] = useState<boolean>(enabled);
   const isUpdatingRef = useRef<boolean>(false);
+  const onStreamUpdateRef = useRef(onStreamUpdate);
+  const onBackgroundSyncRef = useRef(onBackgroundSync);
+
+  useEffect(() => {
+    onStreamUpdateRef.current = onStreamUpdate;
+    onBackgroundSyncRef.current = onBackgroundSync;
+  });
 
   useEffect(() => {
     setIsLiveActive(enabled);
@@ -29,9 +36,9 @@ export function useAutoStream({
       isUpdatingRef.current = true;
       try {
         if (canStream) {
-          await onStreamUpdate();
-        } else if (onBackgroundSync) {
-          await onBackgroundSync();
+          await onStreamUpdateRef.current();
+        } else if (onBackgroundSyncRef.current) {
+          await onBackgroundSyncRef.current();
         }
       } catch (err) {
         console.warn("[AutoStream] Poll failed:", err);
@@ -43,7 +50,7 @@ export function useAutoStream({
     return () => {
       window.clearInterval(timer);
     };
-  }, [enabled, intervalMs, canStream, onStreamUpdate, onBackgroundSync]);
+  }, [enabled, intervalMs, canStream]);
 
   return { isLiveActive };
 }

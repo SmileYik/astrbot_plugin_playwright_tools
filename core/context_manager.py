@@ -312,6 +312,9 @@ class ContextManager:
                 owner_id=context.owner_id,
                 event_type="join",
                 operator_id=owner_id,
+                session_name=getattr(context, "session_name", ""),
+                operator_name=getattr(context, "owner_name", ""),
+                owner_name=getattr(context, "owner_name", ""),
                 details={"invited_user": target_user_id},
             )
         return True, f"已成功将 @{target_user_id} 邀请加入您的浏览器操作上下文"
@@ -337,6 +340,8 @@ class ContextManager:
                 owner_id=target_ctx.owner_id,
                 event_type="switch",
                 operator_id=sender_id,
+                session_name=getattr(target_ctx, "session_name", ""),
+                owner_name=getattr(target_ctx, "owner_name", ""),
                 details={"target_owner": target_owner_id},
             )
         return True, f"已将您的操作上下文切换至用户 @{target_owner_id} 的浏览器"
