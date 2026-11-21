@@ -11,6 +11,7 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 from core.readers.markdown_reader import InlineMarkdownReader
+from core.readers.aria_reader import AriaSnapshotReader
 from core.readers.base import BasePageReader, PageSnapshot
 
 
@@ -137,6 +138,98 @@ class TestInlineMarkdownReader(unittest.TestCase):
         self.assertIn("page", meta["parameters"]["properties"])
         self.assertIn("keyword", meta["parameters"]["properties"])
         self.assertIn("refresh", meta["parameters"]["properties"])
+
+
+class TestAriaSnapshotReader(unittest.TestCase):
+    def test_aria_reader_tool_metadata(self):
+        reader = AriaSnapshotReader(chunk_char_limit=1500)
+        meta = reader.get_tool_metadata()
+        self.assertIn("ARIA", meta["description"])
+        self.assertIn("page", meta["parameters"]["properties"])
+
+    def test_aria_chunking_with_ancestor_breadcrumbs(self):
+        reader = AriaSnapshotReader(chunk_char_limit=120)
+        tree_text = (
+            "- main:\n"
+            "  - region \"客户端\":\n"
+            "    - button \"下载\" [ref=1]\n"
+            "  - region \"服务端\":\n"
+            "    - button \"下载\" [ref=2]\n"
+        )
+        chunks = reader._chunk_aria_tree(tree_text, "https://example.com", "测试网页")
+        self.assertGreaterEqual(len(chunks), 2)
+        self.assertIn("[ref=1]", "".join(chunks))
+        self.assertIn("[ref=2]", "".join(chunks))
+        self.assertIn("分页: 1/", chunks[0])
+
+    def test_aria_password_masking(self):
+        reader_masked = AriaSnapshotReader(mask_passwords=True)
+        script_masked = reader_masked.get_js_extractor_script()
+        self.assertIn("******", script_masked)
+        reader_unmasked = AriaSnapshotReader(mask_passwords=False)
+        script_unmasked = reader_unmasked.get_js_extractor_script()
+        self.assertNotIn("******", script_unmasked)
+
+    def test_aria_extract_snapshot_with_mock_page(self):
+        reader = AriaSnapshotReader(chunk_char_limit=2000, mask_passwords=True)
+        mock_page = AsyncMock()
+
+        async def fake_eval(script):
+            return {
+                "title": "管理中心",
+                "url": "https://example.com/admin",
+                "ariaTree": "- main:\n  - button \"提交\" [ref=1]",
+                "elements": [
+                    {"ref": 1, "role": "button", "name": "提交"},
+                ],
+            }
+
+        mock_page.evaluate = fake_eval
+
+        snapshot = run_coro(reader.extract_snapshot(mock_page, "https://example.com/admin"))
+        self.assertIsInstance(snapshot, PageSnapshot)
+        self.assertEqual(snapshot.title, "管理中心")
+        self.assertEqual(snapshot.url, "https://example.com/admin")
+        self.assertEqual(len(snapshot.chunks), 1)
+        self.assertEqual(snapshot.total_pages, 1)
+        self.assertIn(1, snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map[1]["name"], "提交")
+        self.assertIn("[ref=1]", snapshot.chunks[0])
+
+    def test_aria_format_chunk(self):
+        reader = AriaSnapshotReader(chunk_char_limit=150)
+        snapshot = PageSnapshot(
+            title="标题",
+            url="https://example.com",
+            raw_content="- main:\n  - text: 内容",
+            ref_map={},
+            total_pages=2,
+            chunks=["第 1 页内容", "第 2 页内容"],
+        )
+        self.assertEqual(reader.format_chunk(snapshot, 1), "第 1 页内容")
+        self.assertEqual(reader.format_chunk(snapshot, 2), "第 2 页内容")
+        self.assertEqual(reader.format_chunk(snapshot, 999), "第 2 页内容")
+        self.assertEqual(reader.format_chunk(snapshot, 0), "第 1 页内容")
+
+    def test_aria_search_snapshot(self):
+        reader = AriaSnapshotReader()
+        snapshot = PageSnapshot(
+            title="标题",
+            url="https://example.com",
+            raw_content="- main:\n  - region \"设置\":\n    - button \"重置密码\" [ref=1]",
+            ref_map={1: {"ref": 1, "name": "重置密码"}},
+            total_pages=1,
+            chunks=["快照全文"],
+        )
+        res_found = reader.search(snapshot, "重置密码")
+        self.assertIn("找到 1 处匹配", res_found)
+        self.assertIn("button \"重置密码\" [ref=1]", res_found)
+
+        res_not_found = reader.search(snapshot, "无此内容")
+        self.assertIn("未在页面 ARIA 语义树中找到匹配", res_not_found)
+
+        res_empty = reader.search(snapshot, "")
+        self.assertIn("检索失败", res_empty)
 
 
 if __name__ == "__main__":
