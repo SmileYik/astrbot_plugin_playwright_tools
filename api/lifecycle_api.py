@@ -92,11 +92,8 @@ class LifecycleApiHandler:
                 active_items = res
 
         return json_response({
-            "code": 0,
-            "data": {
-                "items": active_items,
-                "total": len(active_items),
-            }
+            "items": active_items,
+            "total": len(active_items),
         })
 
     async def api_lifecycle_logs(
@@ -137,13 +134,10 @@ class LifecycleApiHandler:
                 logs, total = res
 
         return json_response({
-            "code": 0,
-            "data": {
-                "items": logs,
-                "total": total,
-                "page": page,
-                "page_size": page_size,
-            }
+            "items": logs,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
         })
 
     async def api_manual_screenshot(self, context_key: str = "", tab_index: int | None = None):

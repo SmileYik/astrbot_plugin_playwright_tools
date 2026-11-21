@@ -33,11 +33,7 @@ export interface QueryParams {
   tool_name: string;
 }
 
-export interface ApiResponse<T> {
-  code: number;
-  data: T;
-  message?: string;
-}
+export type ApiResponse<T> = T & { code?: number; data?: T; message?: string };
 
 export interface LogsResponseData {
   total: number;

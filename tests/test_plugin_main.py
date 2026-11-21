@@ -237,18 +237,18 @@ class TestPluginMain(unittest.TestCase):
 
         # 1. 验证 api_audit_logs
         res_logs = run_coro(plugin.api_audit_logs())
-        self.assertEqual(res_logs["data"]["code"], 0)
-        self.assertEqual(res_logs["data"]["data"]["total"], 1)
+        self.assertNotIn("code", res_logs["data"])
+        self.assertEqual(res_logs["data"]["total"], 1)
 
         # 2. 验证 api_audit_stats
         res_stats = run_coro(plugin.api_audit_stats())
-        self.assertEqual(res_stats["data"]["code"], 0)
-        self.assertEqual(res_stats["data"]["data"]["total"], 1)
+        self.assertNotIn("code", res_stats["data"])
+        self.assertEqual(res_stats["data"]["total"], 1)
 
         # 3. 验证 api_audit_export
         res_export = run_coro(plugin.api_audit_export())
-        self.assertEqual(res_export["data"]["code"], 0)
-        self.assertIn("用户1", res_export["data"]["data"])
+        self.assertNotIn("code", res_export["data"])
+        self.assertIn("用户1", res_export["data"]["content"])
 
         # 4. 验证 api_audit_clear 拒绝未确认
         res_clear_reject = run_coro(plugin.api_audit_clear())
@@ -268,7 +268,7 @@ class TestPluginMain(unittest.TestCase):
 
         # 再次获取 stats 验证已被清空
         res_stats_after = run_coro(plugin.api_audit_stats())
-        self.assertEqual(res_stats_after["data"]["data"]["total"], 0)
+        self.assertEqual(res_stats_after["data"]["total"], 0)
 
     def test_plugin_config_initialization_with_new_audit_and_extractor_settings(self):
         TEMP_DIR.mkdir(parents=True, exist_ok=True)

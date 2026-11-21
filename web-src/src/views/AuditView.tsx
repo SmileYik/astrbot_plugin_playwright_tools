@@ -111,9 +111,13 @@ export const AuditView: React.FC<AuditViewProps> = ({
   const handleExport = async (format: "json" | "csv") => {
     try {
       const result = await exportAuditLogs(format);
-      if (result.data) {
+      if (result.content === "[DOWNLOADED_BY_BRIDGE]") {
+        showBanner(`成功导出 ${format.toUpperCase()} 文件`, "info");
+        return;
+      }
+      if (result.content) {
         const mime = format === "csv" ? "text/csv;charset=utf-8;" : "application/json;charset=utf-8;";
-        const blob = new Blob([result.data], { type: mime });
+        const blob = new Blob([result.content], { type: mime });
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;

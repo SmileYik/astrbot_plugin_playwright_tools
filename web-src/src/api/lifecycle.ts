@@ -40,11 +40,16 @@ export async function fetchLifecycleLogs(params: {
 
   try {
     const res = await apiGet<ApiResponse<LifecycleLogsResponseData>>("lifecycle/logs", query);
-    if (res && res.code === 0 && res.data) {
-      return res.data;
+    if (res && Array.isArray(res.items)) {
+      return {
+        total: typeof res.total === "number" ? res.total : 0,
+        items: res.items,
+        page: typeof res.page === "number" ? res.page : query.page,
+        page_size: typeof res.page_size === "number" ? res.page_size : query.page_size,
+      };
     }
-    if (res && "items" in (res as any)) {
-      return res as unknown as LifecycleLogsResponseData;
+    if (res && res.code === 0 && res.data && Array.isArray(res.data.items)) {
+      return res.data;
     }
   } catch (err) {
     console.warn("[LifecycleAPI] fetchLifecycleLogs error:", err);

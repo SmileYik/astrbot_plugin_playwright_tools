@@ -19,11 +19,16 @@ export async function fetchAuditLogs(
 
   try {
     const res = await apiGet<ApiResponse<LogsResponseData>>("audit/logs", query);
-    if (res && res.code === 0 && res.data) {
-      return res.data;
+    if (res && Array.isArray(res.items)) {
+      return {
+        total: typeof res.total === "number" ? res.total : 0,
+        items: res.items,
+        page: typeof res.page === "number" ? res.page : query.page,
+        page_size: typeof res.page_size === "number" ? res.page_size : query.page_size,
+      };
     }
-    if (res && "items" in (res as any)) {
-      return res as unknown as LogsResponseData;
+    if (res && res.code === 0 && res.data && Array.isArray(res.data.items)) {
+      return res.data;
     }
   } catch (err) {
     console.warn("[AuditAPI] fetchAuditLogs error:", err);
@@ -40,11 +45,17 @@ export async function fetchAuditLogs(
 export async function fetchAuditStats(): Promise<AuditStats> {
   try {
     const res = await apiGet<ApiResponse<AuditStats>>("audit/stats");
-    if (res && res.code === 0 && res.data) {
-      return res.data;
+    if (res && typeof res.total === "number") {
+      return {
+        total: res.total ?? 0,
+        allowed: res.allowed ?? 0,
+        denied: res.denied ?? 0,
+        error: res.error ?? 0,
+        today_count: res.today_count ?? 0,
+      };
     }
-    if (res && "total" in (res as any)) {
-      return res as unknown as AuditStats;
+    if (res && res.code === 0 && res.data && typeof res.data.total === "number") {
+      return res.data;
     }
   } catch (err) {
     console.warn("[AuditAPI] fetchAuditStats error:", err);
@@ -70,19 +81,20 @@ export async function clearAuditLogs(): Promise<boolean> {
 
 export async function exportAuditLogs(
   format: "json" | "csv" = "json"
-): Promise<{ data: string; format: string }> {
-  try {
-    const res = await apiGet<ApiResponse<any>>("audit/export", { format });
-    if (res && res.code === 0) {
-      return { data: typeof res.data === "string" ? res.data : JSON.stringify(res.data, null, 2), format };
+): Promise<{ content: string; format: string }> {
+  const bridge = (window as any).AstrBotPluginPage || (window as any).AstrBotPluginView;
+  if (bridge && typeof bridge.download === "function") {
+    try {
+      const filename = `audit-logs-${new Date().toISOString().slice(0, 10)}.${format}`;
+      await bridge.download("audit/export", { format }, filename);
+      return { content: "[DOWNLOADED_BY_BRIDGE]", format };
+    } catch (err) {
+      console.warn("[AuditAPI] bridge.download failed, falling back to apiGet:", err);
     }
-  } catch (err) {
-    console.warn("[AuditAPI] exportAuditLogs error:", err);
   }
-  return {
-    data: "",
-    format,
-  };
+  const res = await apiGet<any>("audit/export", { format });
+  const content = (res && typeof res.content === "string") ? res.content : (res && res.data) ? res.data : (typeof res === "string" ? res : "");
+  return { content, format };
 }
 
 export async function fetchScreenshot(path: string): Promise<string> {

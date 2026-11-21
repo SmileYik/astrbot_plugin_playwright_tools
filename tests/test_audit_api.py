@@ -63,6 +63,24 @@ class TestAuditApi(unittest.TestCase):
         self.assertIn("/my_plugin/audit/screenshot", routes_map)
         self.assertEqual(routes_map["/my_plugin/audit/screenshot"], ["GET"])
 
+    def test_audit_logs_single_layer_contract(self):
+        async def mock_query(page, page_size, keyword, status, tool_name):
+            return [{"id": 1}], 1
+        self.mock_logger.query_logs = mock_query
+
+        mock_req = MagicMock()
+        mock_req.query.get.side_effect = lambda k, default=None: default
+        audit_api_module.request = mock_req
+
+        res = run_coro(self.handler.api_audit_logs())
+        data = res.body if hasattr(res, "body") else res.get("data", res)
+        import json
+        if isinstance(data, (bytes, bytearray)):
+            data = json.loads(data.decode("utf-8"))
+        self.assertIn("items", data)
+        self.assertIn("total", data)
+        self.assertNotIn("code", data)
+
     def test_api_audit_logs(self):
         async def mock_query(page, page_size, keyword, status, tool_name):
             return [{"id": 1}], 1
@@ -73,9 +91,13 @@ class TestAuditApi(unittest.TestCase):
         audit_api_module.request = mock_req
 
         res = run_coro(self.handler.api_audit_logs())
-        self.assertEqual(res["data"]["code"], 0)
-        self.assertEqual(res["data"]["data"]["total"], 1)
-        self.assertEqual(len(res["data"]["data"]["items"]), 1)
+        data = res.body if hasattr(res, "body") else res.get("data", res)
+        if hasattr(res, "body"):
+            import json
+            data = json.loads(res.body.decode("utf-8"))
+        self.assertNotIn("code", data)
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(len(data["items"]), 1)
 
     def test_api_audit_stats(self):
         async def mock_stats():
@@ -83,8 +105,13 @@ class TestAuditApi(unittest.TestCase):
         self.mock_logger.get_stats = mock_stats
 
         res = run_coro(self.handler.api_audit_stats())
-        self.assertEqual(res["data"]["code"], 0)
-        self.assertEqual(res["data"]["data"]["total"], 10)
+        data = res.body if hasattr(res, "body") else res.get("data", res)
+        if hasattr(res, "body"):
+            import json
+            data = json.loads(res.body.decode("utf-8"))
+        self.assertNotIn("code", data)
+        self.assertEqual(data["total"], 10)
+        self.assertEqual(data["allowed"], 8)
 
     def test_api_audit_export(self):
         async def mock_export(fmt, keyword, status, tool_name):
@@ -96,8 +123,13 @@ class TestAuditApi(unittest.TestCase):
         audit_api_module.request = mock_req
 
         res = run_coro(self.handler.api_audit_export())
-        self.assertEqual(res["data"]["code"], 0)
-        self.assertEqual(res["data"]["data"], '{"export": true}')
+        data = res.body if hasattr(res, "body") else res.get("data", res)
+        if hasattr(res, "body"):
+            import json
+            data = json.loads(res.body.decode("utf-8"))
+        self.assertNotIn("code", data)
+        self.assertEqual(data["content"], '{"export": true}')
+        self.assertEqual(data["format"], "json")
 
     def test_api_audit_clear_reject_unconfirmed(self):
         mock_req = MagicMock()

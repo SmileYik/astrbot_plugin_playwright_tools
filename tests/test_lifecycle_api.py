@@ -74,6 +74,19 @@ class TestLifecycleApi(unittest.TestCase):
         self.assertIn("/playwright_tools/lifecycle/kill", routes_map)
         self.assertEqual(routes_map["/playwright_tools/lifecycle/kill"], ["POST"])
 
+    def test_lifecycle_single_layer_contract(self):
+        async def mock_get_detail():
+            return [{"context_key": "sess_1:user_1"}]
+        self.mock_mgr.get_active_contexts_detail = mock_get_detail
+        res = run_coro(self.handler.api_active_contexts())
+        data = res.body if hasattr(res, "body") else res.get("data", res)
+        if hasattr(res, "body"):
+            import json
+            data = json.loads(res.body.decode("utf-8"))
+        self.assertIn("items", data)
+        self.assertIn("total", data)
+        self.assertNotIn("code", data)
+
     def test_api_active_contexts(self):
         async def mock_get_detail():
             return [
@@ -88,11 +101,15 @@ class TestLifecycleApi(unittest.TestCase):
 
         self.mock_mgr.get_active_contexts_detail = mock_get_detail
         res = run_coro(self.handler.api_active_contexts())
+        data = res.body if hasattr(res, "body") else res.get("data", res)
+        if hasattr(res, "body"):
+            import json
+            data = json.loads(res.body.decode("utf-8"))
 
-        self.assertEqual(res["data"]["code"], 0)
-        self.assertEqual(res["data"]["data"]["total"], 1)
-        self.assertEqual(len(res["data"]["data"]["items"]), 1)
-        self.assertEqual(res["data"]["data"]["items"][0]["context_key"], "sess_1:user_1")
+        self.assertNotIn("code", data)
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(len(data["items"]), 1)
+        self.assertEqual(data["items"][0]["context_key"], "sess_1:user_1")
 
     def test_api_lifecycle_logs(self):
         async def mock_query(page, page_size, session_id, event_type, keyword):
@@ -111,11 +128,16 @@ class TestLifecycleApi(unittest.TestCase):
         lifecycle_api_module.request = mock_req
 
         res = run_coro(self.handler.api_lifecycle_logs())
-        self.assertEqual(res["data"]["code"], 0)
-        self.assertEqual(res["data"]["data"]["total"], 1)
-        self.assertEqual(res["data"]["data"]["page"], 2)
-        self.assertEqual(res["data"]["data"]["page_size"], 10)
-        self.assertEqual(res["data"]["data"]["items"][0]["event_type"], "create")
+        data = res.body if hasattr(res, "body") else res.get("data", res)
+        if hasattr(res, "body"):
+            import json
+            data = json.loads(res.body.decode("utf-8"))
+
+        self.assertNotIn("code", data)
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["page"], 2)
+        self.assertEqual(data["page_size"], 10)
+        self.assertEqual(data["items"][0]["event_type"], "create")
 
     def test_api_manual_screenshot_success(self):
         mock_page_0 = MagicMock()

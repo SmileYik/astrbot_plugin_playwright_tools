@@ -119,19 +119,16 @@ class AuditApiHandler:
             page=page, page_size=page_size, keyword=keyword, status=status, tool_name=tool_name
         )
         return json_response({
-            "code": 0,
-            "data": {
-                "total": total,
-                "items": items,
-                "page": page,
-                "page_size": page_size,
-            }
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
         })
 
     async def api_audit_stats(self):
         """获取审计指标数据。"""
         stats = await self.audit_logger.get_stats()
-        return json_response({"code": 0, "data": stats})
+        return json_response(stats)
 
     async def api_audit_export(self):
         """导出审计数据为 JSON 或 CSV。"""
@@ -144,7 +141,7 @@ class AuditApiHandler:
         content = await self.audit_logger.export_logs(
             fmt=fmt, keyword=keyword, status=status, tool_name=tool_name
         )
-        return json_response({"code": 0, "data": content, "format": fmt})
+        return json_response({"content": content, "format": fmt})
 
     async def api_audit_clear(self):
         """清空历史审计记录。"""
