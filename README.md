@@ -1,146 +1,187 @@
 # PlaywrightTool (astrbot_plugin_playwright_tools)
 
-基于 Playwright (首选 Camoufox 驱动) 的 AstrBot 浏览器自动化插件。  
-为大模型提供低 Token 消耗、高精准度的元素编号（Ref ID）交互与长页面分页阅读能力，具备完善的多租户隐私隔离、白名单防护与 SQLite 行为审计。
+基于 Playwright (首选 Camoufox 驱动) 的 AstrBot 网页浏览与自动化操作插件。  
+为大模型提供低 Token 消耗、高精准度的元素编号（Ref ID）交互与长页面结构化阅读能力，具备完善的多租户隐私隔离、细粒度白名单防护与可视化运维审计。
 
 ---
 
-## 特性亮点
+## 🌟 特性亮点
 
-- **三大聚合复合工具**：收敛为 `pw_page`、`pw_interact`、`pw_media`，采用 `FunctionTool` 类型化注册与统一前缀 `pw_`。
-- **元素编号（Ref ID）与快速搜索**：精简 DOM 并为可操作元素赋予自增编号（如 `[1] <button>`），提供长页面分页与关键词快速检索。
-- **全面键鼠交互**：支持点击、输入、下拉选择、鼠标悬停、焦点管理（focus/blur）、元素拖拽、键盘按键及滚动。
-- **双重截图熔断机制**：支持视口截图与全页长截图；长截图具备最大像素高度限制（超限截断）与超时回退（超时降级为视口截图）。
-- **全局超时保护**：所有单工具执行均受超时保护，超时强制中断并返回友好提示。
-- **提示词动态注入**：支持在请求大模型前动态追加自定义系统提示词。
-- **多租户隐私隔离**：
-  - **个人模式**：上下文相互隔离，支持通过指令邀请好友协作与手动关闭释放。
-  - **会话模式**：同一会话共享浏览器实例。
-  - **空闲超时与指令释放**：超时自动销毁 Context，释放内存资源。
-- **细粒度安全白名单**：支持域名通配符（如 `*.github.com`）与行为权限绑定（`read`, `click`, `fill`, `scroll`, `screenshot`, `download`）；拦截未授权的顶层跳转、弹窗与 iframe 导航。
-- **统一管理控制台与行为审计**：
-  - **控制台独立视图**：在 WebUI 后台提供基于 Material Design 3 大圆角风格的统一控制台面板（`views/browser/`），集成操作审计日志检视、DOM 快照与活跃会话生命周期运维管理。
-  - **多维运维操作**：支持按会话名、发送者、工具名、执行状态及正文关键词检索，支持将日志导出为 JSON 或 CSV，支持二次确认安全清空。
-  - **元数据被动感知**：全链路自动记录群聊名/私聊发送者昵称，SQLite 本地存储且自动清理过期记录。
-
----
-
-## 插件指令
-
-| 指令 | 说明 |
-|---|---|
-| `/browser invite <UID/@用户>` | 邀请目标用户加入当前个人浏览器协作 |
-| `/browser use <UID/@用户>` | 显式切换当前会话绑定的操作目标浏览器 |
-| `/browser close` | 手动关闭并释放属于自己的浏览器上下文 |
-| `/browser status` | 查看当前绑定的浏览器活跃上下文、网页及标签页状态 |
+- **四大聚合复合工具**：收敛为 `pw_page`、`pw_read`、`pw_interact`、`pw_media`，采用 AstrBot `FunctionTool` 原生强类型注册。
+- **元素编号（Ref ID）与精准定位**：精简 DOM 并为所有可交互控件赋予自增编号（如 `[1] [按钮] 登录`），告别脆弱且高 Token 消耗的选择器，保证大模型定位精准度。
+- **双正文提炼模式与长页智能分页**：
+  - **内联交互 Markdown (Inline Markdown)**：默认推荐，将正文排版（标题、段落、列表、表格）、嵌入图片与带 Ref ID 的可交互控件内联熔合为一篇结构化 Markdown，所见即所得。
+  - **无障碍语义树快照 (ARIA Snapshot)**：基于浏览器原生 Accessibility Tree 生成严密的语义角色层级树。
+  - **自适应分页预算**：基于字符预算（`page_chunk_char_limit`）平滑切分超长文档，大模型可按页阅读或定向关键词检索。
+- **全面键鼠交互与智能报错脱敏**：
+  - 原生支持点击、输入、下拉选择、鼠标悬停（hover）、焦点管理（focus/blur）、元素拖拽（drag）、键盘按键及平滑滚动。
+  - 自动剥离底层冗余指针跟踪日志，遇到超时、弹层遮挡时输出单行脱敏提示并自动附加下一步行动建议（`[推荐操作: ...]`）。
+- **多租户隐私隔离与细粒度安全白名单**：
+  - **个人模式 (`personal`)**：上下文相互隔离，支持通过指令邀请好友协作与手动释放。
+  - **会话模式 (`session`)**：同一会话共享浏览器实例。
+  - **安全白名单防护**：支持域名通配符（如 `*.github.com`）与操作权限多选绑定，拦截未授权的顶层跳转、弹窗与 iframe 导航。
+  - **密码防泄漏**：可开启密码输入框脱敏，自动将密码字段替换为 `******`。
+- **双重截图熔断机制**：支持视口截图与全页长截图；长截图具备最大像素高度限制（超限自动截断）与超时回退（超时降级为视口截图）。
+- **统一 MD3 管理控制台与行为审计**：
+  - 在 WebUI 后台提供基于 Material Design 3 大圆角风格的统一控制台面板（`views/browser/`），集成操作审计日志检视、DOM 快照与活跃会话生命周期运维管理。
+  - 多维运维操作：支持按会话名、发送者、工具名、执行状态及正文关键词检索，支持将日志导出为 JSON 或 CSV，支持二次确认安全清空。
 
 ---
 
-## 大模型工具规范 (LLM Tools)
+## 📦 安装部署与环境依赖
 
-所有工具均通过 AstrBot `context.add_llm_tools` 类型化注册，统一命名为 `pw_*`：
+### 1. 环境要求
+- Python 3.10+
+- AstrBot v3.4.0+
 
-### 1. `pw_page` (页面控制与视图)
-管理页面的打开、快照读取、关键字检索、标签页切换、弹窗响应及释放。
-
-- **参数**：
-  - `action` (string, 必填): `open` / `read` / `search` / `switch_tab` / `dialog` / `close`
-  - `url` (string, 可选): 网页地址 (action=`open` 时必填)
-  - `target` (string, 可选): 快照提取目标 `'all'` (正文+控件) / `'text'` (纯 Markdown 排版正文) / `'elements'` (仅可交互控件)，默认 `'all'`
-  - `page` (integer, 可选): 分页页码，从 1 开始 (action=`read` 时可选，默认 1)
-  - `keyword` (string, 可选): 页面检索关键词 (action=`search` 时必填)
-  - `tab_index` (integer, 可选): 标签页序号 (action=`switch_tab` 时必填)
-  - `dialog_action` (string, 可选): 弹窗响应策略 `'accept'` / `'dismiss'` (action=`dialog` 时可选)
-  - `prompt_text` (string, 可选): 弹窗输入文本 (action=`dialog` 且为 prompt 时可选)
-
-### 2. `pw_interact` (DOM 元素与键鼠交互)
-针对页面元素执行点击、填充、下拉选择、悬停、聚焦/失焦、拖拽、按键与滚动。
-
-- **参数**：
-  - `action` (string, 必填): `click` / `fill` / `select` / `hover` / `focus` / `blur` / `drag` / `press_key` / `scroll`
-  - `ref` (integer, 可选): 目标元素 Ref ID 编号
-  - `text` (string, 可选): 输入文本 (action=`fill` 时必填)
-  - `value` (string, 可选): 下拉选择值 (action=`select` 时必填)
-  - `target_ref` (integer, 可选): 拖拽目标元素 Ref ID (action=`drag` 时必填)
-  - `key` (string, 可选): 键盘按键名称如 `'Enter'`, `'Tab'` (action=`press_key` 时必填)
-  - `direction` (string, 可选): 滚动方向 `'down'` / `'up'` (action=`scroll` 时可选，默认 `'down'`)
-  - `amount` (integer, 可选): 滚动像素数 (action=`scroll` 时可选，默认 500)
-
-### 3. `pw_media` (媒体交付与下载)
-执行当前视口截图、全页面长截图或触发文件下载。
-
-- **参数**：
-  - `action` (string, 必填): `screenshot_viewport` / `screenshot_full` / `download`
-  - `target` (string, 可选): 交付目标 `'chat'` (发送至聊天) 或 `'ai'` (base64 供视觉大模型分析，默认 `'chat'`)
-  - `ref` (integer, 可选): 下载链接/按钮的 Ref ID 编号 (action=`download` 时必填)
-
----
-
-## WebUI 配置说明 (`_conf_schema.json`)
-
-配置已划分为 5 大业务分组，支持在 AstrBot WebUI 中折叠与展开：
-
-### 1. 安全与权限 (`security`)
-| 配置项 | 类型 | 默认值 | 作用描述 |
-|---|---|---|---|
-| `admin_only` | bool | `false` | 仅管理员可用 |
-| `extra_admin_uids` | list (`sender_id`) | `[]` | 额外管理员 UID 列表（支持平台用户选择器） |
-| `storage_state_path` | string | `""` | 管理员 Cookie/StorageState 凭据文件路径 |
-| `whitelist_rules` | template_list | `[]` | 网站白名单与权限集合（可视化添加，支持通配域名与权限多选） |
-
-### 2. 会话与运行时 (`runtime`)
-| 配置项 | 类型 | 默认值 | 作用描述 |
-|---|---|---|---|
-| `context_mode` | string (select) | `"personal"` | 隔离模式：`personal` (个人隔离) 或 `session` (会话共享) |
-| `idle_timeout_minutes` | int (slider) | `10` | 空闲自动销毁分钟数 (1~120 分钟) |
-| `tool_execution_timeout_seconds` | int (slider) | `30` | 单个工具执行超时时间 (5~180 秒) |
-| `enable_close_tool` | bool | `true` | 是否向 AI 注册主动关闭浏览器上下文的工具 |
-| `system_prompt_injection` | text | `""` | 自定义系统提示词注入，留空则不注入 |
-
-### 3. 浏览器引擎 (`browser`)
-| 配置项 | 类型 | 默认值 | 作用描述 |
-|---|---|---|---|
-| `browser_adapter` | string (select) | `"camoufox"` | 浏览器适配器：`camoufox` (防检测) 或 `playwright` (原生引擎) |
-| `playwright_browser_type` | string (select) | `"chromium"` | Playwright 核心类型：`chromium`, `firefox`, `webkit`, `custom` (选自定义时必填路径) |
-| `browser_executable_path` | string | `""` | 自定义浏览器二进制文件绝对路径 |
-| `camoufox_geoip` | bool | `false` | Camoufox 适配器是否开启 GeoIP 定位防检 |
-| `browser_headless` | bool | `true` | 是否以无头模式运行浏览器 |
-| `browser_window_width` | int (slider) | `1280` | 浏览器初始视口宽度 (800~3840 像素) |
-| `browser_window_height` | int (slider) | `720` | 浏览器初始视口高度 (600~2160 像素) |
-| `browser_user_agent` | string | `""` | 自定义 User-Agent，留空使用内置默认值 |
-
-### 4. 截图与多媒体 (`media`)
-| 配置项 | 类型 | 默认值 | 作用描述 |
-|---|---|---|---|
-| `screenshot_format` | string (select) | `"png"` | 截图输出格式：`png` (无损高清) 或 `jpeg` (压缩优化) |
-| `screenshot_quality` | int (slider) | `80` | JPEG 压缩质量 (1~100，仅当格式为 jpeg 时显示) |
-| `screenshot_max_height_px` | int (slider) | `8000` | 长截图最大允许高度 (1000~30000 像素)，超出自动截断 |
-| `screenshot_timeout_seconds` | int (slider) | `15` | 长截图超时时间 (5~120 秒)，超时降级为视口截图 |
-| `allow_screenshot_to_ai` | bool | `false` | 是否允许将网页截图发送给大模型进行视觉分析 |
-| `element_multiline_separator` | string | `" \| "` | 页面元素内部换行分隔替换符 |
-
-### 5. 存储与审计管理 (`storage_audit`, 默认折叠)
-| 配置项 | 类型 | 默认值 | 作用描述 |
-|---|---|---|---|
-| `download_save_path` | string | `"data/downloads"` | 浏览器下载文件保存路径 |
-| `screenshot_save_path` | string | `"data/screenshots"` | 截图文件保存路径 |
-| `file_retention_days` | int (slider) | `7` | 下载与截图文件保留天数 (1~90 天) |
-| `audit_retention_days` | int (slider) | `30` | 审计记录保存天数 (1~365 天) |
-| `audit_max_output_chars` | int | `0` | 审计单条工具输出最大字符上限 (0 表示不限长度) |
-| `audit_save_screenshots` | bool | `true` | 是否在审计数据库中关联持久化截图文件 |
-
----
-
-## 依赖与安装
-
-运行环境需 Python 3.10+，并建议安装 Camoufox：
+### 2. 依赖安装
+推荐安装具备反反爬指纹伪装的 Camoufox 驱动：
 
 ```bash
 pip install "camoufox[geoip]"
 ```
 
+若使用原生 Playwright 引擎（Chromium / Firefox / WebKit）：
+
+```bash
+pip install playwright
+playwright install chromium
+```
+
 ---
 
-## 系统架构参考
+## 🎮 插件指令与配置说明
 
-关于分层架构、并发隔离模型与 Web API 规范，请参见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+### 1. 聊天指令 (`/browser`)
+
+用户与管理员可在聊天对话框中使用以下指令管理浏览器上下文：
+
+| 指令 | 权限 | 说明 |
+|---|---|---|
+| `/browser invite <UID/@用户>` | 所有者 | 邀请目标用户加入当前个人浏览器进行协同操作 |
+| `/browser use <UID/@用户>` | 已授权用户 | 显式切换当前会话绑定的操作目标浏览器 |
+| `/browser close` | 所有者 | 手动关闭并释放属于自己的浏览器上下文 |
+| `/browser status` | 全员 | 查看当前绑定的浏览器活跃上下文、网页及标签页状态 |
+| `/browser list` | 全员 | 列出当前会话内所有活跃的浏览器上下文 |
+| `/browser list-all` | 管理员 | 查看全平台所有会话的活跃浏览器上下文 |
+| `/browser kill <context_key>` | 管理员 | 强行关闭并释放指定的浏览器上下文资源 |
+
+---
+
+### 2. WebUI 配置说明 (`_conf_schema.json`)
+
+配置已划分为 5 大业务分组，支持在 AstrBot WebUI 中折叠与展开：
+
+#### ① 安全与权限 (`security`)
+| 配置项 | 类型 | 默认值 | 作用描述 |
+|---|---|---|---|
+| `admin_only` | bool | `false` | 仅管理员可用：开启后仅机器人管理员与额外管理员可调用浏览器工具 |
+| `extra_admin_uids` | list (`sender_id`) | `[]` | 额外管理员 UID 列表（支持平台用户选择器） |
+| `storage_state_path` | string | `""` | 管理凭据路径：管理员专用的 Cookie / StorageState JSON 文件路径（仅管理员可用） |
+| `whitelist_rules` | template_list | `[]` | 网站白名单：添加非管理员允许访问的网站通配规则及对应权限（支持通配域名如 `*.github.com` 与权限多选） |
+| `mask_password_inputs` | bool | `true` | 脱敏密码输入框：页面中 `type='password'` 的组件内容将被脱敏为 `******`，防止敏感信息泄露给大模型 |
+
+#### ② 会话与运行时 (`runtime`)
+| 配置项 | 类型 | 默认值 | 作用描述 |
+|---|---|---|---|
+| `context_mode` | string (select) | `"personal"` | 隔离模式：`personal` (个人隔离，每用户独享独立上下文) 或 `session` (会话共享，群聊/私聊共用) |
+| `idle_timeout_minutes` | int (slider) | `10` | 空闲销毁时长：上下文无交互超过此时长后自动关闭以释放内存 (1~120 分钟) |
+| `tool_execution_timeout_seconds` | int (slider) | `30` | 执行超时时长：单个工具执行的最长等待时间 (5~180 秒) |
+| `enable_close_tool` | bool | `true` | 注册关闭工具：是否向大模型注册主动关闭浏览器上下文的工具 |
+| `system_prompt_injection` | text | `""` | 系统提示词注入：在调用大模型前动态注入自定义系统提示词，留空则不注入 |
+| `content_extraction_mode` | string (select) | `"inline_markdown"` | 页面正文提炼模式：`inline_markdown` (内联交互 Markdown [推荐]) 或 `aria_snapshot` (无障碍语义树快照) |
+| `page_chunk_char_limit` | int (slider) | `2000` | 分页字符预算：单页正文提炼的最大字符预算 (500~8000)，超限自动平滑切分至下一页 |
+
+#### ③ 浏览器引擎 (`browser`)
+| 配置项 | 类型 | 默认值 | 作用描述 |
+|---|---|---|---|
+| `browser_adapter` | string (select) | `"camoufox"` | 浏览器适配器：`camoufox` (防检测指纹伪装) 或 `playwright` (原生引擎) |
+| `playwright_browser_type` | string (select) | `"chromium"` | Playwright 核心类型：`chromium`, `firefox`, `webkit`, `custom` (其他自定义路径) |
+| `browser_executable_path` | string | `""` | 浏览器执行路径：自定义浏览器二进制文件的完整绝对路径（仅当核心类型为 `custom` 时必填） |
+| `camoufox_geoip` | bool | `false` | GeoIP 定位防检：Camoufox 适配器是否根据 IP 自动模拟地理位置与时区 |
+| `browser_headless` | bool | `true` | 无头模式：是否以无头模式后台静默运行浏览器 |
+| `browser_window_width` | int (slider) | `1280` | 窗口宽度：浏览器初始视口宽度 (800~3840 像素) |
+| `browser_window_height` | int (slider) | `720` | 窗口高度：浏览器初始视口高度 (600~2160 像素) |
+| `browser_user_agent` | string | `""` | 自定义 UA：自定义 User-Agent，留空使用内置默认值 |
+
+#### ④ 截图与交互输出 (`media`)
+| 配置项 | 类型 | 默认值 | 作用描述 |
+|---|---|---|---|
+| `screenshot_format` | string (select) | `"png"` | 截图格式：`png` (无损高清) 或 `jpeg` (压缩优化) |
+| `screenshot_quality` | int (slider) | `80` | 截图质量：JPEG 格式时的压缩质量 (1~100) |
+| `screenshot_max_height_px` | int (slider) | `8000` | 长截图高度上限：全屏截取的最大像素高度 (1000~30000 像素)，超出自动截断 |
+| `screenshot_timeout_seconds` | int (slider) | `15` | 长截图超时时长：长截图拼接渲染超时秒数 (5~120 秒)，超时降级为视口截图 |
+| `allow_screenshot_to_ai` | bool | `false` | 截图发送给 AI：是否允许将网页截图发送给大模型进行多模态视觉理解 |
+| `element_multiline_separator` | string | `" \| "` | 元素换行替换符：页面可操作元素提取时内部换行符的替换连接符 |
+
+#### ⑤ 存储与审计管理 (`storage_audit`, 默认折叠)
+| 配置项 | 类型 | 默认值 | 作用描述 |
+|---|---|---|---|
+| `download_save_path` | string | `"data/downloads"` | 下载保存路径：浏览器下载文件保存的本地目录 |
+| `screenshot_save_path` | string | `"data/screenshots"` | 截图保存路径：截图文件保存的本地目录 |
+| `file_retention_days` | int (slider) | `7` | 文件保留天数：下载与截图文件保留天数 (1~90 天)，超期自动清理 |
+| `audit_retention_days` | int (slider) | `30` | 审计保留天数：审计记录保存天数 (1~365 天)，超期自动清理 |
+| `audit_max_output_chars` | int | `0` | 审计字符上限：单条工具输出最大字符上限 (0 表示不限长度) |
+| `audit_save_screenshots` | bool | `true` | 审计持久化截图：是否在审计数据库中关联保存截图文件 |
+
+---
+
+## 🧠 内置技能 (Built-in Skills)
+
+插件内置了面向大模型的标准化操作技能文档：
+
+- **`playwright-tool`** (`skills/playwright-tool/SKILL.md`)：  
+  指导 AI 按照标准流程浏览网页、阅读结构化正文、检索关键词、应对页面遮挡弹层并执行精准元素交互。AstrBot 会在启用插件时自动识别并加载该技能。
+
+---
+
+## 🛠️ 大模型工具规范 (LLM Tools Specification)
+
+所有工具均通过 AstrBot `context.add_llm_tools` 类型化注册，统一命名为 `pw_*`：
+
+### 1. `pw_page` (页面状态与生命周期控制)
+管理页面的打开、标签页切换、原生对话框响应及上下文释放。
+
+- **参数**：
+  - `action` (string, 必填): 要执行的页面动作：`'open'`(打开网址) / `'switch_tab'`(切换标签页) / `'dialog'`(响应弹窗) / `'close'`(关闭当前浏览器上下文)
+  - `url` (string, 可选): 网页地址 (action=`open` 时必填)
+  - `tab_index` (integer, 可选): 要切换到的标签页序号，从 1 开始 (action=`switch_tab` 时必填)
+  - `dialog_action` (string, 可选): 弹窗响应行为：`'accept'`(确认/确定) 或 `'dismiss'`(取消/拒绝) (action=`dialog` 时必填)
+  - `prompt_text` (string, 可选): Prompt 弹窗的输入文本 (action=`dialog` 且为 prompt 时可选)
+
+### 2. `pw_read` (结构化正文与快照阅读)
+读取当前页面的结构化排版内容与可交互元素编号列表，支持多页分页与关键词定向定位。
+
+- **参数**：
+  - `page` (integer, 可选): 分页查看时的页码编号，从 1 开始 (默认为 1)
+  - `keyword` (string, 可选): 页面内容关键词定位检索，若提供则返回包含关键词的上下文片段与相关元素
+  - `refresh` (boolean, 可选): 是否强制重新获取当前网页快照（例如等待动态内容加载完成或确认页面有最新更新时使用，默认为 `false`）
+
+### 3. `pw_interact` (DOM 元素与键鼠交互)
+针对页面快照中的 Ref ID 编号执行高精度键鼠操作。
+
+- **参数**：
+  - `action` (string, 必填): 要执行的交互动作：`'click'`(点击元素) / `'fill'`(输入文本) / `'select'`(下拉框选择) / `'hover'`(鼠标悬停) / `'focus'`(聚焦) / `'blur'`(失焦) / `'drag'`(拖拽至目标元素) / `'press_key'`(按键盘按键) / `'scroll'`(滚动页面)
+  - `ref` (integer, 可选): 目标元素在页面快照中的 Ref ID 编号 (除 press_key/scroll 外通常必填)
+  - `text` (string, 可选): 输入文本内容 (action=`fill` 时必填)
+  - `value` (string, 可选): 下拉框选中的选项值 (action=`select` 时必填)
+  - `target_ref` (integer, 可选): 拖拽放置的目标元素 Ref ID 编号 (action=`drag` 时必填)
+  - `key` (string, 可选): 要发送的按键名称，如 `'Enter'`, `'Tab'`, `'Escape'`, `'ArrowDown'` (action=`press_key` 时必填)
+  - `direction` (string, 可选): 滚动方向：`'down'`(向下) 或 `'up'`(向上) (action=`scroll` 时可选，默认 `'down'`)
+  - `amount` (integer, 可选): 滚动像素距离 (action=`scroll` 时可选，默认 500)
+
+### 4. `pw_media` (媒体交付与下载)
+执行当前视口截图、全页面长截图或触发文件下载。
+
+- **参数**：
+  - `action` (string, 必填): 要执行的媒体动作：`'screenshot_viewport'`(当前视口截图) / `'screenshot_full'`(全页面长截图) / `'download'`(触发下载指定元素文件)
+  - `target` (string, 可选): 交付目标：`'chat'`(发送至当前聊天会话) 或 `'ai'`(以 base64 形式交付供多模态大模型视觉理解，默认 `'chat'`)
+  - `ref` (integer, 可选): 触发下载的链接或按钮 Ref ID 编号 (action=`download` 时必填)
+
+---
+
+## 🏗️ 系统架构与延伸文档
+
+- **系统分层架构与模型设计**：详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- **开发与协作规范**：详见 [AGENT.md](AGENT.md)
+- **版本演进记录**：详见 [CHANGELOG.md](CHANGELOG.md)
