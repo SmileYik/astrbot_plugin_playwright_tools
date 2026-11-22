@@ -261,7 +261,7 @@ class TestContextManager(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.allocate_ref_id(), "1")
         ctx.next_ref_id = 1_000_000
         self.assertEqual(ctx.allocate_ref_id(), "1000000")
-        self.assertEqual(ctx.allocate_ref_id(), "0")
+        self.assertEqual(ctx.allocate_ref_id(), "1")
 
     async def test_create_context_cleans_up_on_failure(self):
         mock_adapter = MagicMock()

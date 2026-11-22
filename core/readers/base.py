@@ -14,6 +14,7 @@ class PageSnapshot:
     total_pages: int
     chunks: list[str]
     timestamp: float = field(default_factory=time.time)
+    allocated_count: int = 0
 
 
 class BasePageReader(ABC):
@@ -24,7 +25,7 @@ class BasePageReader(ABC):
         self.mask_passwords = mask_passwords
 
     @abstractmethod
-    async def extract_snapshot(self, page: Any, url: str = "") -> PageSnapshot:
+    async def extract_snapshot(self, page: Any, url: str = "", start_ref: int = 1) -> PageSnapshot:
         """从 Playwright 页面中提炼内容快照并分配 Ref ID。"""
         pass
 

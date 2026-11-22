@@ -60,6 +60,12 @@ class TestInlineMarkdownReader(unittest.IsolatedAsyncioTestCase):
         html_script_unmasked = reader_unmasked.get_js_extractor_script()
         self.assertNotIn("******", html_script_unmasked)
 
+    def test_inline_markdown_reader_start_ref_parameter(self):
+        reader = InlineMarkdownReader()
+        script = reader.get_js_extractor_script(start_ref=42)
+        self.assertIn("let nextRef = 42;", script)
+        self.assertIn("allocated_count", script)
+
     async def test_extract_snapshot_with_mock_page(self):
         reader = InlineMarkdownReader(chunk_char_limit=2000, mask_passwords=True)
         mock_page = AsyncMock()

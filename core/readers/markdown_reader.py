@@ -13,12 +13,14 @@ class InlineMarkdownReader(BasePageReader):
     def __init__(self, chunk_char_limit: int = 2000, mask_passwords: bool = True):
         super().__init__(chunk_char_limit=chunk_char_limit, mask_passwords=mask_passwords)
 
-    def get_js_extractor_script(self) -> str:
+    def get_js_extractor_script(self, start_ref: int = 1) -> str:
         """返回注入至浏览器执行的 JavaScript 提取脚本。
         
         密码框在 mask_passwords 为 True 时脱敏为 value="******"，
         为 False 时保留原始值。
+        可交互元素 Ref ID 从 start_ref 持续单调自增。
         """
+        start_ref_int = max(1, int(start_ref))
         if self.mask_passwords:
             pwd_mask_expr = 'value = "******";'
         else:
@@ -39,7 +41,8 @@ class InlineMarkdownReader(BasePageReader):
 
             const noiseTags = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG', 'TEMPLATE', 'IFRAME']);
 
-            let nextRef = 1;
+            let nextRef = {start_ref_int};
+            let allocatedCount = 0;
             const rawElements = [];
 
             const isInteractive = (node) => {{
@@ -148,6 +151,7 @@ class InlineMarkdownReader(BasePageReader):
                         ref = parseInt(node.getAttribute('data-astr-ref'));
                     }} else {{
                         ref = nextRef++;
+                        allocatedCount++;
                         if (node.setAttribute) node.setAttribute('data-astr-ref', ref.toString());
                     }}
                     return formatInteractive(node, ref);
@@ -313,7 +317,8 @@ class InlineMarkdownReader(BasePageReader):
                 title: document.title || '',
                 url: (window.location && window.location.href) || '',
                 blocks: blocks,
-                elements: rawElements
+                elements: rawElements,
+                allocated_count: allocatedCount
             }};
         }})();
         """
@@ -390,9 +395,9 @@ class InlineMarkdownReader(BasePageReader):
         ]
         return chunks
 
-    async def extract_snapshot(self, page: Any, url: str = "") -> PageSnapshot:
+    async def extract_snapshot(self, page: Any, url: str = "", start_ref: int = 1) -> PageSnapshot:
         """在浏览器中执行 JS 提炼并构建 PageSnapshot。"""
-        script = self.get_js_extractor_script()
+        script = self.get_js_extractor_script(start_ref=start_ref)
         data = await page.evaluate(script)
         if not isinstance(data, dict):
             data = {}
@@ -403,6 +408,7 @@ class InlineMarkdownReader(BasePageReader):
         if not isinstance(blocks, list):
             blocks = [str(blocks)] if blocks else []
 
+        allocated_count = int(data.get("allocated_count", 0) or 0)
         raw_elements = data.get("elements", [])
         ref_map: dict[str, dict] = {}
         if isinstance(raw_elements, list):
@@ -424,6 +430,7 @@ class InlineMarkdownReader(BasePageReader):
             ref_map=ref_map,
             total_pages=total_pages,
             chunks=chunks,
+            allocated_count=allocated_count,
         )
 
     def format_chunk(self, snapshot: PageSnapshot, page_index: int) -> str:

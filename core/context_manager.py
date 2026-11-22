@@ -44,10 +44,10 @@ class BrowserSessionContext:
         self.last_active_time = time.time()
 
     def allocate_ref_id(self) -> str:
-        """分配单调递增的 ref_id 字符串，当达到 1,000,000 时回滚为 0。"""
+        """分配单调递增的 ref_id 字符串，当达到 1,000,000 时回滚为 1。"""
         current = self.next_ref_id
         if current >= 1_000_000:
-            self.next_ref_id = 0
+            self.next_ref_id = 1
         else:
             self.next_ref_id += 1
         return str(current)

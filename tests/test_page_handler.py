@@ -138,5 +138,14 @@ class TestPageHandler(unittest.TestCase):
         self.assertEqual(self.mock_context.dialog_action, {"action": "dismiss", "prompt_text": None})
         self.assertIn("已预设", res)
 
+    def test_read_page_advances_ref_id_monotonically(self):
+        self.mock_context.ref_lock = asyncio.Lock()
+        self.mock_context.next_ref_id = 10
+        self.fake_snapshot.allocated_count = 5
+        self.fake_snapshot.timestamp = time.time() - 100
+
+        run_coro(self.handler.read_page("s1", "u1", page=1))
+        self.assertEqual(self.mock_context.next_ref_id, 15)
+
 if __name__ == "__main__":
     unittest.main()

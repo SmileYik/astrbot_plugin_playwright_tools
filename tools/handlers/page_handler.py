@@ -141,13 +141,29 @@ class PageHandler(BaseActionHandler):
                 or is_expired
                 or refresh
             ):
-                try:
-                    snapshot = await self.reader.extract_snapshot(cur_page, current_url)
-                except TypeError:
-                    snapshot = await self.reader.extract_snapshot(cur_page)
-                ctx.current_snapshot = snapshot
-                ctx.ref_map = getattr(snapshot, "ref_map", {})
-                ctx.is_snapshot_dirty = False
+                ref_lock = getattr(ctx, "ref_lock", None)
+                if ref_lock is None:
+                    ref_lock = asyncio.Lock()
+                    ctx.ref_lock = ref_lock
+
+                async with ref_lock:
+                    start_ref = getattr(ctx, "next_ref_id", 1) or 1
+                    try:
+                        snapshot = await self.reader.extract_snapshot(cur_page, current_url, start_ref=start_ref)
+                    except TypeError:
+                        try:
+                            snapshot = await self.reader.extract_snapshot(cur_page, current_url)
+                        except TypeError:
+                            snapshot = await self.reader.extract_snapshot(cur_page)
+
+                    ctx.current_snapshot = snapshot
+                    ctx.ref_map = getattr(snapshot, "ref_map", {})
+                    ctx.is_snapshot_dirty = False
+                    allocated = getattr(snapshot, "allocated_count", 0) or 0
+                    next_ref = (start_ref + allocated) % 1_000_000
+                    if next_ref == 0:
+                        next_ref = 1
+                    ctx.next_ref_id = next_ref
 
             if keyword and str(keyword).strip():
                 return self.reader.search(ctx.current_snapshot, str(keyword).strip())
