@@ -17,6 +17,12 @@ try:
 except ImportError:
     async_playwright = None
 
+try:
+    from astrbot.api import logger
+except ImportError:
+    import logging
+    logger = logging.getLogger("PlaywrightAdapter")
+
 
 class PlaywrightAdapter(BrowserAdapterBase):
     """基于原生 Playwright 的异步浏览器适配器。"""
@@ -75,16 +81,16 @@ class PlaywrightAdapter(BrowserAdapterBase):
         if self._browser is not None:
             try:
                 await self._browser.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[PlaywrightAdapter] 关闭浏览器实例失败: {e}")
             finally:
                 self._browser = None
 
         if self._playwright_cm is not None:
             try:
                 await self._playwright_cm.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[PlaywrightAdapter] 停止 Playwright 运行时失败: {e}")
             finally:
                 self._playwright_cm = None
                 self._playwright = None

@@ -200,8 +200,8 @@ class BaseActionHandler:
                             attr_val = await attr_val
                         if attr_val == "password":
                             is_password = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[BaseHandler] 探测输入框 password 类型异常: {e}")
 
         if (
             input_args.get("is_password")

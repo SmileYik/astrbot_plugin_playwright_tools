@@ -55,15 +55,15 @@ def _extract_event_and_metadata(context: Any) -> tuple[Any, str, str, str, str]:
             val = event.get_sender_name()
             if isinstance(val, str) and val.strip():
                 sender_name = val.strip()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[PwTools] 获取发送者名称降级: {e}")
     if not sender_name:
         try:
             val = getattr(getattr(getattr(event, "message_obj", None), "sender", None), "nickname", None)
             if isinstance(val, str) and val.strip():
                 sender_name = val.strip()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[PwTools] 获取发送者昵称降级: {e}")
     if not sender_name:
         sender_name = sender_id
 
@@ -82,8 +82,8 @@ def _extract_event_and_metadata(context: Any) -> tuple[Any, str, str, str, str]:
                         session_name = f"群聊: {g_id}"
             else:
                 session_name = f"私聊: {sender_name}"
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[PwTools] 提取 session_name 降级: {e}")
 
     if not session_name:
         if sender_name and sender_name != sender_id:
@@ -107,8 +107,8 @@ async def _invoke_handler(fn, *args, **kwargs):
         if not has_varkw:
             filtered_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
             return await fn(*args, **filtered_kwargs)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[PwTools] 自适应签名反射失败，直接调用: {e}")
     return await fn(*args, **kwargs)
 
 
@@ -120,16 +120,16 @@ async def _execute_with_timeout(coro, timeout_seconds: int) -> str:
     except asyncio.TimeoutError:
         try:
             coro.close()
-        except Exception:
-            pass
+        except Exception as ce:
+            logger.debug(f"[PwTools] 关闭超时协程异常: {ce}")
         return f"操作超时：执行超过 {timeout_seconds} 秒限制，已强制终止。"
     except Exception as e:
         tb_str = traceback.format_exc()
         logger.error(f"[PlaywrightTool] 工具执行未预期异常: {e}\n{tb_str}")
         try:
             coro.close()
-        except Exception:
-            pass
+        except Exception as ce:
+            logger.debug(f"[PwTools] 关闭未完成协程异常: {ce}")
         return f"工具执行异常: {str(e)}"
 
 
@@ -233,8 +233,8 @@ class PwReadTool(FunctionTool[AstrAgentContext]):
                 meta = page_handler.reader.get_tool_metadata()
                 if isinstance(meta, dict) and meta.get("description"):
                     self.description = meta["description"]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[PwTools] 读取 reader 工具描述异常: {e}")
 
         try:
             super().__init__(name=self.name, description=self.description, parameters=self.parameters)
@@ -492,7 +492,7 @@ class PwMediaTool(FunctionTool[AstrAgentContext]):
                 if hasattr(event, "send") and callable(event.send):
                     from astrbot.core.message.message_event_result import MessageChain
                     await event.send(MessageChain().file_image(img_path))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[PwMediaTool] 自动发送截图至聊天窗口失败: {e}")
 
         return res

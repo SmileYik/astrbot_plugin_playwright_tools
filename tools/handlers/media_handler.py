@@ -63,16 +63,16 @@ class MediaHandler(BaseActionHandler):
 
         try:
             Path(self.download_dir).mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass
+        except OSError as e:
+            logger.debug(f"[MediaHandler] 创建下载目录降级或跳过: {e}")
         try:
             Path(self.screenshot_dir).mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass
+        except OSError as e:
+            logger.debug(f"[MediaHandler] 创建截图目录降级或跳过: {e}")
         try:
             Path(self.audit_screenshots_dir).mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass
+        except OSError as e:
+            logger.debug(f"[MediaHandler] 创建审计截图目录降级或跳过: {e}")
 
     def _is_jpeg(self) -> bool:
         return self.screenshot_format in ("jpeg", "jpg")
@@ -116,7 +116,8 @@ class MediaHandler(BaseActionHandler):
             if d:
                 try:
                     abs_d = os.path.abspath(d)
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"[MediaHandler] 解析目录绝对路径异常: {e}")
                     abs_d = d
                 if abs_d not in seen_dirs:
                     seen_dirs.add(abs_d)
@@ -138,8 +139,8 @@ class MediaHandler(BaseActionHandler):
                                         logger.warning(
                                             f"[PlaywrightTool] 删除过期文件失败 {entry.path}: {rem_err}"
                                         )
-                        except OSError:
-                            pass
+                        except OSError as e:
+                            logger.debug(f"[MediaHandler] 读取目录条目状态异常: {e}")
             except OSError as dir_err:
                 logger.warning(f"[PlaywrightTool] 扫描目录失败 {dir_path}: {dir_err}")
 
@@ -262,7 +263,8 @@ class MediaHandler(BaseActionHandler):
                 scroll_height = await page.evaluate(
                     "Math.max(document.body ? document.body.scrollHeight : 0, document.documentElement ? document.documentElement.scrollHeight : 0, 0)"
                 )
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[MediaHandler] 获取页面 scrollHeight 失败: {e}")
                 scroll_height = 0
 
             is_clipped = False
@@ -294,8 +296,8 @@ class MediaHandler(BaseActionHandler):
                 if shot_coro and hasattr(shot_coro, "close"):
                     try:
                         shot_coro.close()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[MediaHandler] 关闭超时截图协程异常: {e}")
                 try:
                     image_bytes = await page.screenshot(full_page=False, **shot_opts)
                     note = f"（长截图耗时超过 {timeout_sec} 秒，已自动截断并降级为当前视口截图）"

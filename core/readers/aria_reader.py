@@ -3,6 +3,12 @@ import re
 from typing import Any
 from .base import BasePageReader, PageSnapshot
 
+try:
+    from astrbot.api import logger
+except ImportError:
+    import logging
+    logger = logging.getLogger("AriaSnapshotReader")
+
 
 class AriaSnapshotReader(BasePageReader):
     """基于 Playwright 官方原生 ARIA 快照与 Ref 映射的分页阅读器。
@@ -27,8 +33,8 @@ class AriaSnapshotReader(BasePageReader):
                 return str(res) if isinstance(res, str) else ""
             if isinstance(t, str):
                 return t
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[AriaReader] 获取页面标题异常: {e}")
         return ""
 
     def _get_page_url(self, page: Any, default_url: str = "") -> str:
@@ -42,8 +48,8 @@ class AriaSnapshotReader(BasePageReader):
                     return str(res) if isinstance(res, str) else ""
                 if isinstance(u, str):
                     return u
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[AriaReader] 获取页面 URL 异常: {e}")
         return ""
 
     async def _fetch_aria_snapshot(self, page: Any) -> str:
@@ -60,8 +66,8 @@ class AriaSnapshotReader(BasePageReader):
                         res = await res
                     if isinstance(res, str):
                         return res
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[AriaReader] 获取 :root aria_snapshot 异常: {e}")
 
         # 2. 回退到 page.aria_snapshot(mode='ai')
         if hasattr(page, "aria_snapshot"):
@@ -74,8 +80,8 @@ class AriaSnapshotReader(BasePageReader):
                     res = await res
                 if isinstance(res, str):
                     return res
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[AriaReader] 获取 page.aria_snapshot 异常: {e}")
 
         return ""
 

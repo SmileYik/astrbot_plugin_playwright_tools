@@ -1,7 +1,7 @@
 import unittest
 import os
 import sys
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 if parent_dir not in sys.path:
@@ -272,6 +272,18 @@ class TestContextManager(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError):
             await mgr._create_new_context("s1", "u1")
         mock_browser_ctx.close.assert_awaited_once()
+
+    async def test_create_context_cleanup_failure_logs_warning(self):
+        mock_adapter = MagicMock()
+        mock_browser_ctx = AsyncMock()
+        mock_adapter.create_context = AsyncMock(return_value=mock_browser_ctx)
+        mock_browser_ctx.new_page = AsyncMock(side_effect=RuntimeError("New page failed"))
+        mock_browser_ctx.close = AsyncMock(side_effect=RuntimeError("Close failed"))
+        mgr = ContextManager(adapter=mock_adapter, security=MagicMock())
+        with patch("astrbot_plugin_playwright_tools.core.context_manager.logger.warning") as mock_warn:
+            with self.assertRaises(RuntimeError):
+                await mgr._create_new_context("s1", "u1")
+            mock_warn.assert_called()
 
     async def test_frame_navigation_invalidates_snapshot_and_ref_map(self):
         mock_adapter = MagicMock()

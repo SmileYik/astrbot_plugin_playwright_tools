@@ -12,6 +12,12 @@ except ImportError:
         return {"error": msg, "status_code": status_code, "data": data}
     request = None
 
+try:
+    from astrbot.api import logger
+except ImportError:
+    import logging
+    logger = logging.getLogger("AuditApi")
+
 
 def extract_query_param(req: Any, key: str, default: Any = None, type_conv: Any = None) -> Any:
     """从不同类型的请求对象（DashboardRequest, Starlette Request 等）中可靠提取 query 参数。"""
@@ -50,8 +56,8 @@ def extract_query_param(req: Any, key: str, default: Any = None, type_conv: Any 
                 if res is not None:
                     val = res
                     break
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[AuditApi] 提取 query 参数 {key} 异常: {e}")
 
     if val is None:
         return default
@@ -152,7 +158,8 @@ class AuditApiHandler:
                 payload = await req.json(default={})
                 if isinstance(payload, dict):
                     confirm = bool(payload.get("confirm", False))
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[AuditApi] 解析清空请求 json 失败: {e}")
                 confirm = False
 
         if not confirm:
@@ -187,7 +194,8 @@ class AuditApiHandler:
                 target_path = (base_dir / p).resolve()
             if not target_path.is_relative_to(base_dir):
                 return error_response("越界访问被拒绝", status_code=403)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[AuditApi] 解析截图路径异常 (拒绝访问): {e}")
             return error_response("越界访问被拒绝", status_code=403)
 
         if not target_path.exists() or not target_path.is_file():

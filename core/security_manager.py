@@ -1,6 +1,12 @@
 import fnmatch
 from urllib.parse import urlparse
 
+try:
+    from astrbot.api import logger
+except ImportError:
+    import logging
+    logger = logging.getLogger("SecurityManager")
+
 class SecurityManager:
     """权限与白名单守卫管理器，负责鉴权、通配符域名匹配及顶层页面导航保护。"""
 
@@ -26,7 +32,8 @@ class SecurityManager:
             parsed = urlparse(url)
             host = parsed.hostname or ""
             return host.lower()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[SecurityManager] 解析 URL 主机名失败: {e}")
             return ""
 
     def _normalize_pattern(self, pat: str) -> str:

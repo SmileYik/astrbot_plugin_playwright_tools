@@ -6,6 +6,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    from astrbot.api import logger
+except ImportError:
+    import logging
+    logger = logging.getLogger("AuditLogger")
+
 TOOL_GROUPS: dict[str, list[str]] = {
     "pw_page": ["open_url", "read_page", "search_page", "switch_tab", "handle_dialog", "close_browser"],
     "pw_interact": ["click", "fill_form", "select_option", "hover", "focus", "blur", "drag", "press_key", "scroll"],
@@ -48,8 +54,8 @@ class AuditLogger:
                 """)
                 try:
                     conn.execute("ALTER TABLE tool_audit_logs ADD COLUMN screenshot_path TEXT DEFAULT ''")
-                except sqlite3.OperationalError:
-                    pass
+                except sqlite3.OperationalError as e:
+                    logger.debug(f"[AuditLogger] 列 screenshot_path 已存在或添加跳过: {e}")
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS context_lifecycle_logs (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,12 +73,12 @@ class AuditLogger:
                 """)
                 try:
                     conn.execute("ALTER TABLE context_lifecycle_logs ADD COLUMN operator_name TEXT DEFAULT ''")
-                except sqlite3.OperationalError:
-                    pass
+                except sqlite3.OperationalError as e:
+                    logger.debug(f"[AuditLogger] 列 operator_name 已存在或添加跳过: {e}")
                 try:
                     conn.execute("ALTER TABLE context_lifecycle_logs ADD COLUMN owner_name TEXT DEFAULT ''")
-                except sqlite3.OperationalError:
-                    pass
+                except sqlite3.OperationalError as e:
+                    logger.debug(f"[AuditLogger] 列 owner_name 已存在或添加跳过: {e}")
         finally:
             conn.close()
 

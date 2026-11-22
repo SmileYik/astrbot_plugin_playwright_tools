@@ -5,6 +5,12 @@ from typing import TYPE_CHECKING, Any
 from ..adapts.base import BrowserAdapterBase
 from .security_manager import SecurityManager
 
+try:
+    from astrbot.api import logger
+except ImportError:
+    import logging
+    logger = logging.getLogger("ContextManager")
+
 if TYPE_CHECKING:
     from playwright.async_api import BrowserContext, Page
 else:
@@ -129,13 +135,15 @@ class ContextManager:
                         res.send(None)
                     except StopIteration:
                         pass
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"[ContextManager] 同步驱动协程日志异常: {e}")
                         try:
                             res.close()
-                        except Exception:
-                            pass
+                        except Exception as ce:
+                            logger.debug(f"[ContextManager] 关闭未完成协程异常: {ce}")
             return res
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[ContextManager] 派发生命周期日志失败: {e}")
             return None
 
     async def resolve_context(
@@ -278,18 +286,19 @@ class ContextManager:
                                 await route.abort()
                                 return
                         await route.continue_()
-                    except Exception:
+                    except Exception as e:
+                        logger.warning(f"[ContextManager] 路由守卫拦截处理异常: {e}")
                         try:
                             await route.continue_()
-                        except Exception:
-                            pass
+                        except Exception as ce:
+                            logger.debug(f"[ContextManager] 路由放行回退异常: {ce}")
 
                 try:
                     res_route = browser_ctx.route("**/*", _route_guard)
                     if hasattr(res_route, "__await__"):
                         await res_route
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"[ContextManager] 挂载全局路由拦截守卫失败: {e}")
 
             first_page = await browser_ctx.new_page()
 
@@ -323,8 +332,8 @@ class ContextManager:
                     browser_ctx.on("page", lambda p: _touch())
                     browser_ctx.on("request", lambda req: _touch())
                     browser_ctx.on("response", lambda resp: _touch())
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[ContextManager] 外部上下文挂载事件保活监听异常: {e}")
 
             def _setup_page_listeners(page):
                 def _on_frame_nav(frame):
@@ -341,14 +350,14 @@ class ContextManager:
                             ctx.is_snapshot_dirty = True
                             ctx.current_snapshot = None
                             ctx.ref_map = {}
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[ContextManager] 页面帧导航监听异常: {e}")
 
                 if hasattr(page, "on"):
                     try:
                         page.on("framenavigated", _on_frame_nav)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[ContextManager] 注册 framenavigated 监听失败: {e}")
 
             _setup_page_listeners(first_page)
 
@@ -359,14 +368,14 @@ class ContextManager:
                         ctx.pages.append(new_page)
                         ctx.current_page = new_page
                         _setup_page_listeners(new_page)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[ContextManager] 弹窗新页面注册监听异常: {e}")
 
             if hasattr(browser_ctx, "on"):
                 try:
                     browser_ctx.on("page", _on_popup)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[ContextManager] 注册新标签页 page 监听失败: {e}")
 
             if self.audit_logger:
                 try:
@@ -384,8 +393,8 @@ class ContextManager:
                     )
                     if hasattr(res, "__await__"):
                         await res
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"[ContextManager] 记录上下文创建生命周期审计日志失败: {e}")
 
             return ctx
         except Exception as e:
@@ -394,8 +403,8 @@ class ContextManager:
                     res_close = browser_ctx.close()
                     if hasattr(res_close, "__await__"):
                         await res_close
-                except Exception:
-                    pass
+                except Exception as ce:
+                    logger.warning(f"[ContextManager] 上下文创建异常时回退清理失败: {ce}")
             raise e
 
     def invite_user(self, session_id: str, owner_id: str, target_user_id: str) -> tuple[bool, str]:
@@ -467,8 +476,8 @@ class ContextManager:
                 res = ctx.browser_context.close()
                 if hasattr(res, "__await__"):
                     await res
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[ContextManager] 关闭用户浏览器上下文异常: {e}")
 
         # 清除指向此上下文的指针
         to_del = [k for k, v in self.user_active_pointer.items() if k[0] == session_id and v == sender_id]
@@ -489,8 +498,8 @@ class ContextManager:
                 )
                 if hasattr(res, "__await__"):
                     await res
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[ContextManager] 记录上下文关闭生命周期审计日志失败: {e}")
 
         return True, "已成功关闭并释放您的浏览器上下文"
 
@@ -515,8 +524,8 @@ class ContextManager:
                         res = ctx.browser_context.close()
                         if hasattr(res, "__await__"):
                             await res
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"[ContextManager] 超时清理关闭 BrowserContext 异常: {e}")
                 count += 1
                 to_del = [
                     ptr for ptr, v in self.user_active_pointer.items()
@@ -540,8 +549,8 @@ class ContextManager:
                         )
                         if hasattr(res, "__await__"):
                             await res
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"[ContextManager] 记录超时清理生命周期日志失败: {e}")
 
         return count
 
@@ -564,8 +573,8 @@ class ContextManager:
                         res = old_ctx.browser_context.close()
                         if hasattr(res, "__await__"):
                             await res
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"[ContextManager] 强制重置清理旧外部上下文异常: {e}")
 
             if key not in self.contexts:
                 timeout_sec = None
@@ -601,8 +610,8 @@ class ContextManager:
                     res = ctx.browser_context.close()
                     if hasattr(res, "__await__"):
                         await res
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[ContextManager] 释放外部 BrowserContext 异常: {e}")
 
             if self.audit_logger:
                 try:
@@ -618,11 +627,9 @@ class ContextManager:
                     )
                     if hasattr(res, "__await__"):
                         await res
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"[ContextManager] 记录外部上下文释放生命周期日志失败: {e}")
             return True
-
-        return count
 
     async def force_kill_context(self, context_key: str, operator_id: str) -> tuple[bool, str]:
         """强制终止指定上下文并释放底层资源。"""
@@ -644,8 +651,8 @@ class ContextManager:
                 res = target_ctx.browser_context.close()
                 if hasattr(res, "__await__"):
                     await res
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[ContextManager] 强制终止 BrowserContext 异常: {e}")
 
         session_id = getattr(target_ctx, "session_id", "")
         owner_id = getattr(target_ctx, "owner_id", "")
@@ -671,8 +678,8 @@ class ContextManager:
                 )
                 if hasattr(res, "__await__"):
                     await res
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[ContextManager] 记录强制终止生命周期日志失败: {e}")
 
         return True, "上下文已成功强制关闭并释放资源"
 
@@ -730,7 +737,8 @@ class ContextManager:
                                 title_str = ""
                             else:
                                 title_str = str(p.title)
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"[ContextManager] 获取标签页标题失败降级: {e}")
                     title_str = ""
 
                 tabs.append({

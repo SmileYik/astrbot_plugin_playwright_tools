@@ -13,6 +13,12 @@ except ImportError:
         return {"error": msg, "status_code": status_code, "data": data}
     request = None
 
+try:
+    from astrbot.api import logger
+except ImportError:
+    import logging
+    logger = logging.getLogger("LifecycleApi")
+
 from .audit_api import extract_query_param
 
 
@@ -29,8 +35,8 @@ async def _extract_request_payload(req: Any) -> dict:
                 res = await res
             if isinstance(res, dict):
                 payload.update(res)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[LifecycleApi] 异步提取请求 JSON 负载异常: {e}")
 
     if hasattr(req, "form") and callable(req.form):
         try:
@@ -39,8 +45,8 @@ async def _extract_request_payload(req: Any) -> dict:
                 res = await res
             if isinstance(res, dict):
                 payload.update(res)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[LifecycleApi] 异步提取请求 Form 负载异常: {e}")
 
     return payload
 

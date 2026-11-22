@@ -119,8 +119,8 @@ class InteractHandler(BaseActionHandler):
                         attr_val = await attr_val
                     if attr_val == "password":
                         is_pwd = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[InteractHandler] 探测输入框 password 属性异常: {e}")
 
             await locator.fill(str(text), timeout=10000)
             ctx.is_snapshot_dirty = True
@@ -163,7 +163,8 @@ class InteractHandler(BaseActionHandler):
             locator = self._get_locator(page, ref)
             try:
                 await locator.select_option(value=value, timeout=5000)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[InteractHandler] 下拉框按 value 选取失败，尝试按 label 选取: {e}")
                 await locator.select_option(label=value, timeout=5000)
             ctx.is_snapshot_dirty = True
 

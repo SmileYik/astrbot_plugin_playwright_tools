@@ -62,8 +62,8 @@ class PageHandler(BaseActionHandler):
             try:
                 page.on("dialog", on_dialog)
                 page._has_dialog_listener = True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[PageHandler] 注册弹窗监听异常: {e}")
 
     async def open_url(
         self,
@@ -89,7 +89,8 @@ class PageHandler(BaseActionHandler):
                         title = str(t_val)
                 else:
                     title = str(getattr(page, "title", ""))
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[PageHandler] 打开页面后提取标题异常: {e}")
                 title = ""
 
             ctx.current_snapshot = None

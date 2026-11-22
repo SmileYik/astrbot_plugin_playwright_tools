@@ -190,8 +190,8 @@ class PlaywrightToolPlugin(Star):
 
             if is_admin:
                 self.security_manager.admin_uids.add(sender_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[PlaywrightTool] 同步事件管理员标识失败: {e}")
 
     async def initialize(self):
         """插件初始化，启动过期审计数据清理与空闲定时回收任务。"""
@@ -346,8 +346,8 @@ class PlaywrightToolPlugin(Star):
             for ctx in list(self.context_manager.contexts.values()):
                 try:
                     await ctx.browser_context.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"[PlaywrightTool] 关闭上下文浏览器实例异常: {e}")
             await self.adapter.stop()
             logger.info("[PlaywrightTool] 已完全释放所有浏览器资源")
         except Exception as e:
