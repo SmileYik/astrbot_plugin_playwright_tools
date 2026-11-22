@@ -96,6 +96,53 @@ class TestBaseActionHandler(unittest.IsolatedAsyncioTestCase):
         action_fn.assert_not_called()
         self.mock_audit.log_action.assert_not_called()
 
+    async def test_session_mode_uses_sender_id_for_permission(self):
+        self.mock_mgr.mode = "session"
+        self.mock_context.owner_id = "admin_user"
+        self.mock_context.allowed_users = set()
+
+        called_users = []
+        def record_perm(user_id, url, action):
+            called_users.append(user_id)
+            return True, ""
+        self.mock_sec.check_permission.side_effect = record_perm
+
+        res = await self.handler.execute_action(
+            session_id="s1",
+            sender_id="normal_user",
+            action_name="click",
+            target_resource="",
+            action_coro_fn=AsyncMock(return_value="ok"),
+            input_args={"ref": "1"},
+            required_permission="click",
+        )
+        self.assertEqual(res, "ok")
+        self.assertEqual(called_users, ["normal_user"])
+        self.assertEqual(self.mock_context.current_operator_id, "normal_user")
+
+    async def test_personal_mode_collaborator_inherits_owner_permission(self):
+        self.mock_mgr.mode = "personal"
+        self.mock_context.owner_id = "owner_user"
+        self.mock_context.allowed_users = {"invited_collab"}
+
+        called_users = []
+        def record_perm(user_id, url, action):
+            called_users.append(user_id)
+            return True, ""
+        self.mock_sec.check_permission.side_effect = record_perm
+
+        res = await self.handler.execute_action(
+            session_id="s1",
+            sender_id="invited_collab",
+            action_name="click",
+            target_resource="",
+            action_coro_fn=AsyncMock(return_value="ok"),
+            input_args={"ref": "1"},
+            required_permission="click",
+        )
+        self.assertEqual(res, "ok")
+        self.assertEqual(called_users, ["owner_user"])
+
     async def test_normal_execution_records_audit_and_returns_result(self):
         action_fn = AsyncMock(return_value="已成功点击元素 [1]")
 

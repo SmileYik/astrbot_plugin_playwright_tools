@@ -219,17 +219,31 @@ class BaseActionHandler:
                         secret_text = val
                     audit_input_args[key] = "******"
 
+        # 确定鉴权主体
+        is_session_mode = getattr(self.context_mgr, "mode", "personal") == "session"
+        if is_session_mode:
+            auth_user_id = sender_id
+            ctx.current_operator_id = sender_id
+        else:
+            allowed_users = getattr(ctx, "allowed_users", set()) or set()
+            if sender_id in allowed_users and sender_id != getattr(ctx, "owner_id", ""):
+                auth_user_id = ctx.owner_id
+                ctx.current_operator_id = ctx.owner_id
+            else:
+                auth_user_id = sender_id
+                ctx.current_operator_id = sender_id
+
         # 鉴权检查
         if required_permission:
             if (
                 required_permission == "navigate" or action_name == "open_url"
             ) and hasattr(self.security_mgr, "is_url_allowed_navigation"):
                 allowed, reason = self.security_mgr.is_url_allowed_navigation(
-                    ctx.owner_id, current_url
+                    auth_user_id, current_url
                 )
             else:
                 allowed, reason = self.security_mgr.check_permission(
-                    ctx.owner_id, current_url, required_permission
+                    auth_user_id, current_url, required_permission
                 )
             if not allowed:
                 await self._log_audit(

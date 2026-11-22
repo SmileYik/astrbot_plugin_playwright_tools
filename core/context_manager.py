@@ -25,6 +25,10 @@ class BrowserSessionContext:
     allowed_users: set[str] = field(default_factory=set)
     created_time: float = field(default_factory=time.time)
     last_active_time: float = field(default_factory=time.time)
+    idle_timeout_seconds: float = 600.0
+    is_external: bool = False
+    plugin_name: str = ""
+    current_operator_id: str = ""
     session_name: str = ""
     owner_name: str = ""
     ref_map: dict[Any, dict] = field(default_factory=dict)
@@ -32,6 +36,7 @@ class BrowserSessionContext:
     last_dialog_message: str | None = None
     current_snapshot: Any = None
     is_snapshot_dirty: bool = False
+    ref_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     next_ref_id: int = 1
 
     def touch(self) -> None:
@@ -233,12 +238,23 @@ class ContextManager:
         try:
             browser_ctx = await self.adapter.create_context(storage_state_path=state_to_inject)
 
+            ctx_box: list[BrowserSessionContext | None] = [None]
+
             # 挂载顶层导航路由拦截守卫 (Navigation Guard)
             async def _route_guard(route, request):
                 try:
+                    cur_ctx = ctx_box[0]
+                    if cur_ctx and getattr(cur_ctx, "is_external", False):
+                        await route.continue_()
+                        return
+
                     is_nav = request.is_navigation_request() if hasattr(request, "is_navigation_request") else False
                     if is_nav:
-                        allowed, _ = self.security.is_url_allowed_navigation(owner_id, request.url)
+                        if self.mode == "session":
+                            op_id = getattr(cur_ctx, "current_operator_id", "") if cur_ctx else ""
+                            allowed, _ = self.security.is_url_allowed_navigation(op_id, request.url)
+                        else:
+                            allowed, _ = self.security.is_url_allowed_navigation(owner_id, request.url)
                         if not allowed:
                             await route.abort()
                             return
@@ -269,6 +285,7 @@ class ContextManager:
                 session_name=session_name,
                 owner_name=owner_name,
             )
+            ctx_box[0] = ctx
 
             def _setup_page_listeners(page):
                 def _on_frame_nav(frame):
