@@ -13,6 +13,11 @@ if root_dir not in sys.path:
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
+
+if "astrbot" not in sys.modules:
+    from unittest.mock import MagicMock
+    sys.modules["astrbot"] = MagicMock()
+    sys.modules["astrbot.api"] = MagicMock()
 try:
     from core.audit_logger import AuditLogger
 except ImportError:

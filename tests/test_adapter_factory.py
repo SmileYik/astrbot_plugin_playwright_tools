@@ -3,6 +3,10 @@ import sys
 import unittest
 from unittest.mock import patch, MagicMock, AsyncMock
 
+if "astrbot" not in sys.modules:
+    sys.modules["astrbot"] = MagicMock()
+    sys.modules["astrbot.api"] = MagicMock()
+
 # 确保路径能够导入项目模块
 root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if root_dir not in sys.path:

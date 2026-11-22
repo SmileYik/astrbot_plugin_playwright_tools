@@ -5,6 +5,11 @@ import sys
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
+
+if "astrbot" not in sys.modules:
+    from unittest.mock import MagicMock
+    sys.modules["astrbot"] = MagicMock()
+    sys.modules["astrbot.api"] = MagicMock()
 from astrbot_plugin_playwright_tools.core.security_manager import SecurityManager
 
 class TestSecurityManager(unittest.TestCase):

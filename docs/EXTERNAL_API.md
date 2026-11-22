@@ -7,7 +7,7 @@
 ## 1. 接入理念与寻址方式
 
 在 AstrBot 插件运行环境中，各个插件通常相互解耦，**不应（也无法）通过传统的 Python 静态 `import`** 引入其他插件的内部类。  
-本插件遵循 AstrBot 标准的 Star 注册机制，将服务基座挂载于插件 Star 类实例的 `service` 属性上。其他插件通过 `self.context.get_registered_star("PlaywrightTool")` 即可获取服务句柄。
+本插件遵循 AstrBot 标准的 Star 注册机制，将服务基座挂载于插件 Star 类实例的 `service` 属性上。其他插件通过 `self.context.get_registered_star("astrbot_plugin_playwright_tools")` 即可获取服务句柄。
 
 ```mermaid
 sequenceDiagram
@@ -17,7 +17,7 @@ sequenceDiagram
     participant CM as ContextManager
     participant PW as 原生 Playwright 引擎
 
-    TP->>AC: get_registered_star("PlaywrightTool")
+    TP->>AC: get_registered_star("astrbot_plugin_playwright_tools")
     AC-->>TP: StarMetadata (star_cls.service)
     TP->>PS: service.context("your_plugin_name") / get_browser_context(...)
     PS->>PS: wait_ready() 就绪检查
@@ -60,8 +60,8 @@ from astrbot.api import logger
 @register("my_awesome_plugin", "Author", "我的自定义业务插件", "v1.0.0")
 class MyAwesomePlugin(Star):
     async def fetch_page_title(self, target_url: str) -> str:
-        # 1. 寻址 PlaywrightTool 插件基座
-        star_meta = self.context.get_registered_star("PlaywrightTool")
+        # 1. 寻址 PlaywrightTool 插件基座 (使用插件 ID)
+        star_meta = self.context.get_registered_star("astrbot_plugin_playwright_tools")
         if not star_meta or not star_meta.star_cls:
             raise RuntimeError("未检测到 astrbot_plugin_playwright_tools 插件，请先安装并启用该插件。")
 
@@ -83,9 +83,9 @@ class MyAwesomePlugin(Star):
 ```python
 class LongRunningTaskPlugin(Star):
     async def get_shared_browser(self):
-        star_meta = self.context.get_registered_star("PlaywrightTool")
+        star_meta = self.context.get_registered_star("astrbot_plugin_playwright_tools")
         if not star_meta or not star_meta.star_cls:
-            raise RuntimeError("请先启用 PlaywrightTool 插件")
+            raise RuntimeError("请先启用 astrbot_plugin_playwright_tools 插件")
 
         service = star_meta.star_cls.service
         
@@ -98,7 +98,7 @@ class LongRunningTaskPlugin(Star):
         return b_ctx
 
     async def cleanup(self):
-        star_meta = self.context.get_registered_star("PlaywrightTool")
+        star_meta = self.context.get_registered_star("astrbot_plugin_playwright_tools")
         if star_meta and star_meta.star_cls:
             await star_meta.star_cls.service.release_browser_context("long_running_task_plugin")
 ```

@@ -129,15 +129,24 @@ class TestConfSchema(unittest.TestCase):
             "data/plugin_data/astrbot_plugin_playwright_tools/screenshots",
         )
 
-    def test_no_logging_import_in_tools(self):
+    def test_no_logging_import_in_codebase(self):
         from pathlib import Path
-        tools_dir = Path(__file__).resolve().parent.parent / "tools"
-        for py_file in tools_dir.rglob("*.py"):
-            content = py_file.read_text(encoding="utf-8")
+        repo_root = Path(__file__).resolve().parent.parent
+        for sub_dir in ["tools", "core", "adapts", "api"]:
+            for py_file in (repo_root / sub_dir).rglob("*.py"):
+                content = py_file.read_text(encoding="utf-8")
+                self.assertNotIn(
+                    "import logging",
+                    content,
+                    f"File {py_file} must not contain 'import logging'. Use 'from astrbot.api import logger' instead.",
+                )
+        main_py = repo_root / "main.py"
+        if main_py.exists():
+            content = main_py.read_text(encoding="utf-8")
             self.assertNotIn(
                 "import logging",
                 content,
-                f"File {py_file} must not contain 'import logging'. Use 'from astrbot.api import logger' instead.",
+                f"File {main_py} must not contain 'import logging'. Use 'from astrbot.api import logger' instead.",
             )
 
 

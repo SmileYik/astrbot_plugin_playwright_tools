@@ -3,11 +3,7 @@ import re
 from typing import Any
 from .base import BasePageReader, PageSnapshot
 
-try:
-    from astrbot.api import logger
-except ImportError:
-    import logging
-    logger = logging.getLogger("AriaSnapshotReader")
+from astrbot.api import logger
 
 
 class AriaSnapshotReader(BasePageReader):

@@ -6,11 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-try:
-    from astrbot.api import logger
-except ImportError:
-    import logging
-    logger = logging.getLogger("AuditLogger")
+from astrbot.api import logger
 
 TOOL_GROUPS: dict[str, list[str]] = {
     "pw_page": ["open_url", "read_page", "search_page", "switch_tab", "handle_dialog", "close_browser"],

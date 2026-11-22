@@ -80,6 +80,7 @@
 ## 日志
 
 需要在各个关键节点上埋下日志, 异常发生时必须完整打印和记录 traceback 调用栈，方便后续追踪调试.
+特别声明：日志记录不能使用外部日志库（严禁使用 `import logging`），仅能使用 `from astrbot.api import logger`。
 
 ## 1. Think Before Coding
 

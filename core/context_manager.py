@@ -5,11 +5,7 @@ from typing import TYPE_CHECKING, Any
 from ..adapts.base import BrowserAdapterBase
 from .security_manager import SecurityManager
 
-try:
-    from astrbot.api import logger
-except ImportError:
-    import logging
-    logger = logging.getLogger("ContextManager")
+from astrbot.api import logger
 
 if TYPE_CHECKING:
     from playwright.async_api import BrowserContext, Page

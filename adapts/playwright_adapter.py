@@ -17,11 +17,7 @@ try:
 except ImportError:
     async_playwright = None
 
-try:
-    from astrbot.api import logger
-except ImportError:
-    import logging
-    logger = logging.getLogger("PlaywrightAdapter")
+from astrbot.api import logger
 
 
 class PlaywrightAdapter(BrowserAdapterBase):

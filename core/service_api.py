@@ -13,7 +13,7 @@ class PlaywrightServiceAPI:
 
     遵循 AstrBot Star 寻址机制，外部插件可通过:
     ```python
-    meta = self.context.get_registered_star("PlaywrightTool")
+    meta = self.context.get_registered_star("astrbot_plugin_playwright_tools")
     if meta and meta.star_cls:
         service = meta.star_cls.service
         async with service.context("my_plugin") as b_ctx:

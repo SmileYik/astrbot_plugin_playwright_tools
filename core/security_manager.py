@@ -1,11 +1,7 @@
 import fnmatch
 from urllib.parse import urlparse
 
-try:
-    from astrbot.api import logger
-except ImportError:
-    import logging
-    logger = logging.getLogger("SecurityManager")
+from astrbot.api import logger
 
 class SecurityManager:
     """权限与白名单守卫管理器，负责鉴权、通配符域名匹配及顶层页面导航保护。"""

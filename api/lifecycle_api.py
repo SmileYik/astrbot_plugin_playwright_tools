@@ -13,11 +13,7 @@ except ImportError:
         return {"error": msg, "status_code": status_code, "data": data}
     request = None
 
-try:
-    from astrbot.api import logger
-except ImportError:
-    import logging
-    logger = logging.getLogger("LifecycleApi")
+from astrbot.api import logger
 
 from .audit_api import extract_query_param
 

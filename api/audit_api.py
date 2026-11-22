@@ -12,11 +12,7 @@ except ImportError:
         return {"error": msg, "status_code": status_code, "data": data}
     request = None
 
-try:
-    from astrbot.api import logger
-except ImportError:
-    import logging
-    logger = logging.getLogger("AuditApi")
+from astrbot.api import logger
 
 
 def extract_query_param(req: Any, key: str, default: Any = None, type_conv: Any = None) -> Any:
