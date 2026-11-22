@@ -10,10 +10,17 @@ from astrbot_plugin_playwright_tools.core.context_manager import ContextManager,
 from astrbot_plugin_playwright_tools.core.security_manager import SecurityManager
 
 def run_coro(coro):
+    import asyncio
+    import concurrent.futures
     try:
-        coro.send(None)
-    except StopIteration as e:
-        return e.value
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and loop.is_running():
+        with concurrent.futures.ThreadPoolExecutor(1) as executor:
+            return executor.submit(asyncio.run, coro).result()
+    else:
+        return asyncio.run(coro)
 
 class TestContextManager(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -158,7 +165,8 @@ class TestContextManager(unittest.IsolatedAsyncioTestCase):
         timeout_call = calls[-1]
         self.assertEqual(timeout_call.kwargs["event_type"], "timeout")
         self.assertEqual(timeout_call.kwargs["operator_id"], "system")
-        self.assertEqual(timeout_call.kwargs["details"], {"idle_minutes": 10})
+        self.assertEqual(timeout_call.kwargs["details"]["idle_minutes"], 10)
+        self.assertIn("tab_count", timeout_call.kwargs["details"])
 
         # 5. close lifecycle event
         ctx2, _ = run_coro(mgr.resolve_context(session_id="s1", sender_id="user_c"))
@@ -249,7 +257,8 @@ class TestContextManager(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_kwargs["owner_id"], "user_1")
         self.assertEqual(call_kwargs["event_type"], "force_kill")
         self.assertEqual(call_kwargs["operator_id"], "admin_user")
-        self.assertEqual(call_kwargs["details"], {"operator": "admin_user"})
+        self.assertEqual(call_kwargs["details"]["operator"], "admin_user")
+        self.assertIn("tab_count", call_kwargs["details"])
 
         # Killing non-existent context returns False
         ok_fail, msg_fail = run_coro(mgr.force_kill_context("non_existent", operator_id="admin_user"))
@@ -404,6 +413,94 @@ class TestContextManager(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(contexts[0])
         self.assertTrue(all(c is contexts[0] for c in contexts))
         self.assertEqual(create_count, 1)
+
+    async def test_browser_disconnected_callback_clears_contexts_and_audits(self):
+        mock_audit = MagicMock()
+        mock_audit.log_lifecycle = AsyncMock()
+        self.mgr.audit_logger = mock_audit
+
+        ctx = await self.mgr._create_new_context("s_crash", "u_crash")
+        self.mgr.contexts[("s_crash", "u_crash")] = ctx
+        self.mgr.user_active_pointer[("s_crash", "user_2")] = "u_crash"
+        self.mgr._creation_locks[("s_crash", "u_crash")] = MagicMock()
+        mock_audit.log_lifecycle.reset_mock()
+
+        # 验证注册了 disconnect 回调并触发
+        self.assertTrue(hasattr(self.mgr, "_on_browser_disconnected"))
+        self.mgr._on_browser_disconnected()
+
+        self.assertEqual(len(self.mgr.contexts), 0)
+        self.assertEqual(len(self.mgr.user_active_pointer), 0)
+        self.assertEqual(len(self.mgr._creation_locks), 0)
+        self.assertIsNone(self.mgr.last_zero_context_time)
+        mock_audit.log_lifecycle.assert_called_once()
+        call_kwargs = mock_audit.log_lifecycle.call_args.kwargs
+        self.assertEqual(call_kwargs["event_type"], "terminate")
+        self.assertEqual(call_kwargs["details"]["reason"], "browser_crash")
+
+    async def test_close_all_contexts_concurrency_and_timeout(self):
+        mock_audit = MagicMock()
+        mock_audit.log_lifecycle = AsyncMock()
+        self.mgr.audit_logger = mock_audit
+
+        ctx1 = await self.mgr._create_new_context("s1", "u1")
+        ctx2 = await self.mgr._create_new_context("s2", "u2")
+        self.mgr.contexts[("s1", "u1")] = ctx1
+        self.mgr.contexts[("s2", "u2")] = ctx2
+        mock_audit.log_lifecycle.reset_mock()
+
+        count = await self.mgr.close_all_contexts(reason="terminate")
+        self.assertEqual(count, 2)
+        self.assertEqual(len(self.mgr.contexts), 0)
+        self.assertEqual(mock_audit.log_lifecycle.call_count, 2)
+
+    async def test_check_and_cleanup_idle_browser_state_machine(self):
+        import time
+        self.mgr.browser_idle_timeout_minutes = 5
+        self.mgr.adapter.is_running = True
+        self.mgr.adapter.stop = AsyncMock()
+
+        # 1. 仍有上下文时，不应停止
+        ctx = await self.mgr._create_new_context("s1", "u1")
+        self.mgr.contexts[("s1", "u1")] = ctx
+        stopped = await self.mgr.check_and_cleanup_idle_browser()
+        self.assertFalse(stopped)
+        self.mgr.adapter.stop.assert_not_called()
+
+        # 2. 上下文释放，但刚归零时未达到阈值
+        self.mgr.contexts.clear()
+        stopped = await self.mgr.check_and_cleanup_idle_browser()
+        self.assertFalse(stopped)
+        self.assertIsNotNone(self.mgr.last_zero_context_time)
+
+        # 3. 模拟超时 301 秒
+        self.mgr.last_zero_context_time = time.time() - 301
+        stopped = await self.mgr.check_and_cleanup_idle_browser()
+        self.assertTrue(stopped)
+        self.mgr.adapter.stop.assert_called_once()
+        self.assertIsNone(self.mgr.last_zero_context_time)
+
+    async def test_close_user_context_cleans_creation_locks_and_logs(self):
+        mock_audit = MagicMock()
+        mock_audit.log_lifecycle = AsyncMock()
+        self.mgr.audit_logger = mock_audit
+
+        ctx = await self.mgr._create_new_context("s_close", "u_close")
+        key = ("s_close", "u_close")
+        self.mgr.contexts[key] = ctx
+        self.mgr._creation_locks[key] = MagicMock()
+        mock_audit.log_lifecycle.reset_mock()
+
+        ok, msg = await self.mgr.close_user_context("s_close", "u_close")
+        self.assertTrue(ok)
+        self.assertNotIn(key, self.mgr.contexts)
+        self.assertNotIn(key, self.mgr._creation_locks)
+        self.assertIsNotNone(self.mgr.last_zero_context_time)
+        mock_audit.log_lifecycle.assert_called_once()
+        details = mock_audit.log_lifecycle.call_args.kwargs["details"]
+        self.assertIn("duration_seconds", details)
+        self.assertIn("tab_count", details)
+
 
 if __name__ == "__main__":
     unittest.main()

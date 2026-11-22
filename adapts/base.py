@@ -26,6 +26,41 @@ class BrowserAdapterBase(ABC):
         self.window_width = window_width
         self.window_height = window_height
         self.executable_path = str(executable_path or "").strip()
+        self._disconnect_callbacks: list = []
+
+    @property
+    def is_running(self) -> bool:
+        """底层浏览器进程是否正在运行且保持连接。"""
+        b = self.browser
+        if b is None:
+            return False
+        if hasattr(b, "is_connected"):
+            try:
+                res = b.is_connected()
+                return bool(res)
+            except Exception:
+                return False
+        return True
+
+    def set_disconnect_callback(self, cb) -> None:
+        """注册底层浏览器崩溃/失联事件的回调函数。"""
+        if cb and cb not in self._disconnect_callbacks:
+            self._disconnect_callbacks.append(cb)
+
+    def _trigger_disconnect_callbacks(self) -> None:
+        """执行所有注册的断开连接回调。"""
+        for cb in list(self._disconnect_callbacks):
+            try:
+                res = cb()
+                if hasattr(res, "__await__"):
+                    import asyncio
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(res)
+                    except RuntimeError:
+                        pass
+            except Exception:
+                pass
 
     @property
     @abstractmethod

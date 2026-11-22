@@ -122,6 +122,17 @@
           "step": 1
         }
       },
+      "browser_idle_timeout_minutes": {
+        "type": "int",
+        "description": "浏览器进程空闲退出时长",
+        "hint": "无活跃上下文时底层浏览器进程空闲退出时长 (分钟)，超时自动关闭 OS 进程释放内存；设置为 0 则保持常驻不退出",
+        "default": 5,
+        "slider": {
+          "min": 0,
+          "max": 120,
+          "step": 1
+        }
+      },
       "tool_execution_timeout_seconds": {
         "type": "int",
         "description": "执行超时时长",

@@ -4,6 +4,31 @@
 
 ---
 
+## [v1.2.0] - 2026-11-22
+
+### 浏览器生命周期与进程空闲回收 (Browser Lifecycle & Process Reclamation)
+- **底层浏览器进程智能空闲回收**：新增 `runtime.browser_idle_timeout_minutes` 配置项（默认 5 分钟），无活跃上下文超过设定时间后自动关闭底层 Chromium/Camoufox 进程（`adapter.stop()`），释放系统常驻内存；后续请求透明按需重新拉起。
+- **底层浏览器失联崩溃感知与自愈**：通过 Adapter 监听 Playwright 底层 `disconnected` 事件，在外部信号强杀或进程崩溃时触发断开回调，主动清理僵尸上下文映射，记录 `terminate (reason="browser_crash")` 审计，保障后续调用透明重启服务。
+- **四大关键生命周期全覆盖审计与规范日志**：
+  - 对“主动释放（`close`）”、“超时回收（`timeout`）”、“强制杀死（`kill`）”与“插件终止（`terminate`）”四大流转环节实现审计记录全覆盖与日志记录；
+  - 审计详情结构化记录上下文存活时长（`duration_seconds`）、标签页数量（`tab_count`）及最终页面 URL（`final_url`）。
+- **插件退出与重载的超时熔断与 atexit 兜底保护**：
+  - 优化主插件 `terminate()`，成对注销 `atexit` 钩子，通过 `ContextManager.close_all_contexts(reason="terminate")` 实施 `asyncio.gather` 并发 5.0 秒总超时熔断；
+  - 底层驱动关闭施加 5.0 秒超时安全守卫，结合 `atexit.register` 注册异常退出清理钩子，避免产生孤儿进程。
+
+### 安全权限与会话协同演进 (Security Permissions & Collaborative Sessions)
+- **12 项原子化操作权限细分与白名单放行**：新增动作级细粒度权限校验（`click`, `fill`, `select`, `hover`, `focus`, `drag`, `press_key`, `scroll`, `screenshot`, `screenshot_full`, `download`）；白名单放行时基于 `is_navigation_request` 拦截顶层导航，自动保留网页内部第三方资源（如静态样式、脚本、图片、CDN 等），防止页面崩坏。
+- **会话模式管理员特权越权防护**：修复共享会话模式下非管理员用户可能通过共享上下文盗用管理员身份的问题，在动作执行中严格按当前实际操作人 `sender_id` 进行动态权限预检。
+- **邀请协助委托模型与权限继承**：明确个人隔离模式（`personal`）下由被协助者（上下文所有者）主动发起 `/browser invite` 邀请，受邀协助者通过 `/browser use` 切换后以被协助者的权限与身份协同操作，并在审计日志中严格区分 `owner_id` 与 `operator_id`。
+
+### 并发控制与服务共享基座 (Concurrency & Cross-Plugin Service Base)
+- **单上下文排队互斥创建锁 (`_creation_locks`)**：针对相同会话/用户并发请求进入时可能重复创建多个底层 BrowserContext 的竞态问题，实现基于 Context Key 的细粒度异步排队锁。
+- **跨标签页单调递增 PID 式 Ref ID 分配**：引入单上下文异步排队锁 `ref_lock`，保证并发提炼正文或多标签页操作时 Ref ID 严格单调递增，避免元素编号冲突。
+- **跨插件 Playwright 共享服务基座 (`PlaywrightServiceAPI`)**：基于 AstrBot Star 机制向其他插件开放浏览器上下文申请、复用与生命周期管理能力，实现生态内插件共享同一个底层 Playwright 驱动。
+- **异常分级治理与官方 Logger 强化**：全面移除静默 `pass`，完整记录异常 traceback 调用栈；全模块严格仅采用 `from astrbot.api import logger`。
+
+---
+
 ## [v1.1.0] - 2026-11-22
 
 ### 健壮性与架构重构 (Robustness & Architecture Refactor)

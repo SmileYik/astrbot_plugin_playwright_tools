@@ -1,5 +1,7 @@
 import json
 import asyncio
+import time
+import atexit
 from typing import Any
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
@@ -26,7 +28,7 @@ from .tools.tools import PwPageTool, PwReadTool, PwInteractTool, PwMediaTool
     "PlaywrightTool",
     "SmileYik",
     "给大模型用的网页浏览器插件。支持打开网页、阅读文章与点击填表。采用元素编号避免乱点并减少 Token 消耗，同时自带防网站拦截与后台管理控制台。",
-    "v1.1.0"
+    "v1.2.0"
 )
 class PlaywrightToolPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
@@ -63,6 +65,7 @@ class PlaywrightToolPlugin(Star):
         # 会话与运行时
         context_mode = str(rt_cfg.get("context_mode", self.config.get("context_mode", "personal")))
         idle_timeout = int(rt_cfg.get("idle_timeout_minutes", self.config.get("idle_timeout_minutes", 10)))
+        browser_idle_timeout = int(rt_cfg.get("browser_idle_timeout_minutes", self.config.get("browser_idle_timeout_minutes", 5)))
         tool_timeout = int(rt_cfg.get("tool_execution_timeout_seconds", self.config.get("tool_execution_timeout_seconds", 30)))
         enable_close_tool = bool(rt_cfg.get("enable_close_tool", self.config.get("enable_close_tool", True)))
         self.system_prompt_injection = str(rt_cfg.get("system_prompt_injection", self.config.get("system_prompt_injection", ""))).strip()
@@ -112,7 +115,13 @@ class PlaywrightToolPlugin(Star):
             idle_timeout_minutes=idle_timeout,
             storage_state_path=storage_state_path,
             audit_logger=self.audit_logger,
+            browser_idle_timeout_minutes=browser_idle_timeout,
         )
+
+        try:
+            atexit.register(self._atexit_cleanup)
+        except Exception as e:
+            logger.debug(f"[PlaywrightTool] 注册 atexit 钩子异常: {e}")
 
         # 3. 初始化模块化 Handlers 与复合 FunctionTool
         self.page_handler = PageHandler(
@@ -193,6 +202,14 @@ class PlaywrightToolPlugin(Star):
         except Exception as e:
             logger.debug(f"[PlaywrightTool] 同步事件管理员标识失败: {e}")
 
+    def _atexit_cleanup(self) -> None:
+        """解释器退出时的尽力而为兜底钩子。"""
+        try:
+            if hasattr(self, "adapter") and getattr(self.adapter, "is_running", False):
+                logger.warning("[PlaywrightTool] 检测到 Python 解释器退出时底层浏览器仍处于运行状态")
+        except Exception:
+            pass
+
     async def initialize(self):
         """插件初始化，启动过期审计数据清理与空闲定时回收任务。"""
         try:
@@ -206,14 +223,28 @@ class PlaywrightToolPlugin(Star):
         self._cleanup_task = asyncio.create_task(self._periodic_cleanup_loop())
 
     async def _periodic_cleanup_loop(self):
-        """每隔 5 分钟轮询清理空闲超时上下文与超期审计记录。"""
+        """每隔 30 秒轮询清理空闲超时上下文、无上下文浏览器进程与超期审计记录。"""
+        last_audit_clean_time = 0.0
         while True:
             try:
-                await asyncio.sleep(300)
+                await asyncio.sleep(30)
                 closed = await self.context_manager.cleanup_idle_contexts()
-                cleaned = await self.audit_logger.cleanup_expired(self._retention_days)
-                if closed > 0 or cleaned > 0:
-                    logger.info(f"[PlaywrightTool] 周期清理: 释放 {closed} 个空闲上下文，清理 {cleaned} 条过期日志")
+                browser_stopped = await self.context_manager.check_and_cleanup_idle_browser()
+                now = time.time()
+                cleaned = 0
+                if now - last_audit_clean_time > 3600:
+                    cleaned = await self.audit_logger.cleanup_expired(self._retention_days)
+                    last_audit_clean_time = now
+
+                if closed > 0 or browser_stopped or cleaned > 0:
+                    status_parts = []
+                    if closed > 0:
+                        status_parts.append(f"释放 {closed} 个空闲上下文")
+                    if browser_stopped:
+                        status_parts.append("回收底层浏览器进程")
+                    if cleaned > 0:
+                        status_parts.append(f"清理 {cleaned} 条过期日志")
+                    logger.info(f"[PlaywrightTool] 周期清理: {', '.join(status_parts)}")
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -340,15 +371,22 @@ class PlaywrightToolPlugin(Star):
 
     async def terminate(self):
         """插件销毁释放所有浏览器资源及取消轮询清理任务。"""
+        try:
+            import atexit
+            atexit.unregister(self._atexit_cleanup)
+        except Exception as e:
+            logger.debug(f"[PlaywrightTool] 注销 atexit 钩子异常: {e}")
+
         if self._cleanup_task and not self._cleanup_task.done():
             self._cleanup_task.cancel()
         try:
-            for ctx in list(self.context_manager.contexts.values()):
-                try:
-                    await ctx.browser_context.close()
-                except Exception as e:
-                    logger.warning(f"[PlaywrightTool] 关闭上下文浏览器实例异常: {e}")
-            await self.adapter.stop()
-            logger.info("[PlaywrightTool] 已完全释放所有浏览器资源")
+            closed_count = await self.context_manager.close_all_contexts(reason="terminate")
+            try:
+                stop_res = self.adapter.stop()
+                if hasattr(stop_res, "__await__"):
+                    await asyncio.wait_for(stop_res, timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("[PlaywrightTool] 停止浏览器适配器超时(5s)，强制释放句柄")
+            logger.info(f"[PlaywrightTool] 插件重载/终止完成，共清理 {closed_count} 个存量上下文并停止浏览器进程")
         except Exception as e:
             logger.error(f"[PlaywrightTool] 终止释放异常: {e}")

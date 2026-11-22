@@ -49,34 +49,25 @@ import astrbot_plugin_playwright_tools.api.audit_api as audit_api_module
 import astrbot_plugin_playwright_tools.api.lifecycle_api as lifecycle_api_module
 
 def run_coro(coro):
-    result = None
-    stack = [coro]
-    while stack:
-        try:
-            val = stack[-1].send(None)
-            if hasattr(val, "send"):
-                stack.append(val)
-        except StopIteration as e:
-            stack.pop()
-            if stack:
-                try:
-                    stack[-1].send(e.value)
-                except StopIteration as e2:
-                    stack.pop()
-                    result = e2.value
-            else:
-                result = e.value
-    return result
+    import asyncio
+    import concurrent.futures
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and loop.is_running():
+        with concurrent.futures.ThreadPoolExecutor(1) as executor:
+            return executor.submit(asyncio.run, coro).result()
+    else:
+        return asyncio.run(coro)
 
 def collect_async_gen(agen):
-    results = []
-    try:
-        while True:
-            val = run_coro(agen.asend(None))
-            results.append(val)
-    except StopAsyncIteration:
-        pass
-    return results
+    async def _drain():
+        results = []
+        async for item in agen:
+            results.append(item)
+        return results
+    return run_coro(_drain())
 
 class TestPluginMain(unittest.TestCase):
     def test_conf_schema_valid_json(self):
@@ -97,7 +88,7 @@ class TestPluginMain(unittest.TestCase):
             meta = yaml.safe_load(f)
         self.assertEqual(meta["name"], "astrbot_plugin_playwright_tools")
         self.assertEqual(meta["display_name"], "PlaywrightTool")
-        self.assertEqual(meta["version"], "v1.1.0")
+        self.assertEqual(meta["version"], "v1.2.0")
 
     def test_conf_schema_v2_fields(self):
         with open("_conf_schema.json", "r", encoding="utf-8") as f:
@@ -630,6 +621,33 @@ class TestPluginMain(unittest.TestCase):
         self.assertEqual(lc_items[0]["operator_id"], "u2")
         self.assertEqual(lc_items[0]["owner_name"], "李四")
         self.assertEqual(lc_items[0]["owner_id"], "u2")
+
+    def test_plugin_init_parses_browser_idle_timeout_and_registers_atexit(self):
+        import atexit
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / "test_init.db")
+        mock_ctx = MagicMock()
+        with patch.object(atexit, "register") as mock_atexit_reg:
+            cfg = {"audit_db_path": db_file, "runtime": {"browser_idle_timeout_minutes": 15}}
+            plugin = main.PlaywrightToolPlugin(mock_ctx, config=cfg)
+            self.assertEqual(plugin.context_manager.browser_idle_timeout_minutes, 15)
+            mock_atexit_reg.assert_called_once_with(plugin._atexit_cleanup)
+
+    def test_plugin_terminate_closes_all_contexts_stops_adapter_and_unregisters_atexit(self):
+        import atexit
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / "test_term.db")
+        mock_ctx = MagicMock()
+        plugin = main.PlaywrightToolPlugin(mock_ctx, config={"audit_db_path": db_file})
+        plugin.context_manager.close_all_contexts = AsyncMock(return_value=3)
+        plugin.adapter.stop = AsyncMock()
+
+        with patch.object(atexit, "unregister") as mock_atexit_unreg:
+            run_coro(plugin.terminate())
+            mock_atexit_unreg.assert_called_once_with(plugin._atexit_cleanup)
+            plugin.context_manager.close_all_contexts.assert_called_once_with(reason="terminate")
+            plugin.adapter.stop.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

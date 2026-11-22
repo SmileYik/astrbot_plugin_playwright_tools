@@ -214,6 +214,61 @@ class TestAdapterFactory(unittest.TestCase):
             executable_path="C:/custom/chrome.exe"
         )
 
+    @patch("adapts.playwright_adapter.async_playwright")
+    def test_playwright_adapter_disconnect_callback_and_is_running(self, mock_async_playwright):
+        mock_cm = MagicMock()
+        mock_pw = MagicMock()
+        mock_browser = MagicMock()
+        mock_browser.is_connected.return_value = True
+        mock_cm.start = AsyncMock(return_value=mock_pw)
+        mock_pw.chromium.launch = AsyncMock(return_value=mock_browser)
+        mock_async_playwright.return_value = mock_cm
+
+        adapter = PlaywrightAdapter(browser_type="chromium")
+        self.assertFalse(adapter.is_running)
+
+        called = []
+        adapter.set_disconnect_callback(lambda: called.append("disconnected"))
+
+        run_coro(adapter.start())
+        self.assertTrue(adapter.is_running)
+        mock_browser.on.assert_called_once()
+        event_name, handler = mock_browser.on.call_args[0]
+        self.assertEqual(event_name, "disconnected")
+
+        # 触发 disconnected 回调
+        handler()
+        self.assertEqual(called, ["disconnected"])
+        self.assertIsNone(adapter.browser)
+        self.assertFalse(adapter.is_running)
+
+    def test_camoufox_adapter_disconnect_callback_and_is_running(self):
+        adapter = CamoufoxAdapter()
+        self.assertFalse(adapter.is_running)
+
+        mock_browser = MagicMock()
+        mock_browser.is_connected.return_value = True
+        adapter._browser = mock_browser
+        self.assertTrue(adapter.is_running)
+
+        called = []
+        adapter.set_disconnect_callback(lambda: called.append("camoufox_disconnected"))
+
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_browser)
+        mock_cm.__aexit__ = AsyncMock(return_value=None)
+        with patch("adapts.camoufox_adapter.AsyncCamoufox", return_value=mock_cm):
+            adapter._browser = None
+            run_coro(adapter.start())
+            self.assertTrue(adapter.is_running)
+            mock_browser.on.assert_called_once()
+            event_name, handler = mock_browser.on.call_args[0]
+            self.assertEqual(event_name, "disconnected")
+            handler()
+            self.assertEqual(called, ["camoufox_disconnected"])
+            self.assertIsNone(adapter.browser)
+            self.assertFalse(adapter.is_running)
+
 
 if __name__ == "__main__":
     unittest.main()

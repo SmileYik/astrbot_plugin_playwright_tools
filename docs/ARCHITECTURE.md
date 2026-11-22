@@ -78,8 +78,8 @@ flowchart TD
 - **`PlaywrightAdapter`**: 封装 Playwright 原生驱动（Chromium / Firefox / WebKit / Custom），支持自定义二进制路径，负责底层进程生命周期。
 
 ### 1.2 核心服务与提炼层 (`core/`, `core/readers/`)
-- **`ContextManager`**: 管理多租户 `BrowserSessionContext` 实例。负责个人模式与会话模式的上下文隔离路由、协作者授权、Cookie 注入、空闲定时回收、维护单调递增的 Ref 编号计数器，并在创建上下文异常时自动执行回滚清理。
-- **`SecurityManager`**: 权限与白名单守卫。执行域名通配符匹配（如 `*.github.com`）、动作权限细粒度校验，以及在页面创建和路由阶段拦截未授权顶层跳转、弹出新窗口与 iframe 导航。
+- **`ContextManager`**: 管理多租户 `BrowserSessionContext` 实例。负责个人模式与会话模式的上下文隔离路由、协作者授权、Cookie 注入、空闲定时回收、维护单调递增的 Ref 编号计数器，并在创建上下文异常时自动执行回滚清理。同时负责底层浏览器进程生命周期的智能空闲回收（无活跃上下文超过 `browser_idle_timeout_minutes` 自动关闭底层驱动）、崩溃失联事件（`disconnected`）感知自愈，以及在插件终止时通过并发 5.0 秒总超时熔断机制批量注销存量上下文。
+- **`SecurityManager`**: 权限与白名单守卫。执行域名通配符匹配（如 `*.bing.com`）、12 项原子动作权限细粒度校验，在页面创建和路由阶段拦截未授权顶层跳转、弹出新窗口与 iframe 导航，同时对放行网页自动保留内部第三方静态资源的正常加载。
 - **`AuditLogger`**: SQLite 审计记录器。异步记录全量调用（起止时间、会话、上下文、目标域名、入参与结果），并在初始化与周期轮询中自动清理超期数据。
 - **`readers/`（双阅读提炼器）**:
   - **`InlineMarkdownReader`**: 将网页标题、段落、列表、表格及带 Ref ID 的控件融合成语义清晰的 Markdown 文档，向可交互 DOM 节点注入单调递增编号 `data-astr-ref="{ref}"`，支持字符预算（`page_chunk_char_limit`）平滑分页。
@@ -121,9 +121,9 @@ Session S1 ──> User U1 ──> Context (Owner: U1, SharedWith: [U2])
 Session S1 ──> All Users share Context (Owner: S1)
 ```
 
-1. **个人模式 (`personal`)**：默认以 `session_id:sender_id` 作为上下文标识，各用户数据、Cookie 与页面隔离。
-2. **协作切换**：所有者可通过 `/browser invite <UID>` 授权好友；被授权用户可通过 `/browser use <UID>` 主动切换绑定目标上下文。
-3. **特权防护**：预配置的 Cookie / StorageState 仅对管理员创建的上下文生效，普通用户上下文保持纯净无凭据隔离。
+1. **个人模式 (`personal`)**：默认以 `session_id:sender_id` 作为上下文标识，各用户数据、Cookie 与页面隔离。支持被协助者（所有者）通过 `/browser invite <UID>` 主动发起邀请授权好友；被授权用户可通过 `/browser use <UID>` 切换至该上下文，以被协助者的权限与身份协同操作。
+2. **会话模式 (`session`)**：同一会话共享浏览器实例，所有成员共用上下文。
+3. **白名单与特权防护**：白名单由管理员统一在后台设立并绑定 12 项原子权限，非管理员受白名单约束，放行页面时不拦截网页内部第三方静态资源；预配置的 Cookie / StorageState 仅对管理员创建的上下文生效，普通用户上下文保持纯净无凭据隔离。
 
 ---
 
@@ -151,9 +151,76 @@ Session S1 ──> All Users share Context (Owner: S1)
 
 ---
 
-## 5. 上下文创建回滚与资源安全
+## 5. 浏览器生命周期、上下文回滚与资源安全
 
-`ContextManager._create_new_context` 采用生命周期安全保护：在申请底层 `BrowserContext` 之后，后续的路由守卫挂载、首页面创建、事件监听注册等步骤若发生任何异常，均在 `try...except` 中捕获并立即调用 `await browser_ctx.close()`，清理孤儿上下文，避免资源泄漏。
+### 5.1 上下文创建异常回滚
+`ContextManager._create_new_context` 采用生命周期安全保护：在申请底层 `BrowserContext` 之后，后续的路由守卫挂载、首页面创建、事件监听注册等步骤若发生任何异常，均在 `try...except` 中捕获并立即调用 `await browser_ctx.close()`，清理孤儿上下文，避免资源泄漏。同时针对并发创建场景引入单上下文键粒度的异步排队互斥锁（`_creation_locks`），保证相同租户 key 下仅创建一个实例。
+
+### 5.2 四大生命周期环节全覆盖与审计闭环
+系统在全链路中对上下文资源的四个关键流转环节实施了资源释放、运行日志（`logger.info`）与结构化审计记录（`AuditLogger.log_lifecycle`）：
+1. **主动释放 (User / LLM Close)**：
+   - 触发入口：用户调用 `/browser close` 或大模型调用 `pw_page(action='close')`。
+   - 资源流转：从 `contexts` 映射中移除，带 5 秒超时执行 `browser_context.close()`，清理创建互斥锁与协作者指针，更新归零时间戳 `last_zero_context_time`。
+   - 审计与指标：记录 `close` 事件类型，结构化记入 `duration_seconds`（存活秒数）、`tab_count`（关闭时标签页数）与 `final_url`（关闭时最终 URL）。
+2. **超时回收 (Idle Context Reclamation)**：
+   - 触发入口：主插件后台周期轮询任务（每 30 秒执行一次 `cleanup_idle_contexts()`）。
+   - 资源流转：逐一比对上下文无操作空闲时长是否超过 `idle_timeout_minutes`，超期后安全关闭底层上下文并释放相关状态。
+   - 审计与指标：记录 `timeout` 事件类型，记入 `idle_minutes`、`duration_seconds`、`tab_count` 与 `final_url`。
+3. **强制杀死 (Force Kill / Revocation)**：
+   - 触发入口：管理员调用 `/browser kill <key>` 或 WebUI 控制台发起强退请求。
+   - 资源流转：在 `force_kill_context` 中剔除映射并实施 5 秒超时保护强制关闭，清理上下文关联的协作者共享指针与互斥锁。
+   - 审计与指标：记录 `kill` 事件类型，记入 `operator`、`duration_seconds`、`tab_count` 与 `final_url`。
+4. **插件重载与终止 (Plugin Terminate / Reload / atexit)**：
+   - 触发入口：插件卸载、重载、禁用或宿主进程退出。
+   - 资源流转：在 `main.py: terminate()` 中首先成对注销 `atexit.unregister(self._atexit_cleanup)` 避免重复触发；随后通过 `ContextManager.close_all_contexts(reason="terminate")` 借助 `asyncio.gather` 并发关闭所有存量上下文，施加 5.0 秒总超时熔断；最后以 5.0 秒超时安全执行 `adapter.stop()`。
+   - 异常兜底：若宿主异常终止未正常流经 `terminate()`，通过 `atexit.register` 注册的同步/异步清理钩子实施兜底资源释放。
+   - 审计与指标：记录 `terminate` 事件类型，附带 `reason` 与存活及页面指标。
+
+```mermaid
+flowchart TD
+    subgraph LifecycleEvents ["四大生命周期环节"]
+        E1["1. 主动释放 (pw_page close / /browser close)"]
+        E2["2. 超时回收 (30s 轮询 > idle_timeout_minutes)"]
+        E3["3. 强制杀死 (/browser kill / WebUI)"]
+        E4["4. 插件重载/退出 (terminate / atexit)"]
+    end
+
+    subgraph ReclamationAction ["资源释放与熔断"]
+        CloseCtx["BrowserContext.close() (5.0s 超时保护)"]
+        GatherClose["asyncio.gather 并发关闭 (5.0s 总超时熔断)"]
+        StopBrowser["Adapter.stop() (5.0s 超时保护)"]
+        CleanLocks["清理 _creation_locks & 用户指针"]
+    end
+
+    subgraph Observability ["审计与日志"]
+        LogOutput["logger.info 规范化日志 (存活时长/标签数/最终URL)"]
+        AuditRecord["AuditLogger.log_lifecycle (结构化落盘)"]
+    end
+
+    E1 --> CloseCtx
+    E2 --> CloseCtx
+    E3 --> CloseCtx
+    E4 --> GatherClose
+    GatherClose --> StopBrowser
+
+    CloseCtx --> CleanLocks
+    CleanLocks --> LogOutput
+    CleanLocks --> AuditRecord
+    GatherClose --> LogOutput
+    GatherClose --> AuditRecord
+```
+
+### 5.3 底层浏览器进程空闲自动回收与自愈
+- **底层进程空闲自动回收**：
+  - 底层 Chromium/Camoufox 进程在上下文归零后若持续常驻后台将占用较多系统内存。
+  - 本系统在 `ContextManager` 中维护 `last_zero_context_time` 时间戳。当所有活跃上下文归零后开始计时；主插件后台 30 秒轮询调用 `check_and_cleanup_idle_browser()`。
+  - 当归零持续时间达到配置的 `browser_idle_timeout_minutes`（默认 5 分钟，若配置为 0 则保持常驻），自动调用 `adapter.stop()` 优雅关闭底层浏览器驱动进程，释放系统常驻内存。
+  - 当后续再次有会话发起页面访问时，Adapter 在 `create_context` 中依据 `if not self.is_running` 自动透明重新拉起浏览器实例，上层调用无感。
+- **底层浏览器崩溃失联感知与自愈**：
+  - 浏览器可能因操作系统 OOM 或外部信号被强制关闭，导致 CDP 处于假死僵尸态。
+  - 适配器层监听 Playwright 底层 `disconnected` 事件，并向 `ContextManager` 触发断开回调。
+  - `ContextManager._on_browser_disconnected` 收到通知后，立即清空存量僵死上下文映射并清理互斥锁，向审计系统记录 `terminate (reason="browser_crash")`。
+  - 后续请求将透明触发适配器重新启动新浏览器进程，恢复系统服务可用性。
 
 ---
 

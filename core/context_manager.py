@@ -68,6 +68,7 @@ class ContextManager:
         idle_timeout_minutes: int = 10,
         storage_state_path: str = "",
         audit_logger: Any = None,
+        browser_idle_timeout_minutes: int = 5,
     ):
         self.adapter = adapter
         self.security = security
@@ -75,10 +76,150 @@ class ContextManager:
         self.idle_timeout_minutes = idle_timeout_minutes
         self.storage_state_path = storage_state_path
         self.audit_logger = audit_logger
+        self.browser_idle_timeout_minutes = browser_idle_timeout_minutes
+        self.last_zero_context_time: float | None = None
         self.contexts: dict[Any, BrowserSessionContext] = {}
         self.user_active_pointer: dict[tuple[str, str], str] = {}
         self._creation_locks: dict[Any, asyncio.Lock] = {}
         self._global_lock = asyncio.Lock()
+
+        if hasattr(self.adapter, "set_disconnect_callback"):
+            self.adapter.set_disconnect_callback(self._on_browser_disconnected)
+
+    def _on_browser_disconnected(self) -> None:
+        """底层浏览器崩溃断开时的即时自愈清理。"""
+        count = len(self.contexts)
+        logger.warning(f"[ContextManager] 收到底层浏览器断开/崩溃通知，立即失效清理 {count} 个存量活跃上下文")
+        for k, ctx in list(self.contexts.items()):
+            now = time.time()
+            self._fire_lifecycle_log(
+                session_id=getattr(ctx, "session_id", ""),
+                context_key=self._format_context_key(k),
+                owner_id=getattr(ctx, "owner_id", ""),
+                event_type="terminate",
+                operator_id="system",
+                session_name=getattr(ctx, "session_name", ""),
+                operator_name="system",
+                owner_name=getattr(ctx, "owner_name", ""),
+                details={"reason": "browser_crash", "duration_seconds": round(now - getattr(ctx, "created_time", now), 1)},
+            )
+        self.contexts.clear()
+        self._creation_locks.clear()
+        self.user_active_pointer.clear()
+        self.last_zero_context_time = None
+
+    def _extract_context_metrics(self, ctx: Any) -> dict:
+        """提取上下文关闭前的指标信息（存活时长、标签页数量、终态 URL）。"""
+        now = time.time()
+        created = getattr(ctx, "created_time", None)
+        if isinstance(created, (int, float)):
+            duration = round(now - created, 1)
+        else:
+            duration = 0.0
+
+        pages = getattr(ctx, "pages", [])
+        if hasattr(ctx, "browser_context") and getattr(ctx.browser_context, "pages", None) is not None:
+            bc_pages = ctx.browser_context.pages
+            if isinstance(bc_pages, list):
+                pages = bc_pages
+        tab_count = len(pages) if isinstance(pages, list) else 0
+
+        cur_p = getattr(ctx, "current_page", None)
+        active_url = ""
+        if cur_p and hasattr(cur_p, "url"):
+            u = getattr(cur_p, "url", "")
+            if callable(u):
+                try:
+                    u_val = u()
+                    if isinstance(u_val, str):
+                        active_url = u_val
+                except Exception:
+                    pass
+            elif isinstance(u, str):
+                active_url = u
+
+        return {
+            "duration_seconds": duration,
+            "tab_count": tab_count,
+            "final_url": active_url,
+        }
+
+    async def check_and_cleanup_idle_browser(self) -> bool:
+        """检查无活跃上下文时是否达到底层浏览器进程空闲退出阈值，若超时则关闭底层浏览器进程。"""
+        if self.browser_idle_timeout_minutes <= 0:
+            return False
+        if len(self.contexts) > 0:
+            self.last_zero_context_time = None
+            return False
+        if not getattr(self.adapter, "is_running", False):
+            self.last_zero_context_time = None
+            return False
+        if self.last_zero_context_time is None:
+            self.last_zero_context_time = time.time()
+            return False
+
+        idle_seconds = time.time() - self.last_zero_context_time
+        threshold_seconds = self.browser_idle_timeout_minutes * 60
+        if idle_seconds >= threshold_seconds:
+            logger.info(f"[ContextManager] 无活跃上下文已达 {round(idle_seconds / 60, 1)} 分钟，触发底层浏览器进程空闲回收")
+            try:
+                await asyncio.wait_for(self.adapter.stop(), timeout=5.0)
+            except Exception as e:
+                logger.warning(f"[ContextManager] 底层浏览器进程回收异常: {e}")
+            self.last_zero_context_time = None
+            return True
+        return False
+
+    async def close_all_contexts(self, reason: str = "terminate") -> int:
+        """并发总超时批量关闭所有存量活跃上下文并写入 terminate 审计日志。"""
+        if not self.contexts:
+            return 0
+        items = list(self.contexts.items())
+        count = len(items)
+
+        async def _close_single(k, ctx):
+            metrics = self._extract_context_metrics(ctx)
+            metrics["reason"] = reason
+            try:
+                if hasattr(ctx, "browser_context") and ctx.browser_context:
+                    res = ctx.browser_context.close()
+                    if hasattr(res, "__await__"):
+                        await res
+            except Exception as e:
+                logger.debug(f"[ContextManager] 批量关闭单个上下文异常: {e}")
+
+            if self.audit_logger:
+                try:
+                    res = self.audit_logger.log_lifecycle(
+                        session_id=getattr(ctx, "session_id", ""),
+                        context_key=self._format_context_key(k),
+                        owner_id=getattr(ctx, "owner_id", ""),
+                        event_type="terminate",
+                        operator_id="system",
+                        session_name=getattr(ctx, "session_name", ""),
+                        operator_name="system",
+                        owner_name=getattr(ctx, "owner_name", ""),
+                        details=metrics,
+                    )
+                    if hasattr(res, "__await__"):
+                        await res
+                except Exception as le:
+                    logger.debug(f"[ContextManager] 记录批量终止审计异常: {le}")
+
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*[_close_single(k, c) for k, c in items], return_exceptions=True),
+                timeout=5.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("[ContextManager] 批量关闭所有活跃上下文总耗时超过 5 秒，强制结束等待")
+
+        self.contexts.clear()
+        self._creation_locks.clear()
+        self.user_active_pointer.clear()
+        self.last_zero_context_time = None
+        logger.info(f"[ContextManager] 已完成批量关闭所有活跃上下文 (共 {count} 个, 原因: {reason})")
+        return count
 
     def _get_creation_lock(self, key: Any) -> asyncio.Lock:
         """获取指定 Key 的专用创建锁，防并发竞态。"""
@@ -386,6 +527,10 @@ class ContextManager:
                 except Exception as e:
                     logger.warning(f"[ContextManager] 记录上下文创建生命周期审计日志失败: {e}")
 
+            self.last_zero_context_time = None
+            created_key = self._get_context_key(session_id, owner_id)
+            logger.info(f"[ContextManager] 成功创建浏览器上下文: {self._format_context_key(created_key)} (所有者: {owner_id}, 模式: {self.mode})")
+
             return ctx
         except Exception as e:
             if browser_ctx is not None:
@@ -461,11 +606,17 @@ class ContextManager:
             return False, "您当前没有开启任何属于您自己的浏览器上下文"
 
         ctx = self.contexts.pop(key)
+        self._creation_locks.pop(key, None)
+        metrics = self._extract_context_metrics(ctx)
+
         try:
             if hasattr(ctx, "browser_context") and ctx.browser_context:
                 res = ctx.browser_context.close()
                 if hasattr(res, "__await__"):
-                    await res
+                    try:
+                        await asyncio.wait_for(res, timeout=5.0)
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[ContextManager] 关闭用户浏览器上下文超时(5s): {self._format_context_key(key)}")
         except Exception as e:
             logger.warning(f"[ContextManager] 关闭用户浏览器上下文异常: {e}")
 
@@ -474,17 +625,24 @@ class ContextManager:
         for k in to_del:
             del self.user_active_pointer[k]
 
+        if len(self.contexts) == 0:
+            self.last_zero_context_time = time.time()
+
+        context_key_str = self._format_context_key(key)
+        logger.info(f"[ContextManager] 用户主动关闭上下文: {context_key_str} (所有者: {ctx.owner_id}, 存活: {metrics['duration_seconds']}s)")
+
         if self.audit_logger:
             try:
                 res = self.audit_logger.log_lifecycle(
                     session_id=session_id,
-                    context_key=self._format_context_key(key),
+                    context_key=context_key_str,
                     owner_id=ctx.owner_id,
                     event_type="close",
                     operator_id=sender_id,
                     session_name=getattr(ctx, "session_name", ""),
                     operator_name=getattr(ctx, "owner_name", "") if sender_id == ctx.owner_id else "",
                     owner_name=getattr(ctx, "owner_name", ""),
+                    details=metrics,
                 )
                 if hasattr(res, "__await__"):
                     await res
@@ -508,12 +666,23 @@ class ContextManager:
         count = 0
         for k, ctx_timeout in expired_keys:
             ctx = self.contexts.pop(k, None)
+            self._creation_locks.pop(k, None)
             if ctx:
+                metrics = self._extract_context_metrics(ctx)
+                idle_sec = round(now - ctx.last_active_time, 1)
+                metrics["idle_seconds"] = idle_sec
+                idle_min = int(ctx_timeout // 60) if ctx_timeout % 60 == 0 else round(ctx_timeout / 60, 2)
+                metrics["idle_minutes"] = idle_min
+                metrics["configured_timeout_minutes"] = idle_min
+
                 try:
                     if hasattr(ctx, "browser_context") and ctx.browser_context:
                         res = ctx.browser_context.close()
                         if hasattr(res, "__await__"):
-                            await res
+                            try:
+                                await asyncio.wait_for(res, timeout=5.0)
+                            except asyncio.TimeoutError:
+                                logger.warning(f"[ContextManager] 超时清理关闭 BrowserContext 超时(5s): {self._format_context_key(k)}")
                 except Exception as e:
                     logger.warning(f"[ContextManager] 超时清理关闭 BrowserContext 异常: {e}")
                 count += 1
@@ -524,23 +693,29 @@ class ContextManager:
                 for ptr in to_del:
                     del self.user_active_pointer[ptr]
 
+                context_key_str = self._format_context_key(k)
+                logger.info(f"[ContextManager] 空闲超时回收上下文: {context_key_str} (所有者: {getattr(ctx, 'owner_id', '')}, 空闲: {round(idle_sec / 60, 1)}m, 存活: {metrics['duration_seconds']}s)")
+
                 if self.audit_logger:
                     try:
                         res = self.audit_logger.log_lifecycle(
                             session_id=getattr(ctx, "session_id", ""),
-                            context_key=self._format_context_key(k),
+                            context_key=context_key_str,
                             owner_id=getattr(ctx, "owner_id", ""),
                             event_type="timeout",
                             operator_id="system",
                             session_name=getattr(ctx, "session_name", ""),
                             operator_name="system",
                             owner_name=getattr(ctx, "owner_name", ""),
-                            details={"idle_minutes": int(ctx_timeout // 60) if ctx_timeout % 60 == 0 else round(ctx_timeout / 60, 2)},
+                            details=metrics,
                         )
                         if hasattr(res, "__await__"):
                             await res
                     except Exception as e:
                         logger.warning(f"[ContextManager] 记录超时清理生命周期日志失败: {e}")
+
+        if count > 0 and len(self.contexts) == 0:
+            self.last_zero_context_time = time.time()
 
         return count
 
@@ -593,15 +768,27 @@ class ContextManager:
 
         async with lock:
             ctx = self.contexts.pop(key, None)
+            self._creation_locks.pop(key, None)
             if not ctx:
                 return False
+            metrics = self._extract_context_metrics(ctx)
+            metrics["plugin_name"] = plugin_name
+
             try:
                 if hasattr(ctx, "browser_context") and ctx.browser_context:
                     res = ctx.browser_context.close()
                     if hasattr(res, "__await__"):
-                        await res
+                        try:
+                            await asyncio.wait_for(res, timeout=5.0)
+                        except asyncio.TimeoutError:
+                            logger.warning(f"[ContextManager] 释放外部 BrowserContext 超时(5s): {plugin_name}")
             except Exception as e:
                 logger.warning(f"[ContextManager] 释放外部 BrowserContext 异常: {e}")
+
+            if len(self.contexts) == 0:
+                self.last_zero_context_time = time.time()
+
+            logger.info(f"[ContextManager] 释放外部插件专用上下文: {plugin_name} (存活: {metrics['duration_seconds']}s)")
 
             if self.audit_logger:
                 try:
@@ -614,6 +801,7 @@ class ContextManager:
                         session_name=getattr(ctx, "session_name", ""),
                         operator_name=plugin_name,
                         owner_name=getattr(ctx, "owner_name", ""),
+                        details=metrics,
                     )
                     if hasattr(res, "__await__"):
                         await res
@@ -636,11 +824,18 @@ class ContextManager:
             return False, f"未找到上下文: {context_key}"
 
         self.contexts.pop(target_k, None)
+        self._creation_locks.pop(target_k, None)
+        metrics = self._extract_context_metrics(target_ctx)
+        metrics["operator"] = operator_id
+
         try:
             if hasattr(target_ctx, "browser_context") and target_ctx.browser_context:
                 res = target_ctx.browser_context.close()
                 if hasattr(res, "__await__"):
-                    await res
+                    try:
+                        await asyncio.wait_for(res, timeout=5.0)
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[ContextManager] 强制终止 BrowserContext 超时(5s): {context_key}")
         except Exception as e:
             logger.warning(f"[ContextManager] 强制终止 BrowserContext 异常: {e}")
 
@@ -653,18 +848,24 @@ class ContextManager:
         for k in to_del:
             del self.user_active_pointer[k]
 
+        if len(self.contexts) == 0:
+            self.last_zero_context_time = time.time()
+
+        context_key_str = self._format_context_key(target_k)
+        logger.info(f"[ContextManager] 操作人 {operator_id} 强制终止上下文: {context_key_str} (所有者: {owner_id}, 存活: {metrics['duration_seconds']}s)")
+
         if self.audit_logger:
             try:
                 res = self.audit_logger.log_lifecycle(
                     session_id=session_id,
-                    context_key=self._format_context_key(target_k),
+                    context_key=context_key_str,
                     owner_id=owner_id,
                     event_type="force_kill",
                     operator_id=operator_id,
                     session_name=getattr(target_ctx, "session_name", ""),
                     operator_name=operator_id,
                     owner_name=getattr(target_ctx, "owner_name", ""),
-                    details={"operator": operator_id},
+                    details=metrics,
                 )
                 if hasattr(res, "__await__"):
                     await res

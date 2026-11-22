@@ -381,6 +381,38 @@ class TestAuditLogger(unittest.TestCase):
         logs_specific, total_specific = run_coro(self.logger.query_lifecycle_logs(event_type="created"))
         self.assertEqual(total_specific, 1)
 
+    def test_lifecycle_terminate_and_rich_details(self):
+        run_coro(self.logger.log_lifecycle(
+            session_id="s_term",
+            context_key="s_term:u_term",
+            owner_id="u_term",
+            event_type="terminate",
+            operator_id="system",
+            session_name="重载测试群",
+            operator_name="system",
+            owner_name="测试用户",
+            details={
+                "reason": "plugin_reload",
+                "duration_seconds": 128.5,
+                "tab_count": 3,
+                "final_url": "https://example.com/dashboard"
+            }
+        ))
+        items, total = run_coro(self.logger.query_lifecycle_logs(event_type="terminate"))
+        self.assertEqual(total, 1)
+        self.assertEqual(items[0]["event_type"], "terminate")
+        self.assertEqual(items[0]["context_key"], "s_term:u_term")
+        details = json.loads(items[0]["details"])
+        self.assertEqual(details["reason"], "plugin_reload")
+        self.assertEqual(details["duration_seconds"], 128.5)
+        self.assertEqual(details["tab_count"], 3)
+        self.assertEqual(details["final_url"], "https://example.com/dashboard")
+
+        # 关键词搜索匹配 details 中的内容
+        items_kw, total_kw = run_coro(self.logger.query_lifecycle_logs(keyword="plugin_reload"))
+        self.assertEqual(total_kw, 1)
+        self.assertEqual(items_kw[0]["event_type"], "terminate")
+
 try:
     import pytest
 except ImportError:

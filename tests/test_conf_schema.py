@@ -37,6 +37,13 @@ class TestConfSchema(unittest.TestCase):
         self.assertIn("slider", rt["tool_execution_timeout_seconds"])
         self.assertEqual(rt["tool_execution_timeout_seconds"]["slider"]["min"], 5)
 
+        # 验证底层浏览器进程空闲退出配置
+        self.assertIn("browser_idle_timeout_minutes", rt)
+        self.assertEqual(rt["browser_idle_timeout_minutes"]["type"], "int")
+        self.assertEqual(rt["browser_idle_timeout_minutes"]["default"], 5)
+        self.assertEqual(rt["browser_idle_timeout_minutes"]["slider"]["min"], 0)
+        self.assertEqual(rt["browser_idle_timeout_minutes"]["slider"]["max"], 120)
+
         # 4. 长截图的高度限制和超时时间使用拉杆调节
         med = schema["media"]["items"]
         self.assertEqual(med["screenshot_max_height_px"]["type"], "int")

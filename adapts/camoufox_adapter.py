@@ -17,6 +17,8 @@ try:
 except ImportError:
     AsyncCamoufox = None
 
+from astrbot.api import logger
+
 class CamoufoxAdapter(BrowserAdapterBase):
     """基于 Camoufox 的异步浏览器适配器。"""
 
@@ -58,6 +60,16 @@ class CamoufoxAdapter(BrowserAdapterBase):
         self._camoufox_cm = AsyncCamoufox(headless=self.headless, geoip=self.geoip)
         self._browser = await self._camoufox_cm.__aenter__()
 
+        if hasattr(self._browser, "on"):
+            def _on_disconnected():
+                logger.warning("[CamoufoxAdapter] 检测到底层浏览器进程已断开/崩溃")
+                self._browser = None
+                self._trigger_disconnect_callbacks()
+            try:
+                self._browser.on("disconnected", _on_disconnected)
+            except Exception as e:
+                logger.debug(f"[CamoufoxAdapter] 注册 disconnected 事件监听异常: {e}")
+
     async def stop(self) -> None:
         """关闭浏览器并释放资源。"""
         if self._camoufox_cm is not None:
@@ -69,7 +81,7 @@ class CamoufoxAdapter(BrowserAdapterBase):
 
     async def create_context(self, storage_state_path: str | None = None) -> "BrowserContext":
         """创建独立的 BrowserContext，若 storage_state 文件有效且存在则注入。"""
-        if self._browser is None:
+        if not self.is_running:
             await self.start()
 
         kwargs = {}
