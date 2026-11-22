@@ -55,8 +55,22 @@ class TestConfSchema(unittest.TestCase):
         self.assertEqual(rule_items["allowed_actions"]["type"], "list")
         self.assertEqual(
             rule_items["allowed_actions"]["options"],
-            ["read", "click", "fill", "scroll", "screenshot", "download"],
+            [
+                "read",
+                "click",
+                "fill",
+                "select",
+                "hover",
+                "focus",
+                "drag",
+                "press_key",
+                "scroll",
+                "screenshot",
+                "screenshot_full",
+                "download",
+            ],
         )
+        self.assertEqual(len(rule_items["allowed_actions"]["labels"]), 12)
 
         # 6. 浏览器适配器为下拉框选择
         br = schema["browser"]["items"]

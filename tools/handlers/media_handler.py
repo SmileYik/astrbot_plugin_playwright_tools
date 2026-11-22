@@ -328,7 +328,7 @@ class MediaHandler(BaseActionHandler):
             target_resource="",
             action_coro_fn=_full_shot,
             input_args={"target": target, "max_height_px": max_height_px},
-            required_permission="screenshot",
+            required_permission="screenshot_full",
             session_name=session_name,
             sender_name=sender_name,
             action_desc="长截图",

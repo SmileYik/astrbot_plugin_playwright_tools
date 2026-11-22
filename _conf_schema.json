@@ -51,16 +51,28 @@
                   "read",
                   "click",
                   "fill",
+                  "select",
+                  "hover",
+                  "focus",
+                  "drag",
+                  "press_key",
                   "scroll",
                   "screenshot",
+                  "screenshot_full",
                   "download"
                 ],
                 "labels": [
                   "读取文本 (read)",
                   "点击交互 (click)",
                   "输入表单 (fill)",
+                  "下拉选择 (select)",
+                  "鼠标悬停 (hover)",
+                  "焦点控制 (focus)",
+                  "元素拖拽 (drag)",
+                  "键盘按键 (press_key)",
                   "页面滚动 (scroll)",
-                  "页面截图 (screenshot)",
+                  "视口截图 (screenshot)",
+                  "全页长截图 (screenshot_full)",
                   "下载文件 (download)"
                 ]
               }

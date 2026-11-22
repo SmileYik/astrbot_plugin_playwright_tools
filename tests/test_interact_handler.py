@@ -198,6 +198,40 @@ class TestInteractHandler(unittest.TestCase):
         res_press = run_coro(self.handler.press_key("s1", "u1", key="Enter"))
         self.assertIn("按键失败: 没有权限", res_press)
 
+    def test_interact_handler_subdivided_permissions(self):
+        calls = []
+        def record_perm(user_id, url, action):
+            calls.append(action)
+            return True, ""
+        self.mock_sec.check_permission.side_effect = record_perm
+
+        run_coro(self.handler.click("s1", "u1", ref="1"))
+        self.assertEqual(calls[-1], "click")
+
+        run_coro(self.handler.fill_form("s1", "u1", ref="3", text="abc"))
+        self.assertEqual(calls[-1], "fill")
+
+        run_coro(self.handler.select_option("s1", "u1", ref="4", value="opt1"))
+        self.assertEqual(calls[-1], "select")
+
+        run_coro(self.handler.hover("s1", "u1", ref="1"))
+        self.assertEqual(calls[-1], "hover")
+
+        run_coro(self.handler.focus("s1", "u1", ref="1"))
+        self.assertEqual(calls[-1], "focus")
+
+        run_coro(self.handler.blur("s1", "u1", ref="1"))
+        self.assertEqual(calls[-1], "focus")
+
+        run_coro(self.handler.drag("s1", "u1", ref="1", target_ref="2"))
+        self.assertEqual(calls[-1], "drag")
+
+        run_coro(self.handler.press_key("s1", "u1", key="Enter"))
+        self.assertEqual(calls[-1], "press_key")
+
+        run_coro(self.handler.scroll("s1", "u1"))
+        self.assertEqual(calls[-1], "scroll")
+
     def test_clean_playwright_error_strips_call_log(self):
         raw_error = Exception(
             "Locator.click: Timeout 10000ms exceeded.\n"

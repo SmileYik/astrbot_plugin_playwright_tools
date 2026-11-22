@@ -372,5 +372,26 @@ class TestMediaHandler(unittest.TestCase):
         run_coro(handler.download_file("s1", "u1", ref=999))
         self.assertEqual(cleanup_mock.call_count, 3)
 
+    def test_media_handler_subdivided_permissions(self):
+        calls = []
+        def record_perm(user_id, url, action):
+            calls.append(action)
+            return True, ""
+        self.mock_sec.check_permission.side_effect = record_perm
+
+        async def mock_screenshot(**kwargs):
+            return b"shot"
+        self.mock_page.screenshot = mock_screenshot
+
+        run_coro(self.handler.screenshot_viewport("s1", "u1", target="chat"))
+        self.assertEqual(calls[-1], "screenshot")
+
+        async def mock_eval(script):
+            return 1000
+        self.mock_page.evaluate = mock_eval
+
+        run_coro(self.handler.screenshot_full("s1", "u1", target="chat"))
+        self.assertEqual(calls[-1], "screenshot_full")
+
 if __name__ == "__main__":
     unittest.main()
