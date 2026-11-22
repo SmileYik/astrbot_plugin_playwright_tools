@@ -175,6 +175,20 @@ class TestPluginMain(unittest.TestCase):
         self.assertIn("pw_interact", tool_names)
         self.assertIn("pw_media", tool_names)
 
+    def test_service_api_attached_and_readiness(self):
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / "service_test.db")
+        mock_ctx = MagicMock()
+        mock_ctx.add_llm_tools = MagicMock()
+        plugin = main.PlaywrightToolPlugin(mock_ctx, config={"audit_db_path": db_file})
+        self.assertIsNotNone(getattr(plugin, "service", None))
+        self.assertFalse(plugin.service.ready)
+        import asyncio
+        asyncio.run(plugin.initialize())
+        self.assertTrue(plugin.service.ready)
+        if plugin._cleanup_task and not plugin._cleanup_task.done():
+            plugin._cleanup_task.cancel()
+
     def test_plugin_init_custom_extraction_and_security_configs(self):
         TEMP_DIR.mkdir(parents=True, exist_ok=True)
         db_file = str(TEMP_DIR / "custom_cfg_test.db")

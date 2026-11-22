@@ -14,6 +14,7 @@ from .core.audit_logger import AuditLogger
 from .core.security_manager import SecurityManager
 from .core.readers import InlineMarkdownReader, AriaSnapshotReader
 from .core.context_manager import ContextManager
+from .core.service_api import PlaywrightServiceAPI
 from .adapts.factory import AdapterFactory
 
 from .tools.handlers.page_handler import PageHandler
@@ -174,6 +175,9 @@ class PlaywrightToolPlugin(Star):
         self._retention_days = retention_days
         self._cleanup_task: asyncio.Task | None = None
 
+        # 6. 初始化跨插件浏览器共享服务基座
+        self.service = PlaywrightServiceAPI(self, self.context_manager)
+
     def _sync_event_admin(self, event: AstrMessageEvent) -> None:
         """从当前消息事件中提取并动态同步全局管理员标识。"""
         try:
@@ -198,6 +202,7 @@ class PlaywrightToolPlugin(Star):
         except Exception as e:
             logger.warning(f"[PlaywrightTool] 审计日志清理失败: {e}")
 
+        self.service.set_ready()
         self._cleanup_task = asyncio.create_task(self._periodic_cleanup_loop())
 
     async def _periodic_cleanup_loop(self):
