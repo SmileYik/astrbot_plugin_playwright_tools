@@ -350,5 +350,48 @@ class TestContextManager(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(ctx.current_snapshot)
         self.assertEqual(ctx.ref_map, {})
 
+    async def test_contexts_with_different_idle_timeouts_cleaned_properly(self):
+        import time
+        ctx1 = await self.mgr._create_new_context("s1", "u1", idle_timeout_seconds=5.0)
+        ctx2 = await self.mgr._create_new_context("s2", "u2", idle_timeout_seconds=300.0)
+        self.mgr.contexts[("s1", "u1")] = ctx1
+        self.mgr.contexts[("s2", "u2")] = ctx2
+
+        # Simulate 10 seconds of idle time
+        ctx1.last_active_time = time.time() - 10
+        ctx2.last_active_time = time.time() - 10
+
+        cleaned_count = await self.mgr.cleanup_idle_contexts()
+        self.assertEqual(cleaned_count, 1)
+        self.assertNotIn(("s1", "u1"), self.mgr.contexts)
+        self.assertIn(("s2", "u2"), self.mgr.contexts)
+
+    async def test_concurrent_context_creation_produces_single_instance(self):
+        import asyncio
+        slow_adapter = MagicMock()
+        mock_b_ctx = MagicMock()
+        mock_b_ctx.new_page = AsyncMock(return_value=MagicMock())
+        mock_b_ctx.on = MagicMock()
+
+        create_count = 0
+        async def slow_create(storage_state_path=None):
+            nonlocal create_count
+            create_count += 1
+            await asyncio.sleep(0.02)
+            return mock_b_ctx
+
+        slow_adapter.create_context = slow_create
+        mgr = ContextManager(adapter=slow_adapter, security=MagicMock(), mode="session")
+
+        results = await asyncio.gather(*[
+            mgr.resolve_context("concurrent_session", f"user_{i}")
+            for i in range(10)
+        ])
+
+        contexts = [r[0] for r in results]
+        self.assertIsNotNone(contexts[0])
+        self.assertTrue(all(c is contexts[0] for c in contexts))
+        self.assertEqual(create_count, 1)
+
 if __name__ == "__main__":
     unittest.main()

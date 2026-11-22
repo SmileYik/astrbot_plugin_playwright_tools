@@ -75,6 +75,14 @@ class ContextManager:
         self.audit_logger = audit_logger
         self.contexts: dict[Any, BrowserSessionContext] = {}
         self.user_active_pointer: dict[tuple[str, str], str] = {}
+        self._creation_locks: dict[Any, asyncio.Lock] = {}
+        self._global_lock = asyncio.Lock()
+
+    def _get_creation_lock(self, key: Any) -> asyncio.Lock:
+        """获取指定 Key 的专用创建锁，防并发竞态。"""
+        if key not in self._creation_locks:
+            self._creation_locks[key] = asyncio.Lock()
+        return self._creation_locks[key]
 
     def _get_context_key(self, session_id: str, owner_id: str) -> Any:
         return (session_id, owner_id) if self.mode == "personal" else session_id
@@ -155,10 +163,13 @@ class ContextManager:
             if key not in self.contexts:
                 if peek:
                     return None, ""
-                if self.security.admin_only and not self.security.is_admin(sender_id):
-                    return None, "拒绝访问：当前插件已配置为仅管理员可用"
-                ctx = await self._create_new_context(session_id, sender_id, session_name=session_name, owner_name=sender_name)
-                self.contexts[key] = ctx
+                lock = self._get_creation_lock(key)
+                async with lock:
+                    if key not in self.contexts:
+                        if self.security.admin_only and not self.security.is_admin(sender_id):
+                            return None, "拒绝访问：当前插件已配置为仅管理员可用"
+                        ctx = await self._create_new_context(session_id, sender_id, session_name=session_name, owner_name=sender_name)
+                        self.contexts[key] = ctx
             context = self.contexts[key]
             if session_name and not getattr(context, "session_name", ""):
                 context.session_name = session_name
@@ -217,8 +228,12 @@ class ContextManager:
             return None, "拒绝访问：当前插件已配置为仅管理员可用"
 
         # 4. 自身新建个人上下文
-        new_ctx = await self._create_new_context(session_id, sender_id, session_name=session_name, owner_name=sender_name)
-        self.contexts[own_key] = new_ctx
+        lock = self._get_creation_lock(own_key)
+        async with lock:
+            if own_key not in self.contexts:
+                new_ctx = await self._create_new_context(session_id, sender_id, session_name=session_name, owner_name=sender_name)
+                self.contexts[own_key] = new_ctx
+            new_ctx = self.contexts[own_key]
         new_ctx.touch()
         return new_ctx, ""
 
@@ -228,6 +243,9 @@ class ContextManager:
         owner_id: str,
         session_name: str = "",
         owner_name: str = "",
+        is_external: bool = False,
+        plugin_name: str = "",
+        idle_timeout_seconds: float | None = None,
     ) -> BrowserSessionContext:
         """根据所有者权限创建底层 BrowserContext、路由守卫与首个 Page。"""
         state_to_inject = None
@@ -240,32 +258,32 @@ class ContextManager:
 
             ctx_box: list[BrowserSessionContext | None] = [None]
 
-            # 挂载顶层导航路由拦截守卫 (Navigation Guard)
-            async def _route_guard(route, request):
-                try:
-                    cur_ctx = ctx_box[0]
-                    if cur_ctx and getattr(cur_ctx, "is_external", False):
-                        await route.continue_()
-                        return
-
-                    is_nav = request.is_navigation_request() if hasattr(request, "is_navigation_request") else False
-                    if is_nav:
-                        if self.mode == "session":
-                            op_id = getattr(cur_ctx, "current_operator_id", "") if cur_ctx else ""
-                            allowed, _ = self.security.is_url_allowed_navigation(op_id, request.url)
-                        else:
-                            allowed, _ = self.security.is_url_allowed_navigation(owner_id, request.url)
-                        if not allowed:
-                            await route.abort()
-                            return
-                    await route.continue_()
-                except Exception:
+            # 挂载顶层导航路由拦截守卫 (Navigation Guard，外部插件跳过)
+            if not is_external and hasattr(browser_ctx, "route"):
+                async def _route_guard(route, request):
                     try:
+                        cur_ctx = ctx_box[0]
+                        if cur_ctx and getattr(cur_ctx, "is_external", False):
+                            await route.continue_()
+                            return
+
+                        is_nav = request.is_navigation_request() if hasattr(request, "is_navigation_request") else False
+                        if is_nav:
+                            if self.mode == "session":
+                                op_id = getattr(cur_ctx, "current_operator_id", "") if cur_ctx else ""
+                                allowed, _ = self.security.is_url_allowed_navigation(op_id, request.url)
+                            else:
+                                allowed, _ = self.security.is_url_allowed_navigation(owner_id, request.url)
+                            if not allowed:
+                                await route.abort()
+                                return
                         await route.continue_()
                     except Exception:
-                        pass
+                        try:
+                            await route.continue_()
+                        except Exception:
+                            pass
 
-            if hasattr(browser_ctx, "route"):
                 try:
                     res_route = browser_ctx.route("**/*", _route_guard)
                     if hasattr(res_route, "__await__"):
@@ -274,6 +292,13 @@ class ContextManager:
                     pass
 
             first_page = await browser_ctx.new_page()
+
+            if idle_timeout_seconds is not None:
+                ctx_timeout = float(idle_timeout_seconds)
+            elif self.idle_timeout_minutes > 0:
+                ctx_timeout = float(self.idle_timeout_minutes * 60)
+            else:
+                ctx_timeout = 0.0
 
             ctx = BrowserSessionContext(
                 session_id=session_id,
@@ -284,8 +309,22 @@ class ContextManager:
                 allowed_users={owner_id},
                 session_name=session_name,
                 owner_name=owner_name,
+                is_external=is_external,
+                plugin_name=plugin_name,
+                idle_timeout_seconds=ctx_timeout,
             )
             ctx_box[0] = ctx
+
+            # 外部插件原生事件静默感知保活
+            if is_external and hasattr(browser_ctx, "on"):
+                def _touch(*args, **kwargs):
+                    ctx.touch()
+                try:
+                    browser_ctx.on("page", lambda p: _touch())
+                    browser_ctx.on("request", lambda req: _touch())
+                    browser_ctx.on("response", lambda resp: _touch())
+                except Exception:
+                    pass
 
             def _setup_page_listeners(page):
                 def _on_frame_nav(frame):
@@ -456,19 +495,19 @@ class ContextManager:
         return True, "已成功关闭并释放您的浏览器上下文"
 
     async def cleanup_idle_contexts(self) -> int:
-        """检查并自动销毁超时的空闲上下文，返回销毁数量。"""
-        if self.idle_timeout_minutes <= 0:
-            return 0
-
+        """检查并自动销毁超时的空闲上下文，按每个上下文的独立超时配置精准淘汰，返回销毁数量。"""
         now = time.time()
-        timeout_seconds = self.idle_timeout_minutes * 60
-        expired_keys = [
-            k for k, ctx in self.contexts.items()
-            if (now - ctx.last_active_time) > timeout_seconds
-        ]
+        expired_keys = []
+        for k, ctx in list(self.contexts.items()):
+            ctx_timeout = getattr(ctx, "idle_timeout_seconds", 0.0)
+            if ctx_timeout <= 0 and self.idle_timeout_minutes > 0:
+                ctx_timeout = float(self.idle_timeout_minutes * 60)
+
+            if ctx_timeout > 0 and (now - ctx.last_active_time) > ctx_timeout:
+                expired_keys.append((k, ctx_timeout))
 
         count = 0
-        for k in expired_keys:
+        for k, ctx_timeout in expired_keys:
             ctx = self.contexts.pop(k, None)
             if ctx:
                 try:
@@ -497,12 +536,91 @@ class ContextManager:
                             session_name=getattr(ctx, "session_name", ""),
                             operator_name="system",
                             owner_name=getattr(ctx, "owner_name", ""),
-                            details={"idle_minutes": self.idle_timeout_minutes},
+                            details={"idle_minutes": int(ctx_timeout // 60) if ctx_timeout % 60 == 0 else round(ctx_timeout / 60, 2)},
                         )
                         if hasattr(res, "__await__"):
                             await res
                     except Exception:
                         pass
+
+        return count
+
+    async def get_or_create_external_context(
+        self,
+        plugin_name: str,
+        idle_timeout_minutes: int | None = None,
+        clean: bool = False,
+    ) -> BrowserSessionContext:
+        """为外部插件获取或创建专用 BrowserSessionContext，支持并发防重与独立超时。"""
+        plugin_name = str(plugin_name or "unknown_plugin").strip()
+        key = ("external", plugin_name)
+        lock = self._get_creation_lock(key)
+
+        async with lock:
+            if clean and key in self.contexts:
+                old_ctx = self.contexts.pop(key, None)
+                if old_ctx and hasattr(old_ctx, "browser_context") and old_ctx.browser_context:
+                    try:
+                        res = old_ctx.browser_context.close()
+                        if hasattr(res, "__await__"):
+                            await res
+                    except Exception:
+                        pass
+
+            if key not in self.contexts:
+                timeout_sec = None
+                if idle_timeout_minutes is not None:
+                    timeout_sec = float(idle_timeout_minutes * 60)
+                ctx = await self._create_new_context(
+                    session_id=f"ext_{plugin_name}",
+                    owner_id=f"plugin_{plugin_name}",
+                    session_name=f"External Context [{plugin_name}]",
+                    owner_name=plugin_name,
+                    is_external=True,
+                    plugin_name=plugin_name,
+                    idle_timeout_seconds=timeout_sec,
+                )
+                self.contexts[key] = ctx
+
+            ctx = self.contexts[key]
+            ctx.touch()
+            return ctx
+
+    async def release_external_context(self, plugin_name: str) -> bool:
+        """释放指定外部插件的专用上下文。"""
+        plugin_name = str(plugin_name or "unknown_plugin").strip()
+        key = ("external", plugin_name)
+        lock = self._get_creation_lock(key)
+
+        async with lock:
+            ctx = self.contexts.pop(key, None)
+            if not ctx:
+                return False
+            try:
+                if hasattr(ctx, "browser_context") and ctx.browser_context:
+                    res = ctx.browser_context.close()
+                    if hasattr(res, "__await__"):
+                        await res
+            except Exception:
+                pass
+
+            if self.audit_logger:
+                try:
+                    res = self.audit_logger.log_lifecycle(
+                        session_id=getattr(ctx, "session_id", ""),
+                        context_key=self._format_context_key(key),
+                        owner_id=getattr(ctx, "owner_id", ""),
+                        event_type="release",
+                        operator_id=f"plugin_{plugin_name}",
+                        session_name=getattr(ctx, "session_name", ""),
+                        operator_name=plugin_name,
+                        owner_name=getattr(ctx, "owner_name", ""),
+                    )
+                    if hasattr(res, "__await__"):
+                        await res
+                except Exception:
+                    pass
+            return True
 
         return count
 
