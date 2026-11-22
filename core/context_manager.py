@@ -260,21 +260,16 @@ class ContextManager:
         try:
             browser_ctx = await self.adapter.create_context(storage_state_path=state_to_inject)
 
-            ctx_box: list[BrowserSessionContext | None] = [None]
+            ctx: BrowserSessionContext | None = None
 
             # 挂载顶层导航路由拦截守卫 (Navigation Guard，外部插件跳过)
             if not is_external and hasattr(browser_ctx, "route"):
                 async def _route_guard(route, request):
                     try:
-                        cur_ctx = ctx_box[0]
-                        if cur_ctx and getattr(cur_ctx, "is_external", False):
-                            await route.continue_()
-                            return
-
                         is_nav = request.is_navigation_request() if hasattr(request, "is_navigation_request") else False
                         if is_nav:
                             if self.mode == "session":
-                                op_id = getattr(cur_ctx, "current_operator_id", "") if cur_ctx else ""
+                                op_id = getattr(ctx, "current_operator_id", "") if ctx else ""
                                 allowed, _ = self.security.is_url_allowed_navigation(op_id, request.url)
                             else:
                                 allowed, _ = self.security.is_url_allowed_navigation(owner_id, request.url)
@@ -318,7 +313,6 @@ class ContextManager:
                 plugin_name=plugin_name,
                 idle_timeout_seconds=ctx_timeout,
             )
-            ctx_box[0] = ctx
 
             # 外部插件原生事件静默感知保活
             if is_external and hasattr(browser_ctx, "on"):
