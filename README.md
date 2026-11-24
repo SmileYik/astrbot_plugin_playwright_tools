@@ -38,13 +38,17 @@
 ### 1. 环境要求
 - Python 3.10+
 - AstrBot v3.4.0+
+- playwright v1.62.0
 
 ### 2. 依赖安装
 推荐安装具备反反爬指纹伪装的 Camoufox 驱动：
 
 ```bash
 pip install "camoufox[geoip]"
+camoufox fetch
 ```
+
+可以前往文档查看 [Camoufox](https://camoufox.com/python/installation/) 的更多安装信息。
 
 若使用原生 Playwright 引擎（Chromium / Firefox / WebKit）：
 
