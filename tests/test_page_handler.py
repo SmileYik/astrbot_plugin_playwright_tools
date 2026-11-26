@@ -205,5 +205,29 @@ class TestPageHandler(unittest.TestCase):
         self.assertIn("https://example.com/detail", res_both)
         self.assertIn("https://example.com/preview.png", res_both)
 
+    def test_read_page_input_args_ref_handling(self):
+        captured_input_args = []
+        original_execute_action = self.handler.execute_action
+
+        async def spy_execute_action(*args, **kwargs):
+            captured_input_args.append(kwargs.get("input_args", {}))
+            return await original_execute_action(*args, **kwargs)
+
+        self.handler.execute_action = spy_execute_action
+
+        # 1. 默认无 ref 调用，input_args 中绝不应包含 ref (避免触发 DOM 探测)
+        run_coro(self.handler.read_page("s1", "u1", page=1))
+        self.assertNotIn("ref", captured_input_args[-1])
+
+        # 2. 传入全空白字符 ref，同样被清理剔除
+        run_coro(self.handler.read_page("s1", "u1", page=1, ref="   "))
+        self.assertNotIn("ref", captured_input_args[-1])
+
+        # 3. 传入有效 ref，input_args 应包含清理后的 ref
+        run_coro(self.handler.read_page("s1", "u1", ref="  123  "))
+        self.assertIn("ref", captured_input_args[-1])
+        self.assertEqual(captured_input_args[-1]["ref"], "123")
+
+
 if __name__ == "__main__":
     unittest.main()

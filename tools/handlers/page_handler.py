@@ -126,6 +126,7 @@ class PageHandler(BaseActionHandler):
         **kwargs,
     ) -> str:
         """读取当前页面的内容与可交互操作元素（支持懒加载快照缓存、四重失效判定、关键词定位与 Ref 详情查询）。"""
+        clean_ref = str(ref or kwargs.get("ref") or "").strip()
 
         async def _read(ctx: BrowserSessionContext, cur_page: Page) -> str:
             current_url = getattr(cur_page, "url", "")
@@ -230,13 +231,21 @@ class PageHandler(BaseActionHandler):
             else:
                 return self.reader.format_chunk(ctx.current_snapshot, page)
 
+        read_input_args = {
+            "page": page,
+            "keyword": keyword,
+            "refresh": refresh,
+        }
+        if clean_ref:
+            read_input_args["ref"] = clean_ref
+
         return await self.execute_action(
             session_id=session_id,
             sender_id=sender_id,
             action_name="read_page",
             target_resource="",
             action_coro_fn=_read,
-            input_args={"page": page, "keyword": keyword, "refresh": refresh, "ref": str(ref or kwargs.get("ref") or "").strip()},
+            input_args=read_input_args,
             required_permission="read",
             session_name=session_name,
             sender_name=sender_name,

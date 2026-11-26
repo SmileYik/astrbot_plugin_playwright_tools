@@ -327,6 +327,65 @@ class TestBaseActionHandler(unittest.IsolatedAsyncioTestCase):
 
         self.handler.wait_page_stable.assert_awaited_once_with(self.mock_page)
 
+    async def test_empty_ref_or_no_secret_input_does_not_trigger_locator_probe(self):
+        action_fn = AsyncMock(return_value="success")
+
+        # 1. ref 为空字符串且无敏感输入
+        self.mock_page.locator.reset_mock()
+        await self.handler.execute_action(
+            session_id="s1",
+            sender_id="u1",
+            action_name="read_page",
+            target_resource="",
+            action_coro_fn=action_fn,
+            input_args={"page": 1, "keyword": "", "refresh": False, "ref": ""},
+            required_permission="read",
+        )
+        self.mock_page.locator.assert_not_called()
+
+        # 2. ref 非空但无敏感文本输入项（如普通点击），不应探测 DOM
+        self.mock_page.locator.reset_mock()
+        await self.handler.execute_action(
+            session_id="s1",
+            sender_id="u1",
+            action_name="click",
+            target_resource="",
+            action_coro_fn=action_fn,
+            input_args={"ref": "1"},
+            required_permission="click",
+        )
+        self.mock_page.locator.assert_not_called()
+
+        # 3. ref 非空且包含待填入的敏感文本，应当触发探测
+        self.mock_page.locator.reset_mock()
+        await self.handler.execute_action(
+            session_id="s1",
+            sender_id="u1",
+            action_name="fill",
+            target_resource="",
+            action_coro_fn=action_fn,
+            input_args={"ref": "2", "text": "secret123"},
+            required_permission="fill",
+        )
+        self.mock_page.locator.assert_called_once_with('[data-astr-ref="2"]')
+
+    async def test_locator_probe_timeout_handled_gracefully(self):
+        self.mock_context.ref_map = {}
+        self.mock_locator.get_attribute = AsyncMock(side_effect=TimeoutError("Timeout exceeded"))
+        action_fn = AsyncMock(return_value="executed_successfully")
+
+        res = await self.handler.execute_action(
+            session_id="s1",
+            sender_id="u1",
+            action_name="fill",
+            target_resource="",
+            action_coro_fn=action_fn,
+            input_args={"ref": "99", "text": "password"},
+            required_permission="fill",
+        )
+        self.assertEqual(res, "executed_successfully")
+        action_fn.assert_awaited_once()
+
     def test_clean_playwright_error_patterns(self):
         # 1. Overlay intercepts pointer events
         e1 = Exception('<button class="submit"> intercepts pointer events')

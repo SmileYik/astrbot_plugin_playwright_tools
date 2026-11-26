@@ -508,6 +508,30 @@ class TestTools(unittest.TestCase):
         self.assertEqual(logged_kwargs.get("session_name"), "测试群")
         self.assertEqual(logged_kwargs.get("sender_name"), "测试者")
 
+    def test_read_tool_omits_empty_ref_arg(self):
+        called_kwargs = {}
+        async def mock_read(s_id, u_id, **kwargs):
+            called_kwargs.update(kwargs)
+            return "ok"
+        self.mock_page_handler.read_page = mock_read
+
+        # 1. 不传 ref
+        with patch("asyncio.wait_for", fake_wait_for):
+            run_coro(self.read_tool.call(self.mock_context_wrapper, page=1))
+        self.assertNotIn("ref", called_kwargs)
+
+        # 2. 传空字符串 ref
+        called_kwargs.clear()
+        with patch("asyncio.wait_for", fake_wait_for):
+            run_coro(self.read_tool.call(self.mock_context_wrapper, page=1, ref="   "))
+        self.assertNotIn("ref", called_kwargs)
+
+        # 3. 传有效 ref
+        called_kwargs.clear()
+        with patch("asyncio.wait_for", fake_wait_for):
+            run_coro(self.read_tool.call(self.mock_context_wrapper, page=1, ref="e5"))
+        self.assertEqual(called_kwargs.get("ref"), "e5")
+
 
 if __name__ == "__main__":
     unittest.main()

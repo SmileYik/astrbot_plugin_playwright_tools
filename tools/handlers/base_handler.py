@@ -179,23 +179,29 @@ class BaseActionHandler:
         input_args = dict(input_args or {})
         audit_input_args = dict(input_args)
 
-        # 密码类型探测
+        # 密码类型探测：仅在存在可能包含密码明文的待脱敏入参（如 text, value, password）且指定了有效非空 ref 时才探测
         is_password = False
-        ref = input_args.get("ref")
-        if ref is not None:
+        has_secret_input = any(key in audit_input_args for key in ("text", "value", "password"))
+        raw_ref = input_args.get("ref")
+        clean_ref_str = str(raw_ref).strip() if raw_ref is not None else ""
+
+        if has_secret_input and clean_ref_str:
             ref_map = getattr(ctx, "ref_map", {}) or {}
-            el_info = ref_map.get(ref) or ref_map.get(str(ref))
+            el_info = ref_map.get(clean_ref_str) or ref_map.get(raw_ref)
             if isinstance(el_info, dict) and el_info.get("type") == "password":
                 is_password = True
             elif page is not None and hasattr(page, "locator"):
                 try:
-                    ref_str = str(ref)
-                    if ref_str.startswith("e") or (ref_str.startswith("f") and "e" in ref_str):
-                        loc = page.locator(f"aria-ref={ref_str}")
+                    if clean_ref_str.startswith("e") or (clean_ref_str.startswith("f") and "e" in clean_ref_str):
+                        loc = page.locator(f"aria-ref={clean_ref_str}")
                     else:
-                        loc = page.locator(f'[data-astr-ref="{ref_str}"]')
+                        loc = page.locator(f'[data-astr-ref="{clean_ref_str}"]')
                     if hasattr(loc, "get_attribute"):
-                        attr_val = loc.get_attribute("type")
+                        try:
+                            # 增加超时限制 (500ms)，避免无效 ref 触发 Playwright 默认 30s 等待挂死
+                            attr_val = loc.get_attribute("type", timeout=500)
+                        except TypeError:
+                            attr_val = loc.get_attribute("type")
                         if inspect.isawaitable(attr_val):
                             attr_val = await attr_val
                         if attr_val == "password":
