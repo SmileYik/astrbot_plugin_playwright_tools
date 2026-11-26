@@ -57,6 +57,65 @@ class TestInlineMarkdownReader(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[历史版本目录][2]", "".join(chunks))
         self.assertIn("[分页:", chunks[0])
 
+    def test_chunk_blocks_table_header_repetition(self):
+        reader = InlineMarkdownReader(chunk_char_limit=450)
+        # 构造一个 20 行的表格
+        header = "| 序号 | 名称 | 描述 |"
+        separator = "| --- | --- | --- |"
+        rows = [f"| {i} | [条目{i}][{i}] | 这是关于第{i}项的长文本详细说明信息 |" for i in range(1, 21)]
+        table_block = "\n".join([header, separator] + rows)
+
+        chunks = reader._chunk_blocks([table_block], url="https://example.com", title="表格测试")
+        self.assertGreater(len(chunks), 1)
+
+        # 验证每一个切片分页都包含完整的表头与分隔行
+        for idx, chunk in enumerate(chunks, 1):
+            self.assertIn(header, chunk, f"分页 {idx} 缺少表头行")
+            self.assertIn(separator, chunk, f"分页 {idx} 缺少分隔行")
+            self.assertLessEqual(len(chunk), 450, f"分页 {idx} 字符数超出预算: {len(chunk)}")
+
+    def test_parse_markdown_table_helper(self):
+        # 1. 合法表格（含对齐冒号）
+        table = "| 列A | 列B | 列C |\n|:---|:---:|---:|\n| 1 | 2 | 3 |"
+        is_t, headers, rows = InlineMarkdownReader._parse_markdown_table(table)
+        self.assertTrue(is_t)
+        self.assertEqual(headers, ["| 列A | 列B | 列C |", "|:---|:---:|---:|"])
+        self.assertEqual(rows, ["| 1 | 2 | 3 |"])
+
+        # 2. 单行不是表格
+        is_t, _, _ = InlineMarkdownReader._parse_markdown_table("| 仅有一行 |")
+        self.assertFalse(is_t)
+
+        # 3. 分隔行不匹配
+        not_table = "| 列A | 列B |\n| 普通文本 | 也是文本 |"
+        is_t, _, _ = InlineMarkdownReader._parse_markdown_table(not_table)
+        self.assertFalse(is_t)
+
+    def test_chunk_blocks_table_with_preamble_and_trailer(self):
+        reader = InlineMarkdownReader(chunk_char_limit=450)
+        preamble = "# 项目表格概览\n请查阅下方数据列表。"
+        header = "| 序号 | 名称 | 描述 |"
+        separator = "| --- | --- | --- |"
+        rows = [f"| {i} | [条目{i}][{i}] | 这是关于第{i}项的长文本详细说明信息 |" for i in range(1, 15)]
+        table_block = "\n".join([header, separator] + rows)
+        trailer = "## 尾注说明\n以上数据按时间排序完成。"
+
+        chunks = reader._chunk_blocks(
+            [preamble, table_block, trailer],
+            url="https://example.com/overview",
+            title="数据总览",
+        )
+        self.assertGreater(len(chunks), 1)
+        self.assertIn("# 项目表格概览", chunks[0])
+        self.assertIn("## 尾注说明", chunks[-1])
+
+        # 包含表格部分的每个切片都包含完整的表头与分隔行
+        for idx, chunk in enumerate(chunks, 1):
+            self.assertLessEqual(len(chunk), 450, f"分页 {idx} 字符数超出预算: {len(chunk)}")
+            if any(f"| {i} |" in chunk for i in range(1, 15)):
+                self.assertIn(header, chunk, f"分页 {idx} 包含表格数据但缺少表头行")
+                self.assertIn(separator, chunk, f"分页 {idx} 包含表格数据但缺少分隔行")
+
     def test_password_masking_switch(self):
         reader_masked = InlineMarkdownReader(mask_passwords=True)
         html_script = reader_masked.get_js_extractor_script()

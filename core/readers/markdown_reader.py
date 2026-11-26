@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import re
 from typing import Any
 from .base import BasePageReader, PageSnapshot
 
@@ -68,8 +69,35 @@ class InlineMarkdownReader(BasePageReader):
 
         return f"{header}\n\n{body}\n\n{footer}"
 
+    TABLE_SEPARATOR_PATTERN = re.compile(r"^\s*\|(?:\s*:?-+:?\s*\|)+\s*$")
+
+    @classmethod
+    def _parse_markdown_table(cls, block: str) -> tuple[bool, list[str], list[str]]:
+        """检测并解析 Markdown 表格。
+        
+        返回 (is_table, header_lines, data_rows)。
+        判定标准：多行文本（至少 2 行），第一行为以 | 起止的表头，第二行为匹配分隔行的行。
+        header_lines 包含 [表头行, 分隔行]，data_rows 包含后续各行。
+        """
+        lines = [line.strip() for line in block.strip().splitlines() if line.strip()]
+        if len(lines) < 2:
+            return False, [], []
+        line0 = lines[0]
+        if not (line0.startswith("|") and line0.endswith("|")):
+            return False, [], []
+        if not cls.TABLE_SEPARATOR_PATTERN.match(lines[1]):
+            return False, [], []
+        header_lines = [lines[0], lines[1]]
+        data_rows = lines[2:]
+        return True, header_lines, data_rows
+
+    _is_markdown_table = _parse_markdown_table
+
     def _chunk_blocks(self, blocks: list[str], url: str = "", title: str = "") -> list[str]:
-        """按语义块边界切分正文，不切断单个语义块或 Ref 控件，累加至字符预算。"""
+        """按语义块边界切分正文，不切断单个语义块或 Ref 控件，累加至字符预算。
+        
+        支持多行 Markdown 表格跨页智能切分，并在跨页时自动回填表头行与分隔行。
+        """
         clean_blocks = [b.strip() for b in blocks if b and b.strip()]
         if not clean_blocks:
             clean_blocks = ["(当前页面未提取到有效正文内容)"]
@@ -78,21 +106,87 @@ class InlineMarkdownReader(BasePageReader):
         current_group: list[str] = []
 
         for block in clean_blocks:
-            if not current_group:
+            is_table, header_lines, data_rows = self._parse_markdown_table(block)
+
+            # 1. 优先尝试将整个 block 完整塞入当前页
+            tentative = current_group + [block] if current_group else [block]
+            tentative_str = self._render_chunk(
+                tentative,
+                len(groups) + 1,
+                len(groups) + 2,
+                url,
+                title,
+            )
+
+            if len(tentative_str) <= self.chunk_char_limit:
                 current_group.append(block)
+                continue
+
+            # 2. 若超出当前预算，且当前 block 是可切分的多行表格
+            if is_table and data_rows:
+                # 若当前页已有其他前置块，检查能否至少容纳表头 + 1 条数据行
+                if current_group:
+                    min_table_block = "\n".join(header_lines + [data_rows[0]])
+                    tentative_min = current_group + [min_table_block]
+                    tentative_min_str = self._render_chunk(
+                        tentative_min,
+                        len(groups) + 1,
+                        len(groups) + 2,
+                        url,
+                        title,
+                    )
+                    if len(tentative_min_str) > self.chunk_char_limit:
+                        # 空间不足以容纳表头 + 1 条数据，先封顶当前页
+                        groups.append(current_group)
+                        current_group = []
+
+                # 表格逐行装箱切分
+                current_table_rows: list[str] = []
+                row_idx = 0
+                n_rows = len(data_rows)
+
+                while row_idx < n_rows:
+                    row = data_rows[row_idx]
+                    candidate_rows = current_table_rows + [row]
+                    candidate_table = "\n".join(header_lines + candidate_rows)
+                    candidate_page = current_group + [candidate_table]
+                    candidate_str = self._render_chunk(
+                        candidate_page,
+                        len(groups) + 1,
+                        len(groups) + 2,
+                        url,
+                        title,
+                    )
+
+                    if len(candidate_str) <= self.chunk_char_limit:
+                        current_table_rows.append(row)
+                        row_idx += 1
+                    else:
+                        if current_table_rows:
+                            # 当前页已有装入行，封顶当前页
+                            current_group.append("\n".join(header_lines + current_table_rows))
+                            groups.append(current_group)
+                            current_group = []
+                            current_table_rows = []
+                            # candidate_row 在下一页重新尝试
+                        else:
+                            # 即使当前页为空页，表头 + 单行仍超出预算；为避免死循环或空表头分页，保底装入 1 行
+                            current_table_rows.append(row)
+                            row_idx += 1
+                            if row_idx < n_rows:
+                                current_group.append("\n".join(header_lines + current_table_rows))
+                                groups.append(current_group)
+                                current_group = []
+                                current_table_rows = []
+
+                if current_table_rows:
+                    current_group.append("\n".join(header_lines + current_table_rows))
             else:
-                tentative = current_group + [block]
-                tentative_str = self._render_chunk(
-                    tentative,
-                    len(groups) + 1,
-                    len(groups) + 2,
-                    url,
-                    title,
-                )
-                if len(tentative_str) <= self.chunk_char_limit:
-                    current_group = tentative
-                else:
+                # 普通 Block 无法完整放入当前页
+                if current_group:
                     groups.append(current_group)
+                    current_group = [block]
+                else:
                     current_group = [block]
 
         if current_group:
