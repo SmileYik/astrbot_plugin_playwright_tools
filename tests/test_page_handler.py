@@ -147,5 +147,39 @@ class TestPageHandler(unittest.TestCase):
         run_coro(self.handler.read_page("s1", "u1", page=1))
         self.assertEqual(self.mock_context.next_ref_id, 15)
 
+    def test_read_page_query_ref_link_and_img(self):
+        self.fake_snapshot.ref_map = {
+            "1": {"ref": "1", "tag": "a", "text": "官方文档", "href": "https://example.com/docs", "src": ""},
+            "2": {"ref": "2", "tag": "img", "text": "架构图", "alt": "架构图", "href": "", "src": "https://example.com/arch.png"},
+            "3": {"ref": "3", "tag": "a", "text": "大图预览", "href": "https://example.com/view", "src": "https://example.com/thumb.png"},
+            "4": {"ref": "4", "tag": "button", "text": "提交"},
+        }
+        self.mock_context.ref_map = self.fake_snapshot.ref_map
+
+        # 1. 链接查询
+        res_link = run_coro(self.handler.read_page("s1", "u1", ref="1"))
+        self.assertIn("=== Ref 元素详情查询: [1] ===", res_link)
+        self.assertIn("元素类型: 超链接", res_link)
+        self.assertIn("https://example.com/docs", res_link)
+
+        # 2. 图片查询
+        res_img = run_coro(self.handler.read_page("s1", "u1", ref="2"))
+        self.assertIn("元素类型: 图片", res_img)
+        self.assertIn("https://example.com/arch.png", res_img)
+
+        # 3. 含图链接查询
+        res_both = run_coro(self.handler.read_page("s1", "u1", ref="3"))
+        self.assertIn("元素类型: 超链接 (含图片)", res_both)
+        self.assertIn("https://example.com/view", res_both)
+        self.assertIn("https://example.com/thumb.png", res_both)
+
+        # 4. 普通按钮查询
+        res_btn = run_coro(self.handler.read_page("s1", "u1", ref="4"))
+        self.assertIn("该元素不包含可跳转的超链接或图片 URL", res_btn)
+
+        # 5. 不存在的 Ref
+        res_none = run_coro(self.handler.read_page("s1", "u1", ref="999"))
+        self.assertIn("未在当前快照中找到 Ref ID 为 '999' 的元素", res_none)
+
 if __name__ == "__main__":
     unittest.main()

@@ -120,11 +120,12 @@ class PageHandler(BaseActionHandler):
         page: int = 1,
         keyword: str = "",
         refresh: bool = False,
+        ref: str = "",
         session_name: str = "",
         sender_name: str = "",
         **kwargs,
     ) -> str:
-        """读取当前页面的内容与可交互操作元素（支持懒加载快照缓存、四重失效判定与关键词定位）。"""
+        """读取当前页面的内容与可交互操作元素（支持懒加载快照缓存、四重失效判定、关键词定位与 Ref 详情查询）。"""
 
         async def _read(ctx: BrowserSessionContext, cur_page: Page) -> str:
             current_url = getattr(cur_page, "url", "")
@@ -166,6 +167,64 @@ class PageHandler(BaseActionHandler):
                         next_ref = 1
                     ctx.next_ref_id = next_ref
 
+            clean_ref = str(ref or kwargs.get("ref") or "").strip()
+            if clean_ref:
+                ref_map = getattr(ctx, "ref_map", {}) or getattr(ctx.current_snapshot, "ref_map", {}) or {}
+                el = ref_map.get(clean_ref)
+                if not el:
+                    return f"未在当前快照中找到 Ref ID 为 '{clean_ref}' 的元素。请确认编号是否正确，或调用 pw_read(refresh=True) 刷新快照。"
+
+                tag = (el.get("tag") or "").lower()
+                role = (el.get("role") or "").lower()
+                href = (el.get("href") or "").strip()
+                src = (el.get("src") or "").strip()
+                text = (el.get("text") or "").strip()
+                alt = (el.get("alt") or "").strip()
+
+                lines = [f"=== Ref 元素详情查询: [{clean_ref}] ==="]
+                if href and src:
+                    lines.append("- 元素类型: 超链接 (含图片)")
+                    if text:
+                        lines.append(f"- 链接文本: {text}")
+                    if alt and alt != text:
+                        lines.append(f"- 图片描述: {alt}")
+                    lines.append(f"- 目标地址: {href}")
+                    lines.append(f"- 图片地址: {src}")
+                elif href:
+                    lines.append("- 元素类型: 超链接")
+                    if text:
+                        lines.append(f"- 链接文本: {text}")
+                    lines.append(f"- 目标地址: {href}")
+                elif src or tag == "img":
+                    lines.append("- 元素类型: 图片")
+                    desc = alt or text
+                    if desc:
+                        lines.append(f"- 图片描述: {desc}")
+                    if src:
+                        lines.append(f"- 图片地址: {src}")
+                    else:
+                        lines.append("- 图片地址: (未获取到有效图片地址)")
+                else:
+                    type_label = "控件"
+                    if tag == "button" or role == "button":
+                        type_label = "按钮"
+                    elif tag == "input":
+                        inp_type = el.get("type", "text")
+                        type_label = f"输入框 ({inp_type})" if inp_type else "输入框"
+                    elif tag == "select":
+                        type_label = "选择框"
+                    elif tag == "textarea":
+                        type_label = "文本域"
+                    elif role:
+                        type_label = role
+
+                    lines.append(f"- 元素类型: {type_label}")
+                    if text:
+                        lines.append(f"- 元素描述: {text}")
+                    lines.append(f"- 提示: 该元素不包含可跳转的超链接或图片 URL。如需操作请调用 pw_interact(action='click', ref='{clean_ref}')。")
+
+                return "\n".join(lines)
+
             if keyword and str(keyword).strip():
                 return self.reader.search(ctx.current_snapshot, str(keyword).strip())
             else:
@@ -177,7 +236,7 @@ class PageHandler(BaseActionHandler):
             action_name="read_page",
             target_resource="",
             action_coro_fn=_read,
-            input_args={"page": page, "keyword": keyword, "refresh": refresh},
+            input_args={"page": page, "keyword": keyword, "refresh": refresh, "ref": str(ref or kwargs.get("ref") or "").strip()},
             required_permission="read",
             session_name=session_name,
             sender_name=sender_name,
