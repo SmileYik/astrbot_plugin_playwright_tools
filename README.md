@@ -1,9 +1,17 @@
+<div align="center">
+
 # PlaywrightTool 
+
+<img src="logo.png" alt="logo" width="40%" />
+
+
+[![Moe Counter](https://count.getloli.com/@Playwright-Tool?theme=booru-touhoulat&padding=7&offset=0&align=top&scale=0.5&pixelated=1&darkmode=auto)](https://github.com/SmileYik/astrbot_plugin_playwright_tools)
 
 基于 Playwright (首选 Camoufox 驱动) 的 AstrBot 网页浏览与自动化操作插件。  
 为大模型提供低 Token 消耗、高精准度的元素编号（Ref ID）交互与长页面结构化阅读能力，具备完善的多租户隐私隔离、细粒度白名单防护与可视化运维审计。
 
----
+</div>
+
 
 ## 🌟 特性亮点
 
@@ -237,3 +245,14 @@ playwright install chromium
 - **系统分层架构与模型设计**：详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - **开发与协作规范**：详见 [AGENT.md](AGENT.md)
 - **版本演进记录**：详见 [CHANGELOG.md](CHANGELOG.md)
+
+![audit](./docs/images/audit.png)
+
+<details>
+<summary>更多截图</summary>
+
+![audit](./docs/images/manual-screenshot.png)
+
+![audit](./docs/images/markdown-inline.png)
+
+</details>
