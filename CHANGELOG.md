@@ -6,10 +6,11 @@
 
 ## [v1.3.0] - 2026-11-26
 
-### 阅读器图片 Ref 收敛与按需 URL 查询 (Reader Image Ref & URL Query)
+### 阅读器 Ref 规范化与按需 URL 查询 (Reader Ref Standardization & On-Demand URL Query)
 - **普通图片 Ref ID 分配与 URL 隐藏**：`InlineMarkdownReader` 将页面上的普通图片（`<img>`）纳入统一的 Ref 编号管理，隐藏长图片 URL 并内联渲染为 `[Ref: X] [图片: alt]`，防止 Token 膨胀并实现图片精准定位。
-- **快照元数据绝对路径提取**：DOM 提炼阶段自动解析超链接（`href`）与图片（`src`）的绝对路径，存入快照映射字典 `PageSnapshot.ref_map`。
-- **`pw_read` 新增 `ref` 查询参数**：工具 Schema 与 Handler 扩展 `ref` 参数，支持通过 Ref ID 秒级查询指定元素的类型（超链接、图片、含图链接、普通控件）、文本描述与完整 URL，并针对非 URL 元素或不存在的 Ref 提供明确指引。
+- **ARIA 语义树 URL 剥离与脱敏**：`AriaSnapshotReader` 彻底过滤 YAML 语义树中的 `- /url: <url>` 子行与末尾多余冒号，对超链接无障碍名称本身为 URL 的情况自动化简为 `link [ref=...]`，正文大幅降低 Token 开销。
+- **两款阅读器 ref_map 契约标准化**：统一 `InlineMarkdownReader` 与 `AriaSnapshotReader` 的元素映射字段（`ref`, `tag`, `role`, `type`, `name`, `text`, `alt`, `href`, `src`, `url`），ARIA 模式异步并发提取图片真实 `src`，并自动关联父级嵌套超链接。
+- **`pw_read` 结构化 `ref` 详情查询**：工具 Schema 与 Handler 扩展 `ref` 参数，支持通过 Ref ID 结构化查询指定元素的类型（超链接、图片、含图链接、普通控件）、文本描述与完整目标/图片 URL，两款阅读器共享通用的分发逻辑。
 
 ---
 
