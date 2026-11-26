@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import re
 from typing import Any
@@ -294,6 +295,28 @@ class AriaSnapshotReader(BasePageReader):
 
         return cleaned_yaml, ref_map, parent_map
 
+    async def _fetch_element_src(self, page: Any, ref: str) -> str:
+        """根据 Ref ID 异步获取图片元素的真实 src。"""
+        try:
+            if not hasattr(page, "locator"):
+                return ""
+            loc = page.locator(f"aria-ref={ref}")
+            if hasattr(loc, "count"):
+                cnt = loc.count()
+                if inspect.isawaitable(cnt):
+                    cnt = await cnt
+                if cnt == 0:
+                    return ""
+            if hasattr(loc, "evaluate"):
+                res = loc.evaluate("el => el.src || el.getAttribute('src') || ''")
+                if inspect.isawaitable(res):
+                    res = await res
+                if isinstance(res, str):
+                    return res.strip()
+        except Exception as e:
+            logger.debug(f"[AriaReader] 获取元素 Ref [{ref}] src 异常: {e}")
+        return ""
+
     async def extract_snapshot(
         self, page: Any, url: str = "", start_ref: int = 1, **kwargs
     ) -> PageSnapshot:
@@ -303,6 +326,37 @@ class AriaSnapshotReader(BasePageReader):
         raw_yaml = await self._fetch_aria_snapshot(page)
 
         cleaned_yaml, ref_map, parent_map = self._parse_aria_yaml(raw_yaml)
+
+        # 提取图片元素的真实 src 并关联父级 link
+        img_refs = [
+            r_id
+            for r_id, info in ref_map.items()
+            if info.get("role") in ("img", "image")
+        ]
+        if img_refs and hasattr(page, "locator"):
+            src_results = await asyncio.gather(
+                *(self._fetch_element_src(page, r_id) for r_id in img_refs),
+                return_exceptions=True,
+            )
+            for r_id, src in zip(img_refs, src_results):
+                if isinstance(src, str) and src:
+                    ref_map[r_id]["src"] = src
+                    if not ref_map[r_id].get("url"):
+                        ref_map[r_id]["url"] = src
+                    # 向上寻找关联的父级 link
+                    curr_ref = r_id
+                    while curr_ref in parent_map:
+                        p_ref = parent_map[curr_ref]
+                        if p_ref in ref_map:
+                            if ref_map[p_ref].get("role") == "link":
+                                if not ref_map[p_ref].get("src"):
+                                    ref_map[p_ref]["src"] = src
+                                if not ref_map[p_ref].get("alt"):
+                                    ref_map[p_ref]["alt"] = ref_map[r_id].get("alt", "")
+                                break
+                            curr_ref = p_ref
+                        else:
+                            break
 
         chunks = self._chunk_aria_tree(cleaned_yaml, page_url, title)
         total_pages = len(chunks)

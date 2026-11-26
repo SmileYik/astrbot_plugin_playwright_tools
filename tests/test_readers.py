@@ -297,6 +297,56 @@ class TestAriaSnapshotReader(unittest.IsolatedAsyncioTestCase):
         self.assertIn("e4", snapshot.ref_map)
         self.assertEqual(snapshot.ref_map["e4"]["href"], "https://example.com/page2")
 
+    async def test_aria_reader_image_src_and_nested_link_extraction(self):
+        mock_page = MagicMock()
+        mock_root = AsyncMock()
+        raw_yaml = (
+            '- document [ref=e1]:\n'
+            '  - link [ref=e2]:\n'
+            '    - /url: https://example.com/item\n'
+            '    - img "商品缩略图" [ref=e3]\n'
+            '  - img "独立照片" [ref=e4]\n'
+        )
+        mock_root.aria_snapshot = AsyncMock(return_value=raw_yaml)
+        mock_page.locator.return_value = mock_root
+        mock_page.url = "https://example.com"
+        mock_page.title = "测试页面"
+
+        mock_loc_e3 = AsyncMock()
+        mock_loc_e3.count = AsyncMock(return_value=1)
+        mock_loc_e3.evaluate = AsyncMock(return_value="https://example.com/thumb.jpg")
+
+        mock_loc_e4 = AsyncMock()
+        mock_loc_e4.count = AsyncMock(return_value=1)
+        mock_loc_e4.evaluate = AsyncMock(return_value="https://example.com/photo.jpg")
+
+        def mock_locator_router(sel):
+            if sel == "aria-ref=e3":
+                return mock_loc_e3
+            elif sel == "aria-ref=e4":
+                return mock_loc_e4
+            return mock_root
+        mock_page.locator.side_effect = mock_locator_router
+
+        reader = AriaSnapshotReader()
+        snapshot = await reader.extract_snapshot(mock_page)
+
+        # 1. 验证 e3 (图片) 的 src 与 alt 提取
+        self.assertIn("e3", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["e3"]["src"], "https://example.com/thumb.jpg")
+        self.assertEqual(snapshot.ref_map["e3"]["alt"], "商品缩略图")
+        self.assertEqual(snapshot.ref_map["e3"]["tag"], "img")
+
+        # 2. 验证 e4 (独立图片) 的 src
+        self.assertIn("e4", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["e4"]["src"], "https://example.com/photo.jpg")
+
+        # 3. 验证 e2 (父级 link) 自动关联嵌套图片的 src
+        self.assertIn("e2", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["e2"]["href"], "https://example.com/item")
+        self.assertEqual(snapshot.ref_map["e2"]["src"], "https://example.com/thumb.jpg")
+        self.assertEqual(snapshot.ref_map["e2"]["alt"], "商品缩略图")
+
     def test_aria_search_snapshot(self):
         reader = AriaSnapshotReader()
         snapshot = PageSnapshot(
