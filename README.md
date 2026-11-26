@@ -8,10 +8,10 @@
 ## 🌟 特性亮点
 
 - **四大聚合复合工具**：收敛为 `pw_page`、`pw_read`、`pw_interact`、`pw_media`，采用 AstrBot `FunctionTool` 原生强类型注册。
-- **元素编号（Ref ID）与精准定位**：精简 DOM 并为所有可交互控件赋予自增编号（如 `[1] [按钮] 登录`），告别脆弱且高 Token 消耗的选择器，保证大模型定位精准度。
+- **元素编号（Ref ID）与精准定位**：精简 DOM 并为所有可交互控件赋予自增编号（如原生引用风 `[登录][1]`、`[按钮: 登录][1]`），告别脆弱且高 Token 消耗的选择器，保证大模型定位精准度。
 - **双正文提炼模式与长页智能分页**：
-  - **内联交互 Markdown (Inline Markdown)**：默认推荐，将正文排版（标题、段落、列表、表格）、嵌入图片与带 Ref ID 的可交互控件内联熔合为一篇结构化 Markdown，所见即所得。
-  - **无障碍语义树快照 (ARIA Snapshot)**：基于浏览器原生 Accessibility Tree 生成严密的语义角色层级树。
+  - **内联交互 Markdown (Inline Markdown)**：默认推荐，将正文排版（标题、段落、列表、表格）、嵌入图片与带 Ref ID 的可交互控件内联熔合为原生引用风格 Markdown。支持长表格跨页智能截断与表头自动回填，Ref 元素全额计入预算以杜绝分页膨胀。
+  - **无障碍语义树快照 (ARIA Snapshot)**：基于浏览器原生 Accessibility Tree 生成严密的语义角色层级树，剥离冗长 URL。
   - **自适应分页预算**：基于字符预算（`page_chunk_char_limit`）平滑切分超长文档，大模型可按页阅读或定向关键词检索。
 - **全面键鼠交互与智能报错脱敏**：
   - 原生支持点击、输入、下拉选择、鼠标悬停（hover）、焦点管理（focus/blur）、元素拖拽（drag）、键盘按键及平滑滚动。
@@ -173,10 +173,10 @@ playwright install chromium
 
 - **参数**：
   - `action` (string, 必填): 要执行的交互动作：`'click'`(点击元素) / `'fill'`(输入文本) / `'select'`(下拉框选择) / `'hover'`(鼠标悬停) / `'focus'`(聚焦) / `'blur'`(失焦) / `'drag'`(拖拽至目标元素) / `'press_key'`(按键盘按键) / `'scroll'`(滚动页面)
-  - `ref` (integer, 可选): 目标元素在页面快照中的 Ref ID 编号 (除 press_key/scroll 外通常必填)
+  - `ref` (string, 可选): 目标元素在页面快照中的 Ref ID 编号 (除 press_key/scroll 外通常必填，支持纯数字 `'1'` 与语义标识 `'e1'`)
   - `text` (string, 可选): 输入文本内容 (action=`fill` 时必填)
   - `value` (string, 可选): 下拉框选中的选项值 (action=`select` 时必填)
-  - `target_ref` (integer, 可选): 拖拽放置的目标元素 Ref ID 编号 (action=`drag` 时必填)
+  - `target_ref` (string, 可选): 拖拽放置的目标元素 Ref ID 编号 (action=`drag` 时必填)
   - `key` (string, 可选): 要发送的按键名称，如 `'Enter'`, `'Tab'`, `'Escape'`, `'ArrowDown'` (action=`press_key` 时必填)
   - `direction` (string, 可选): 滚动方向：`'down'`(向下) 或 `'up'`(向上) (action=`scroll` 时可选，默认 `'down'`)
   - `amount` (integer, 可选): 滚动像素距离 (action=`scroll` 时可选，默认 500)
@@ -187,7 +187,7 @@ playwright install chromium
 - **参数**：
   - `action` (string, 必填): 要执行的媒体动作：`'screenshot_viewport'`(当前视口截图) / `'screenshot_full'`(全页面长截图) / `'download'`(触发下载指定元素文件)
   - `target` (string, 可选): 交付目标：`'chat'`(发送至当前聊天会话) 或 `'ai'`(以 base64 形式交付供多模态大模型视觉理解，默认 `'chat'`)
-  - `ref` (integer, 可选): 触发下载的链接或按钮 Ref ID 编号 (action=`download` 时必填)
+  - `ref` (string, 可选): 触发下载的链接或按钮 Ref ID 编号 (action=`download` 时必填)
 
 ---
 

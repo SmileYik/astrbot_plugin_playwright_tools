@@ -11,9 +11,10 @@
 - **内联控件 Markdown 引用风排版与 JS 独立脚本解耦**：将内联交互控件与超链接全面升级为原生 Markdown 引用脚注风格（`[文本][Ref]`、`![图片: 描述][Ref]`、`[按钮: 文本][Ref]`），显著精简元素语法骨架，密集链接区域字符冗余减少约 30%；将 300+ 行 JS DOM 提取逻辑完全解耦抽离为独立的 `core/readers/markdown_extractor.js` 脚本。
 - **表格感知智能跨页切分与表头自动回填**：`_chunk_blocks` 引入 Markdown 表格结构识别与逐行装箱机制，多行表格跨页时在后续切片首部自动注入表头行与分隔行，确保每个分页都是列语义清晰、语法自闭合的合法表格。
 - **单页字符预算防膨胀与行级兜底微切分**：对超大列表、代码块与极端长文本实施行级与字符级装箱微切分兜底，防范单页快照数万字符膨胀，确保单页总字符严格受控于 `page_chunk_char_limit`（默认 2000）。
-- **ARIA 语义树 URL 剥离与脱敏**：`AriaSnapshotReader` 彻底过滤 YAML 语义树中的 `- /url: <url>` 子行与末尾多余冒号，对超链接无障碍名称本身为 URL 的情况自动化简为 `link [ref=...]`，正文大幅降低 Token 开销。
+- **ARIA 语义树 URL 剥离与脱敏**：`AriaSnapshotReader` 过滤 YAML 语义树中的 `- /url: <url>` 子行与末尾多余冒号，对超链接无障碍名称本身为 URL 的情况自动化简为 `link [ref=...]`，正文大幅降低 Token 开销。
 - **两款阅读器 ref_map 契约标准化**：统一 `InlineMarkdownReader` 与 `AriaSnapshotReader` 的元素映射字段（`ref`, `tag`, `role`, `type`, `name`, `text`, `alt`, `href`, `src`, `url`），ARIA 模式异步并发提取图片真实 `src`，并自动关联父级嵌套超链接。
 - **`pw_read` 结构化 `ref` 详情查询**：工具 Schema 与 Handler 扩展 `ref` 参数，支持通过 Ref ID 结构化查询指定元素的类型（超链接、图片、含图链接、普通控件）、文本描述与完整目标/图片 URL，两款阅读器共享通用的分发逻辑。
+- **动作执行切面空 Ref 防死等与短超时保护**：修复 `BaseActionHandler.execute_action` 在空 Ref 且无敏感输入项时误触发 DOM Locator 探测导致操作挂死 30 秒的缺陷；增加仅在存在敏感输入（`text`/`value`/`password`）且 Ref 有效时探测，并为探测添加 500ms 快速超时保护。
 
 ---
 
