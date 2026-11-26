@@ -262,6 +262,41 @@ class TestAriaSnapshotReader(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reader.format_chunk(snapshot, 999), "第 2 页内容")
         self.assertEqual(reader.format_chunk(snapshot, 0), "第 1 页内容")
 
+    async def test_aria_reader_url_filtering_and_href_extraction(self):
+        mock_page = MagicMock()
+        mock_root = AsyncMock()
+        raw_yaml = (
+            '- document [ref=e1]:\n'
+            '  - heading "Header" [level=1] [ref=e2]\n'
+            '  - link "官方文档" [ref=e3] [cursor=pointer]:\n'
+            '    - /url: https://example.com/docs\n'
+            '  - link "https://example.com/page2" [ref=e4] [cursor=pointer]:\n'
+            '    - /url: https://example.com/page2\n'
+        )
+        mock_root.aria_snapshot = AsyncMock(return_value=raw_yaml)
+        mock_page.locator.return_value = mock_root
+        mock_page.url = "https://example.com"
+        mock_page.title = "测试页面"
+
+        reader = AriaSnapshotReader()
+        snapshot = await reader.extract_snapshot(mock_page)
+
+        # 1. 验证正文中彻底剥离了 - /url:
+        self.assertNotIn("/url:", snapshot.raw_content)
+        # 2. 验证父行末尾冒号被剥离
+        self.assertIn('link "官方文档" [ref=e3] [cursor=pointer]\n', snapshot.raw_content + '\n')
+        self.assertNotIn('link "官方文档" [ref=e3] [cursor=pointer]:', snapshot.raw_content)
+        # 3. 验证 URL 作为文本的链接被精简为不带引号的 link [ref=...]
+        self.assertIn('link [ref=e4] [cursor=pointer]', snapshot.raw_content)
+        self.assertNotIn('link "https://example.com/page2"', snapshot.raw_content)
+        # 4. 验证 ref_map 中正确记录 href 与 url
+        self.assertIn("e3", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["e3"]["href"], "https://example.com/docs")
+        self.assertEqual(snapshot.ref_map["e3"]["url"], "https://example.com/docs")
+        self.assertEqual(snapshot.ref_map["e3"]["tag"], "a")
+        self.assertIn("e4", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["e4"]["href"], "https://example.com/page2")
+
     def test_aria_search_snapshot(self):
         reader = AriaSnapshotReader()
         snapshot = PageSnapshot(

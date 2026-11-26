@@ -6,6 +6,32 @@ from .base import BasePageReader, PageSnapshot
 from astrbot.api import logger
 
 
+TAG_MAP = {
+    "link": "a",
+    "img": "img",
+    "image": "img",
+    "button": "button",
+    "textbox": "input",
+    "checkbox": "input",
+    "radio": "input",
+    "combobox": "select",
+    "heading": "h",
+}
+
+
+class _AriaNode:
+    def __init__(self, indent: int, raw_line: str):
+        self.indent = indent
+        self.raw_line = raw_line
+        self.is_url = False
+        self.url_val = ""
+        self.ref_id = ""
+        self.role = ""
+        self.name = ""
+        self.children: list["_AriaNode"] = []
+        self.parent: "_AriaNode | None" = None
+
+
 class AriaSnapshotReader(BasePageReader):
     """基于 Playwright 官方原生 ARIA 快照与 Ref 映射的分页阅读器。
 
@@ -146,39 +172,149 @@ class AriaSnapshotReader(BasePageReader):
         ]
         return chunks
 
-    async def extract_snapshot(self, page: Any, url: str = "") -> PageSnapshot:
+    def _parse_aria_yaml(
+        self, raw_yaml: str
+    ) -> tuple[str, dict[str, dict], dict[str, str]]:
+        """解析并清洗 Playwright ARIA YAML 文本。
+
+        - 过滤并剥离 `- /url: <url>` 行，将 URL 提取并记录至父级链接的 ref_map 中；
+        - 若超链接无障碍名称本身直接为 URL，在正文中化简为不带引号的 `link [ref=...]`；
+        - 剥离因过滤子节点而遗留的多余末尾冒号；
+        - 标准化 ref_map 元素字典契约，记录父子从属关系映射。
+        """
+        if not raw_yaml or not raw_yaml.strip():
+            return "", {}, {}
+
+        nodes: list[_AriaNode] = []
+        stack: list[_AriaNode] = []
+
+        for line in raw_yaml.splitlines():
+            if not line.strip():
+                continue
+            indent = len(line) - len(line.lstrip())
+            node = _AriaNode(indent, line)
+
+            # 匹配 /url: 子行
+            m_url = re.match(r"^\s*(?:-\s*)?/url:\s*(.+)$", line)
+            if m_url:
+                node.is_url = True
+                node.url_val = m_url.group(1).strip().strip('"').strip("'")
+
+            # 匹配 [ref=...]
+            m_ref = re.search(r"\[ref=([^\]]+)\]", line)
+            if m_ref:
+                node.ref_id = m_ref.group(1).strip()
+
+            # 匹配 - role "name"
+            m_role = re.match(r'^\s*-\s*([a-zA-Z0-9_-]+)(?:\s+"([^"]*)")?', line)
+            if m_role:
+                node.role = m_role.group(1)
+                node.name = m_role.group(2) or ""
+
+            # 依缩进维护祖先栈
+            while stack and stack[-1].indent >= indent:
+                stack.pop()
+
+            if stack:
+                node.parent = stack[-1]
+                stack[-1].children.append(node)
+
+            stack.append(node)
+            nodes.append(node)
+
+        ref_map: dict[str, dict] = {}
+        parent_map: dict[str, str] = {}
+
+        # 1. 初始化所有含 Ref ID 节点的标准化字典
+        for node in nodes:
+            if node.ref_id:
+                role = node.role or ""
+                name = node.name or ""
+                is_url_name = role == "link" and (
+                    name.startswith("http://") or name.startswith("https://")
+                )
+                tag = TAG_MAP.get(role, role)
+                ref_map[node.ref_id] = {
+                    "ref": node.ref_id,
+                    "role": role,
+                    "tag": tag,
+                    "type": "text" if role == "textbox" else "",
+                    "name": name,
+                    "text": "" if is_url_name else name,
+                    "alt": name if role in ("img", "image") else "",
+                    "href": name if is_url_name else "",
+                    "src": "",
+                    "url": name if is_url_name else "",
+                }
+                # 记录最近具有 ref_id 的祖先
+                curr = node.parent
+                while curr:
+                    if curr.ref_id:
+                        parent_map[node.ref_id] = curr.ref_id
+                        break
+                    curr = curr.parent
+
+        # 2. 将 /url: 节点的 URL 回填至父级 Ref
+        for node in nodes:
+            if node.is_url and node.url_val:
+                curr = node.parent
+                while curr:
+                    if curr.ref_id and curr.ref_id in ref_map:
+                        ref_map[curr.ref_id]["href"] = node.url_val
+                        ref_map[curr.ref_id]["url"] = node.url_val
+                        break
+                    curr = curr.parent
+
+        # 3. 构造清洗后的正文行
+        cleaned_lines: list[str] = []
+        for node in nodes:
+            if node.is_url:
+                continue
+
+            line = node.raw_line
+
+            # 超链接文本本身即为 URL 时，脱敏/精简为不带引号的 link
+            if (
+                node.role == "link"
+                and node.name
+                and (node.name.startswith("http://") or node.name.startswith("https://"))
+            ):
+                line = re.sub(r'(\blink)\s+"https?://[^"]*"(\s*)', r"\1\2", line)
+
+            # 若该行无剩余渲染子节点，剥离多余末尾冒号
+            has_rendered_children = any(not c.is_url for c in node.children)
+            if not has_rendered_children:
+                line = re.sub(r":\s*$", "", line)
+
+            cleaned_lines.append(line)
+
+        cleaned_yaml = "\n".join(cleaned_lines)
+        if cleaned_lines and raw_yaml.endswith("\n"):
+            cleaned_yaml += "\n"
+
+        return cleaned_yaml, ref_map, parent_map
+
+    async def extract_snapshot(
+        self, page: Any, url: str = "", start_ref: int = 1, **kwargs
+    ) -> PageSnapshot:
         """从页面提取官方原生 ARIA 快照并解析 Ref 键映射。"""
         title = await self._get_page_title(page)
         page_url = self._get_page_url(page, url)
         raw_yaml = await self._fetch_aria_snapshot(page)
 
-        ref_map: dict[str, dict] = {}
-        for line in raw_yaml.splitlines():
-            matches = re.finditer(r'\[ref=([^\]]+)\]', line)
-            for m in matches:
-                ref_id = m.group(1).strip()
-                if ref_id:
-                    el_info = {"ref": ref_id}
-                    m_role = re.match(r'^\s*-\s*([a-zA-Z0-9_-]+)(?:\s+"([^"]*)")?', line)
-                    if m_role:
-                        role = m_role.group(1)
-                        name = m_role.group(2) or ""
-                        el_info["role"] = role
-                        el_info["tag"] = role
-                        el_info["name"] = name
-                        el_info["text"] = name
-                    ref_map[ref_id] = el_info
+        cleaned_yaml, ref_map, parent_map = self._parse_aria_yaml(raw_yaml)
 
-        chunks = self._chunk_aria_tree(raw_yaml, page_url, title)
+        chunks = self._chunk_aria_tree(cleaned_yaml, page_url, title)
         total_pages = len(chunks)
 
         return PageSnapshot(
             title=title,
             url=page_url,
-            raw_content=raw_yaml,
+            raw_content=cleaned_yaml,
             ref_map=ref_map,
             total_pages=total_pages,
             chunks=chunks,
+            allocated_count=len(ref_map),
         )
 
     def format_chunk(self, snapshot: PageSnapshot, page_index: int) -> str:
@@ -232,7 +368,7 @@ class AriaSnapshotReader(BasePageReader):
         """返回适配 ARIA 语义树阅读的工具定义元数据。"""
         return {
             "name": "pw_read",
-            "description": "读取当前网页的内容快照（以 ARIA 语义可访问性树形式呈现，包含 Landmark 区域、控件语义角色、状态及 Ref 编号，支持按区域分页与关键词搜索）。",
+            "description": "读取当前网页的内容快照（以 ARIA 语义可访问性树形式呈现，包含 Landmark 区域、控件语义角色、状态及 Ref 编号，支持按区域分页、关键词搜索与按 Ref 查询链接与图片详情）。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -244,6 +380,11 @@ class AriaSnapshotReader(BasePageReader):
                     "keyword": {
                         "type": "string",
                         "description": "关键词快速检索页面内容 (可选)",
+                        "default": "",
+                    },
+                    "ref": {
+                        "type": "string",
+                        "description": "要查询详细信息或目标 URL 的元素 Ref 编号（如 'e1', 'e2'） (可选)",
                         "default": "",
                     },
                     "refresh": {
