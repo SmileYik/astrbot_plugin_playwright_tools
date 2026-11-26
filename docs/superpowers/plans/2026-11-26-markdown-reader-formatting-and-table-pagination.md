@@ -27,15 +27,16 @@
 
 ---
 
-### Task 1: 内联交互控件排版精简 (Markdown Reference Footnote Syntax)
+### Task 1: 内联交互控件排版精简与 JS 脚本解耦独立 (Markdown Reference Syntax & JS Decoupling)
 
 **Files:**
-- Modify: `core/readers/markdown_reader.py:108-160`
+- Create: `core/readers/markdown_extractor.js`
+- Modify: `core/readers/markdown_reader.py:16-160`
 - Test: `tests/test_readers.py`
 
 **Interfaces:**
-- Consumes: `formatInteractive(node, ref)` in JS extractor
-- Produces: 精简的 `[文本][Ref]`、`![图片: 描述][Ref]`、`[按钮: 文本][Ref]`、`[输入框 details][Ref]` 等排版字符串
+- Consumes: JS 提炼逻辑与 `formatInteractive(node, ref)`
+- Produces: 独立的 `core/readers/markdown_extractor.js`；精简的 `[文本][Ref]`、`![图片: 描述][Ref]`、`[按钮: 文本][Ref]`、`[输入框 details][Ref]` 等排版字符串；`get_js_extractor_script()` 从外部 JS 文件动态读取模板并注入参数。
 
 - [ ] **Step 1: 在 `tests/test_readers.py` 中编写/更新排版格式单测**
 
@@ -49,7 +50,7 @@ self.assertIn("![图片: 架构图][1]", snapshot.raw_content)
 # 按钮断言
 self.assertIn("[按钮: 点击下载][1]", snapshot.raw_content)
 # 脚本断言
-self.assertIn("`![图片: ${desc}][${ref}]`", script)
+self.assertIn("![图片: ${desc}][${ref}]", script)
 ```
 
 - [ ] **Step 2: 运行测试验证失败**
@@ -57,20 +58,22 @@ self.assertIn("`![图片: ${desc}][${ref}]`", script)
 运行: `python -m unittest tests.test_readers.TestInlineMarkdownReader`
 预期结果: FAIL（仍输出旧版 `[Ref: X] [...]`）。
 
-- [ ] **Step 3: 修改 `core/readers/markdown_reader.py` 的 `formatInteractive`**
+- [ ] **Step 3: 创建 `core/readers/markdown_extractor.js` 并改造 `core/readers/markdown_reader.py`**
 
-按照设计规范更新各元素渲染模板：
-- `tag === 'img'`: `desc ? `![图片: ${desc}][${ref}]` : `![图片][${ref}]``
+1. 将原嵌入在 Python 中的 JS 代码抽取至独立的 `core/readers/markdown_extractor.js`；
+2. 按照设计规范更新 `markdown_extractor.js` 中各元素渲染模板：
+- `tag === 'img'`: `desc ? \`![图片: ${desc}][${ref}]\` : \`![图片][${ref}]\``
 - `tag === 'a' || role === 'link'`:
-  - `if (src)`: `desc ? `[链接 (含图): ${desc}][${ref}]` : `[链接 (含图)][${ref}]``
-  - `else`: `text ? `[${text}][${ref}]` : `[链接][${ref}]``
-- `tag === 'button' || role === 'button'`: `btnText ? `[按钮: ${btnText}][${ref}]` : `[按钮][${ref}]``
+  - `if (src)`: `desc ? \`[链接 (含图): ${desc}][${ref}]\` : \`[链接 (含图)][${ref}]\``
+  - `else`: `text ? \`[${text}][${ref}]\` : \`[链接][${ref}]\``
+- `tag === 'button' || role === 'button'`: `btnText ? \`[按钮: ${btnText}][${ref}]\` : \`[按钮][${ref}]\``
 - `tag === 'input'`:
-  - checkbox / radio: `[复选框: ${label} (${checked})][${ref}]`
-  - 其他 input: `[输入框${detailStr}][${ref}]`
-- `tag === 'select'`: `[选择框${detailStr}][${ref}]`
-- `tag === 'textarea'`: `[文本域${detailStr}][${ref}]`
-- 兜底: `[控件: ${text || tag}][${ref}]`
+  - checkbox / radio: `\`[复选框: ${label} (${checked})][${ref}]\``
+  - 其他 input: `\`[输入框${detailStr}][${ref}]\``
+- `tag === 'select'`: `\`[选择框${detailStr}][${ref}]\``
+- `tag === 'textarea'`: `\`[文本域${detailStr}][${ref}]\``
+- 兜底: `\`[控件: ${text || tag}][${ref}]\``
+3. 在 `markdown_reader.py` 中通过 `Path(__file__).parent / "markdown_extractor.js"` 读取模板并完成参数替换返回。
 
 - [ ] **Step 4: 运行测试验证通过**
 
@@ -80,8 +83,8 @@ self.assertIn("`![图片: ${desc}][${ref}]`", script)
 - [ ] **Step 5: 提交更改**
 
 ```bash
-git add core/readers/markdown_reader.py tests/test_readers.py
-git commit -m "feat(markdown_reader): simplify interactive elements to markdown reference format"
+git add core/readers/markdown_extractor.js core/readers/markdown_reader.py tests/test_readers.py
+git commit -m "feat(markdown_reader): decouple js extractor and simplify interactive elements"
 ```
 
 ---
