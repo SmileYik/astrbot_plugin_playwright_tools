@@ -181,5 +181,29 @@ class TestPageHandler(unittest.TestCase):
         res_none = run_coro(self.handler.read_page("s1", "u1", ref="999"))
         self.assertIn("未在当前快照中找到 Ref ID 为 '999' 的元素", res_none)
 
+    def test_read_page_aria_mode_query_ref(self):
+        self.fake_snapshot.ref_map = {
+            "e1": {"ref": "e1", "tag": "a", "role": "link", "text": "登录入口", "href": "https://example.com/login", "src": ""},
+            "e2": {"ref": "e2", "tag": "img", "role": "img", "text": "Logo", "alt": "Logo", "href": "", "src": "https://example.com/logo.png"},
+            "e3": {"ref": "e3", "tag": "a", "role": "link", "text": "详情原图", "href": "https://example.com/detail", "src": "https://example.com/preview.png"},
+        }
+        self.mock_context.ref_map = self.fake_snapshot.ref_map
+
+        res_link = run_coro(self.handler.read_page("s1", "u1", ref="e1"))
+        self.assertIn("=== Ref 元素详情查询: [e1] ===", res_link)
+        self.assertIn("元素类型: 超链接", res_link)
+        self.assertIn("https://example.com/login", res_link)
+
+        res_img = run_coro(self.handler.read_page("s1", "u1", ref="e2"))
+        self.assertIn("=== Ref 元素详情查询: [e2] ===", res_img)
+        self.assertIn("元素类型: 图片", res_img)
+        self.assertIn("https://example.com/logo.png", res_img)
+
+        res_both = run_coro(self.handler.read_page("s1", "u1", ref="e3"))
+        self.assertIn("=== Ref 元素详情查询: [e3] ===", res_both)
+        self.assertIn("元素类型: 超链接 (含图片)", res_both)
+        self.assertIn("https://example.com/detail", res_both)
+        self.assertIn("https://example.com/preview.png", res_both)
+
 if __name__ == "__main__":
     unittest.main()
