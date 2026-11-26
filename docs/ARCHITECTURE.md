@@ -82,7 +82,7 @@ flowchart TD
 - **`SecurityManager`**: 权限与白名单守卫。执行域名通配符匹配（如 `*.bing.com`）、12 项原子动作权限细粒度校验，在页面创建和路由阶段拦截未授权顶层跳转、弹出新窗口与 iframe 导航，同时对放行网页自动保留内部第三方静态资源的正常加载。
 - **`AuditLogger`**: SQLite 审计记录器。异步记录全量调用（起止时间、会话、上下文、目标域名、入参与结果），并在初始化与周期轮询中自动清理超期数据。
 - **`readers/`（双阅读提炼器）**:
-  - **`InlineMarkdownReader`**: 将网页标题、段落、列表、表格、图片及带 Ref ID 的控件融合成语义清晰的 Markdown 文档，对普通图片与超链接统一隐藏原始 URL 并注入单调递增编号 `data-astr-ref="{ref}"`，支持字符预算（`page_chunk_char_limit`）平滑分页与通过 `pw_read(ref=...)` 按需结构化查询目标 URL。
+  - **`InlineMarkdownReader`**: 将网页标题、段落、列表、表格、图片及带 Ref ID 的控件融合成语义清晰的 Markdown 文档；底层 DOM 提炼逻辑与 Python 完全解耦（独立为 `core/readers/markdown_extractor.js`），内联控件排版全面采用原生 Markdown 引用脚注风格（`[文本][Ref]`、`![图片: 描述][Ref]`），降低约 45% Token 消耗；引入表格感知智能分页，表格跨页时在后续切片首部自动补齐表头行与分隔行，并配合行级/切片级微切分兜底，确保单页总字符严格受控于 `page_chunk_char_limit` 预算。
   - **`AriaSnapshotReader`**: 原生调用 Playwright 官方 `page.locator(':root').aria_snapshot(mode='ai')` 生成标准化无障碍树快照，彻底过滤并剥离 `- /url: <url>` 子行与末尾多余冒号，对超链接无障碍名称本身为 URL 的情况自动化简为 `link [ref=...]`；并发拉取图片元素的真实 `src` 并关联父级嵌套超链接，产出与 Markdown 模式完全对齐的标准 `ref_map` 契约，原生支持 `pw_read(ref=...)` 结构化查询。
 
 ### 1.3 处理器层 (`tools/handlers/`)
