@@ -47,13 +47,14 @@ class TestInlineMarkdownReader(unittest.IsolatedAsyncioTestCase):
         blocks = [
             "# 标题一",
             "这是第一节详细介绍段落，长度适中。",
-            "## 标题二\n- [Ref: 1] [按钮: 点击下载]\n- 状态说明: 推荐选项",
-            "## 标题三\n- [Ref: 2] [链接: 历史版本目录]",
+            "## 标题二\n- [按钮: 点击下载][1]\n- 状态说明: 推荐选项",
+            "## 标题三\n- [历史版本目录][2]",
         ]
         chunks = reader._chunk_blocks(blocks, "https://example.com", "测试网页")
         self.assertGreaterEqual(len(chunks), 2)
         # 验证每个切片内 ref 完整，且切片首尾包含分页提示
-        self.assertIn("[Ref: 1]", "".join(chunks))
+        self.assertIn("[按钮: 点击下载][1]", "".join(chunks))
+        self.assertIn("[历史版本目录][2]", "".join(chunks))
         self.assertIn("[分页:", chunks[0])
 
     def test_password_masking_switch(self):
@@ -81,7 +82,7 @@ class TestInlineMarkdownReader(unittest.IsolatedAsyncioTestCase):
                 "blocks": [
                     "# 控制台",
                     "欢迎来到管理后台。",
-                    "- [Ref: 1] [按钮: 退出登录]",
+                    "- [按钮: 退出登录][1]",
                 ],
                 "elements": [
                     {"ref": 1, "tag": "button", "text": "退出登录"},
@@ -98,7 +99,7 @@ class TestInlineMarkdownReader(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot.total_pages, 1)
         self.assertIn("1", snapshot.ref_map)
         self.assertEqual(snapshot.ref_map["1"]["text"], "退出登录")
-        self.assertIn("[Ref: 1] [按钮: 退出登录]", snapshot.chunks[0])
+        self.assertIn("[按钮: 退出登录][1]", snapshot.chunks[0])
         self.assertIsInstance(snapshot.timestamp, float)
         self.assertGreater(snapshot.timestamp, 0)
 
@@ -112,9 +113,9 @@ class TestInlineMarkdownReader(unittest.IsolatedAsyncioTestCase):
                 "url": "https://example.com/article",
                 "blocks": [
                     "# 文章标题",
-                    "[Ref: 1] [图片: 架构图]",
-                    "- [Ref: 2] [链接: 官方文档]",
-                    "- [Ref: 3] [链接 (含图片): 查看原图]",
+                    "![图片: 架构图][1]",
+                    "- [官方文档][2]",
+                    "- [链接 (含图): 查看原图][3]",
                 ],
                 "elements": [
                     {"ref": 1, "tag": "img", "text": "架构图", "alt": "架构图", "src": "https://example.com/arch.png", "href": ""},
@@ -136,12 +137,24 @@ class TestInlineMarkdownReader(unittest.IsolatedAsyncioTestCase):
         self.assertIn("3", snapshot.ref_map)
         self.assertEqual(snapshot.ref_map["3"]["href"], "https://example.com/view")
         self.assertEqual(snapshot.ref_map["3"]["src"], "https://example.com/thumb.png")
+        self.assertIn("![图片: 架构图][1]", snapshot.raw_content)
+        self.assertIn("[官方文档][2]", snapshot.raw_content[2])
+        self.assertIn("[链接 (含图): 查看原图][3]", snapshot.raw_content[3])
 
     def test_inline_markdown_reader_script_contains_img_ref(self):
         reader = InlineMarkdownReader()
         script = reader.get_js_extractor_script()
         self.assertIn("img", script)
-        self.assertIn("[Ref: ${ref}] [图片", script)
+        self.assertIn("![图片: ${desc}][${ref}]", script)
+        self.assertIn("![图片][${ref}]", script)
+        self.assertIn("[链接 (含图): ${desc}][${ref}]", script)
+        self.assertIn("[${text}][${ref}]", script)
+        self.assertIn("[按钮: ${btnText}][${ref}]", script)
+        self.assertIn("[复选框:", script)
+        self.assertIn("[单选框:", script)
+        self.assertIn("[输入框", script)
+        self.assertIn("[选择框", script)
+        self.assertIn("[文本域", script)
         self.assertIn("href", script)
         self.assertIn("src", script)
 
@@ -169,7 +182,7 @@ class TestInlineMarkdownReader(unittest.IsolatedAsyncioTestCase):
             raw_content=[
                 "# 文档中心",
                 "Playwright 工具套件说明",
-                "- [Ref: 1] [链接: 下载客户端]",
+                "- [下载客户端][1]",
             ],
             ref_map={"1": {"ref": "1", "text": "下载客户端"}},
             total_pages=1,
@@ -177,13 +190,32 @@ class TestInlineMarkdownReader(unittest.IsolatedAsyncioTestCase):
         )
         res_found = reader.search(snapshot, "下载客户端")
         self.assertIn("找到 1 处匹配", res_found)
-        self.assertIn("[Ref: 1] [链接: 下载客户端]", res_found)
+        self.assertIn("[下载客户端][1]", res_found)
 
         res_not_found = reader.search(snapshot, "不存在的关键词")
         self.assertIn("未在页面正文中找到匹配", res_not_found)
 
         res_empty = reader.search(snapshot, "")
         self.assertIn("检索失败", res_empty)
+
+    def test_markdown_extractor_element_formatting_templates(self):
+        reader = InlineMarkdownReader()
+        script = reader.get_js_extractor_script()
+        # 验证各控件引用的模板语法
+        self.assertIn("![图片: ${desc}][${ref}]", script)
+        self.assertIn("![图片][${ref}]", script)
+        self.assertIn("[链接 (含图): ${desc}][${ref}]", script)
+        self.assertIn("[链接 (含图)][${ref}]", script)
+        self.assertIn("[${text}][${ref}]", script)
+        self.assertIn("[链接][${ref}]", script)
+        self.assertIn("[按钮: ${btnText}][${ref}]", script)
+        self.assertIn("[按钮][${ref}]", script)
+        self.assertIn("[复选框: ${label} (${checked})][${ref}]", script)
+        self.assertIn("[单选框: ${label} (${checked})][${ref}]", script)
+        self.assertIn("[输入框${detailStr}][${ref}]", script)
+        self.assertIn("[选择框${detailStr}][${ref}]", script)
+        self.assertIn("[文本域${detailStr}][${ref}]", script)
+        self.assertIn("[控件: ${text || tag}][${ref}]", script)
 
     def test_tool_metadata(self):
         reader = InlineMarkdownReader()
