@@ -88,7 +88,7 @@ class TestPluginMain(unittest.TestCase):
             meta = yaml.safe_load(f)
         self.assertEqual(meta["name"], "astrbot_plugin_playwright_tools")
         self.assertEqual(meta["display_name"], "PlaywrightTool")
-        self.assertEqual(meta["version"], "v1.2.0")
+        self.assertEqual(meta["version"], "v1.3.0")
 
     def test_conf_schema_v2_fields(self):
         with open("_conf_schema.json", "r", encoding="utf-8") as f:
