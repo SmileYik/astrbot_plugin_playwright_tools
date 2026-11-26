@@ -32,7 +32,8 @@ class InlineMarkdownReader(BasePageReader):
                 if (!el || el.nodeType !== 1) return false;
                 const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
                 if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;
-                if (el.getBoundingClientRect) {{
+                const tag = (el.tagName || '').toLowerCase();
+                if (el.getBoundingClientRect && tag !== 'img') {{
                     const rect = el.getBoundingClientRect();
                     if (rect.width <= 0 && rect.height <= 0 && !el.innerText && el.children.length === 0) return false;
                 }}
@@ -49,7 +50,7 @@ class InlineMarkdownReader(BasePageReader):
                 if (!node || node.nodeType !== 1) return false;
                 const tag = (node.tagName || '').toLowerCase();
                 const role = (node.getAttribute && node.getAttribute('role') || '').toLowerCase();
-                if (tag === 'button' || tag === 'a' || tag === 'input' || tag === 'select' || tag === 'textarea') return true;
+                if (tag === 'button' || tag === 'a' || tag === 'input' || tag === 'select' || tag === 'textarea' || tag === 'img') return true;
                 if (role === 'button' || role === 'link' || role === 'checkbox' || role === 'radio' || role === 'textbox' || role === 'combobox') return true;
                 if (node.hasAttribute && node.hasAttribute('onclick')) return true;
                 return false;
@@ -63,8 +64,22 @@ class InlineMarkdownReader(BasePageReader):
                 const placeholder = (node.getAttribute && node.getAttribute('placeholder')) || '';
                 const ariaLabel = ((node.getAttribute && node.getAttribute('aria-label')) || '').trim();
                 const title = ((node.getAttribute && node.getAttribute('title')) || '').trim();
+                let alt = ((node.getAttribute && node.getAttribute('alt')) || '').trim();
+                let src = (node.src || (node.getAttribute && node.getAttribute('src')) || '').trim();
+                let href = (node.href || (node.getAttribute && node.getAttribute('href')) || '').trim();
                 let rawText = (node.innerText || node.textContent || '').trim();
-                let text = rawText || ariaLabel || title;
+
+                if (!src && node.querySelector) {{
+                    try {{
+                        const childImg = node.querySelector('img');
+                        if (childImg) {{
+                            src = (childImg.src || (childImg.getAttribute && childImg.getAttribute('src')) || '').trim();
+                            if (!alt) alt = ((childImg.getAttribute && childImg.getAttribute('alt')) || '').trim();
+                        }}
+                    }} catch (e) {{}}
+                }}
+
+                let text = rawText || alt || ariaLabel || title;
                 if (text.length > 80) text = text.substring(0, 80) + '...';
 
                 let value = '';
@@ -82,16 +97,25 @@ class InlineMarkdownReader(BasePageReader):
                     name: name,
                     placeholder: placeholder,
                     value: value,
-                    text: text
+                    text: text,
+                    alt: alt,
+                    src: src,
+                    href: href,
+                    url: href || src || ''
                 }};
                 rawElements.push(elObj);
 
+                if (tag === 'img') {{
+                    const desc = alt || title || ariaLabel || '';
+                    return desc ? `[Ref: ${{ref}}] [图片: ${{desc}}]` : `[Ref: ${{ref}}] [图片]`;
+                }}
                 if (tag === 'button' || role === 'button' || (tag === 'input' && (type === 'button' || type === 'submit' || type === 'reset'))) {{
                     const btnText = text || value || '';
                     return btnText ? `[Ref: ${{ref}}] [按钮: ${{btnText}}]` : `[Ref: ${{ref}}] [按钮]`;
                 }}
                 if (tag === 'a' || role === 'link') {{
-                    return text ? `[Ref: ${{ref}}] [链接: ${{text}}]` : `[Ref: ${{ref}}] [链接]`;
+                    const label = src ? '链接 (含图片)' : '链接';
+                    return text ? `[Ref: ${{ref}}] [${{label}}: ${{text}}]` : `[Ref: ${{ref}}] [${{label}}]`;
                 }}
                 if (tag === 'input') {{
                     if (type === 'checkbox') {{
@@ -139,11 +163,6 @@ class InlineMarkdownReader(BasePageReader):
 
                 const tag = node.tagName.toLowerCase();
                 if (tag === 'br') return '\\n';
-                if (tag === 'img') {{
-                    const alt = (node.getAttribute && node.getAttribute('alt')) || '';
-                    const src = (node.getAttribute && node.getAttribute('src')) || '';
-                    return src ? `![${{alt}}](${{src}})` : (alt ? `[图片: ${{alt}}]` : '');
-                }}
 
                 if (isInteractive(node)) {{
                     let ref;
@@ -260,13 +279,6 @@ class InlineMarkdownReader(BasePageReader):
 
                 if (tag === 'hr') {{
                     blocks.push('---');
-                    return;
-                }}
-
-                if (tag === 'img') {{
-                    const alt = (node.getAttribute && node.getAttribute('alt')) || '';
-                    const src = (node.getAttribute && node.getAttribute('src')) || '';
-                    if (src) blocks.push(`![${{alt}}](${{src}})`);
                     return;
                 }}
 
@@ -418,6 +430,8 @@ class InlineMarkdownReader(BasePageReader):
                     if ref_str:
                         el_copy = dict(el)
                         el_copy["ref"] = ref_str
+                        if "url" not in el_copy or not el_copy["url"]:
+                            el_copy["url"] = el_copy.get("href") or el_copy.get("src") or ""
                         ref_map[ref_str] = el_copy
 
         chunks = self._chunk_blocks(blocks, page_url, title)

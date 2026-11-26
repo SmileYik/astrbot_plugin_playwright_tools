@@ -3,6 +3,10 @@ import sys
 import unittest
 from unittest.mock import AsyncMock, MagicMock
 
+if "astrbot" not in sys.modules:
+    sys.modules["astrbot"] = MagicMock()
+    sys.modules["astrbot.api"] = MagicMock()
+
 root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
@@ -97,6 +101,49 @@ class TestInlineMarkdownReader(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[Ref: 1] [按钮: 退出登录]", snapshot.chunks[0])
         self.assertIsInstance(snapshot.timestamp, float)
         self.assertGreater(snapshot.timestamp, 0)
+
+    async def test_inline_markdown_reader_extracts_img_ref_and_urls(self):
+        reader = InlineMarkdownReader(chunk_char_limit=2000, mask_passwords=True)
+        mock_page = AsyncMock()
+
+        async def fake_eval(script):
+            return {
+                "title": "测试图文页",
+                "url": "https://example.com/article",
+                "blocks": [
+                    "# 文章标题",
+                    "[Ref: 1] [图片: 架构图]",
+                    "- [Ref: 2] [链接: 官方文档]",
+                    "- [Ref: 3] [链接 (含图片): 查看原图]",
+                ],
+                "elements": [
+                    {"ref": 1, "tag": "img", "text": "架构图", "alt": "架构图", "src": "https://example.com/arch.png", "href": ""},
+                    {"ref": 2, "tag": "a", "text": "官方文档", "alt": "", "src": "", "href": "https://example.com/docs"},
+                    {"ref": 3, "tag": "a", "text": "查看原图", "alt": "缩略图", "src": "https://example.com/thumb.png", "href": "https://example.com/view"},
+                ],
+                "allocated_count": 3,
+            }
+
+        mock_page.evaluate = fake_eval
+        snapshot = await reader.extract_snapshot(mock_page, "https://example.com/article")
+        self.assertIn("1", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["1"]["tag"], "img")
+        self.assertEqual(snapshot.ref_map["1"]["src"], "https://example.com/arch.png")
+        self.assertEqual(snapshot.ref_map["1"]["url"], "https://example.com/arch.png")
+        self.assertIn("2", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["2"]["href"], "https://example.com/docs")
+        self.assertEqual(snapshot.ref_map["2"]["url"], "https://example.com/docs")
+        self.assertIn("3", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["3"]["href"], "https://example.com/view")
+        self.assertEqual(snapshot.ref_map["3"]["src"], "https://example.com/thumb.png")
+
+    def test_inline_markdown_reader_script_contains_img_ref(self):
+        reader = InlineMarkdownReader()
+        script = reader.get_js_extractor_script()
+        self.assertIn("img", script)
+        self.assertIn("[Ref: ${ref}] [图片", script)
+        self.assertIn("href", script)
+        self.assertIn("src", script)
 
     def test_format_chunk(self):
         reader = InlineMarkdownReader(chunk_char_limit=150)
