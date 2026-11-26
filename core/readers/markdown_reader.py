@@ -69,6 +69,20 @@ class InlineMarkdownReader(BasePageReader):
 
         return f"{header}\n\n{body}\n\n{footer}"
 
+    def _render_tentative(
+        self,
+        group: list[str],
+        page_index: int,
+        url: str = "",
+        title: str = "",
+    ) -> str:
+        """预渲染切片用于估算字符预算。
+        
+        使用保守的 total_pages 估算，确保最终渲染时因页码位数增加不会突破预算。
+        """
+        est_total = max(page_index + 1, 99)
+        return self._render_chunk(group, page_index, est_total, url, title)
+
     TABLE_SEPARATOR_PATTERN = re.compile(r"^\s*\|(?:\s*:?-+:?\s*\|)+\s*$")
 
     @classmethod
@@ -110,10 +124,9 @@ class InlineMarkdownReader(BasePageReader):
 
             # 1. 优先尝试将整个 block 完整塞入当前页
             tentative = current_group + [block] if current_group else [block]
-            tentative_str = self._render_chunk(
+            tentative_str = self._render_tentative(
                 tentative,
                 len(groups) + 1,
-                len(groups) + 2,
                 url,
                 title,
             )
@@ -128,10 +141,9 @@ class InlineMarkdownReader(BasePageReader):
                 if current_group:
                     min_table_block = "\n".join(header_lines + [data_rows[0]])
                     tentative_min = current_group + [min_table_block]
-                    tentative_min_str = self._render_chunk(
+                    tentative_min_str = self._render_tentative(
                         tentative_min,
                         len(groups) + 1,
-                        len(groups) + 2,
                         url,
                         title,
                     )
@@ -150,10 +162,9 @@ class InlineMarkdownReader(BasePageReader):
                     candidate_rows = current_table_rows + [row]
                     candidate_table = "\n".join(header_lines + candidate_rows)
                     candidate_page = current_group + [candidate_table]
-                    candidate_str = self._render_chunk(
+                    candidate_str = self._render_tentative(
                         candidate_page,
                         len(groups) + 1,
-                        len(groups) + 2,
                         url,
                         title,
                     )
@@ -182,12 +193,87 @@ class InlineMarkdownReader(BasePageReader):
                 if current_table_rows:
                     current_group.append("\n".join(header_lines + current_table_rows))
             else:
-                # 普通 Block 无法完整放入当前页
+                # 3. 普通 Block 无法完整放入当前页
+                # 若当前页已有其他前置块，先封顶当前页
                 if current_group:
                     groups.append(current_group)
-                    current_group = [block]
-                else:
-                    current_group = [block]
+                    current_group = []
+
+                # 检查 block 自身是否能塞入新的空页
+                tentative_str = self._render_tentative(
+                    [block],
+                    len(groups) + 1,
+                    url,
+                    title,
+                )
+                if len(tentative_str) <= self.chunk_char_limit:
+                    current_group.append(block)
+                    continue
+
+                # block 自身超出字符预算：执行行级微切分装箱
+                lines = block.split("\n")
+                current_lines: list[str] = []
+
+                line_idx = 0
+                n_lines = len(lines)
+                while line_idx < n_lines:
+                    line = lines[line_idx]
+
+                    candidate_lines = current_lines + [line]
+                    candidate_block = "\n".join(candidate_lines)
+                    candidate_page = current_group + [candidate_block]
+                    candidate_str = self._render_tentative(
+                        candidate_page,
+                        len(groups) + 1,
+                        url,
+                        title,
+                    )
+
+                    if len(candidate_str) <= self.chunk_char_limit:
+                        current_lines.append(line)
+                        line_idx += 1
+                    else:
+                        if current_lines:
+                            # 当前页已有装入行，封顶当前页
+                            current_group.append("\n".join(current_lines))
+                            groups.append(current_group)
+                            current_group = []
+                            current_lines = []
+                            # line 在下一页重新尝试
+                        else:
+                            # 单行 line 在空页上也超限：执行字符级硬切片切断
+                            rem_line = line
+                            while rem_line:
+                                base_len = len(
+                                    self._render_tentative([""], len(groups) + 1, url, title)
+                                )
+                                avail = self.chunk_char_limit - base_len
+                                if avail <= 0:
+                                    avail = 1
+                                k = min(len(rem_line), avail)
+                                while (
+                                    k > 1
+                                    and len(
+                                        self._render_tentative(
+                                            [rem_line[:k]], len(groups) + 1, url, title
+                                        )
+                                    )
+                                    > self.chunk_char_limit
+                                ):
+                                    k -= 1
+
+                                piece = rem_line[:k]
+                                rem_line = rem_line[k:]
+
+                                if rem_line:
+                                    groups.append([piece])
+                                else:
+                                    current_lines.append(piece)
+
+                            line_idx += 1
+
+                if current_lines:
+                    current_group.append("\n".join(current_lines))
 
         if current_group:
             groups.append(current_group)

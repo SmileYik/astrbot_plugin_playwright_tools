@@ -116,6 +116,79 @@ class TestInlineMarkdownReader(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(header, chunk, f"分页 {idx} 包含表格数据但缺少表头行")
                 self.assertIn(separator, chunk, f"分页 {idx} 包含表格数据但缺少分隔行")
 
+    def test_chunk_blocks_giant_block_fallback_splitting(self):
+        reader = InlineMarkdownReader(chunk_char_limit=300)
+        # 构造由 60 个列表项组成的巨型非表格 block
+        items = [f"- [条目 {i}][{i}] 这是第 {i} 个长列表说明条目详细描述信息" for i in range(1, 61)]
+        giant_block = "\n".join(items)
+
+        chunks = reader._chunk_blocks([giant_block], url="https://example.com/wiki", title="巨型列表")
+        self.assertGreater(len(chunks), 3)
+
+        for idx, chunk in enumerate(chunks, 1):
+            self.assertLessEqual(len(chunk), 300, f"分页 {idx} 字符数超出预算: {len(chunk)}")
+
+        all_text = "".join(chunks)
+        self.assertIn("[条目 1][1]", all_text)
+        self.assertIn("[条目 60][60]", all_text)
+
+    def test_gtnh_dense_navigation_table_snapshot_limit(self):
+        reader = InlineMarkdownReader(chunk_char_limit=2000)
+        # 模拟 50 行、5 列矩阵、250 个链接的复杂 GTNH Wiki 导航大表
+        header = "| 模块导航 | 能源动力 | 自动化物流 | 矿业勘探 | 终极科技 |"
+        separator = "| :--- | :--- | :--- | :--- | :--- |"
+        rows = []
+        ref_id = 1
+        for r in range(1, 51):
+            cells = []
+            for col_name in ["导航", "能源", "物流", "矿业", "科技"]:
+                cells.append(f"[{col_name}发展路线R{r}: 核心科技树与多方块机器自动化合成配方详细指南][{ref_id}]")
+                ref_id += 1
+            rows.append(f"| {' | '.join(cells)} |")
+        table_block = "\n".join([header, separator] + rows)
+
+        chunks = reader._chunk_blocks(
+            [table_block],
+            url="https://gtnh.miraheze.org/wiki/Main_Page",
+            title="GT New Horizons Wiki",
+        )
+        self.assertGreater(len(chunks), 5)
+
+        for idx, chunk in enumerate(chunks, 1):
+            self.assertLessEqual(len(chunk), 2000, f"分页 {idx} 字符数超出预算: {len(chunk)}")
+            self.assertIn(header, chunk, f"分页 {idx} 缺少表头")
+            self.assertIn(separator, chunk, f"分页 {idx} 缺少分隔行")
+
+        all_text = "".join(chunks)
+        self.assertIn("[导航发展路线R1: 核心科技树与多方块机器自动化合成配方详细指南][1]", all_text)
+        self.assertIn("[科技发展路线R50: 核心科技树与多方块机器自动化合成配方详细指南][250]", all_text)
+
+    def test_single_unbroken_giant_line_safety(self):
+        reader = InlineMarkdownReader(chunk_char_limit=1000)
+        # 构造一个单行 4,000 字符的无换行极端文本
+        giant_line = "".join([f"segment_{i:04d}_data_" for i in range(250)])[:4000]
+        self.assertEqual(len(giant_line), 4000)
+        self.assertNotIn("\n", giant_line)
+
+        chunks = reader._chunk_blocks([giant_line], url="https://example.com/raw", title="长文本")
+        self.assertGreater(len(chunks), 1)
+
+        # 验证每个 chunk 严格受控在 1000 字符内
+        for idx, chunk in enumerate(chunks, 1):
+            self.assertLessEqual(len(chunk), 1000, f"分页 {idx} 字符数超出预算: {len(chunk)}")
+
+        # 提取各个分页的正文内容并拼接，验证内容未丢失
+        extracted_body_parts = []
+        for chunk in chunks:
+            # chunk 结构为: header \n\n body \n\n footer
+            # 去除首尾的页眉与页脚
+            parts = chunk.split("\n\n")
+            body_parts = parts[1:-1]
+            extracted_body_parts.append("\n\n".join(body_parts))
+
+        reconstructed = "".join(extracted_body_parts)
+        self.assertEqual(reconstructed, giant_line, "长文本分片重组后内容不一致，存在信息丢失")
+
     def test_password_masking_switch(self):
         reader_masked = InlineMarkdownReader(mask_passwords=True)
         html_script = reader_masked.get_js_extractor_script()
