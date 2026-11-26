@@ -8,7 +8,7 @@
 
 ### 阅读器 Ref 规范化与按需 URL 查询 (Reader Ref Standardization & On-Demand URL Query)
 - **普通图片 Ref ID 分配与 URL 隐藏**：`InlineMarkdownReader` 将页面上的普通图片（`<img>`）纳入统一的 Ref 编号管理，隐藏长图片 URL 并内联渲染为 `![图片: alt][Ref]`，防止 Token 膨胀并实现图片精准定位。
-- **内联控件 Markdown 引用风排版与 JS 独立脚本解耦**：将内联交互控件与超链接全面升级为原生 Markdown 引用脚注风格（`[文本][Ref]`、`![图片: 描述][Ref]`、`[按钮: 文本][Ref]`），降低约 45% Token 消耗；将 300+ 行 JS DOM 提取逻辑完全解耦抽离为独立的 `core/readers/markdown_extractor.js` 脚本。
+- **内联控件 Markdown 引用风排版与 JS 独立脚本解耦**：将内联交互控件与超链接全面升级为原生 Markdown 引用脚注风格（`[文本][Ref]`、`![图片: 描述][Ref]`、`[按钮: 文本][Ref]`），显著精简元素语法骨架，密集链接区域字符冗余减少约 30%；将 300+ 行 JS DOM 提取逻辑完全解耦抽离为独立的 `core/readers/markdown_extractor.js` 脚本。
 - **表格感知智能跨页切分与表头自动回填**：`_chunk_blocks` 引入 Markdown 表格结构识别与逐行装箱机制，多行表格跨页时在后续切片首部自动注入表头行与分隔行，确保每个分页都是列语义清晰、语法自闭合的合法表格。
 - **单页字符预算防膨胀与行级兜底微切分**：对超大列表、代码块与极端长文本实施行级与字符级装箱微切分兜底，防范单页快照数万字符膨胀，确保单页总字符严格受控于 `page_chunk_char_limit`（默认 2000）。
 - **ARIA 语义树 URL 剥离与脱敏**：`AriaSnapshotReader` 彻底过滤 YAML 语义树中的 `- /url: <url>` 子行与末尾多余冒号，对超链接无障碍名称本身为 URL 的情况自动化简为 `link [ref=...]`，正文大幅降低 Token 开销。
