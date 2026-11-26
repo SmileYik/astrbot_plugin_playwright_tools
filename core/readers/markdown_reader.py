@@ -513,6 +513,11 @@ class InlineMarkdownReader(BasePageReader):
                         "description": "关键词快速检索页面内容 (可选)",
                         "default": "",
                     },
+                    "ref": {
+                        "type": "string",
+                        "description": "要查询详细信息或目标 URL 的元素 Ref 编号（如 '1', '2'） (可选)",
+                        "default": "",
+                    },
                     "refresh": {
                         "type": "boolean",
                         "description": "是否强制刷新重新提取页面快照 (默认为False)",

@@ -252,6 +252,7 @@ class PwReadTool(FunctionTool[AstrAgentContext]):
             page = 1
         keyword = str(kwargs.get("keyword") or "")
         refresh = bool(kwargs.get("refresh", False))
+        ref = str(kwargs.get("ref") or "").strip()
 
         res = await _execute_with_timeout(
             _invoke_handler(
@@ -261,6 +262,7 @@ class PwReadTool(FunctionTool[AstrAgentContext]):
                 page=page,
                 keyword=keyword,
                 refresh=refresh,
+                ref=ref,
                 session_name=session_name,
                 sender_name=sender_name,
             ),

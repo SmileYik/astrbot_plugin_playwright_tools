@@ -139,6 +139,25 @@ class TestTools(unittest.TestCase):
         self.assertFalse(called_args.get("refresh"))
         self.assertEqual(res, "搜索结果: 测试关键字")
 
+    def test_pw_read_schema_has_ref_property(self):
+        self.assertIn("ref", PW_READ_SCHEMA["properties"])
+        self.assertEqual(PW_READ_SCHEMA["properties"]["ref"]["type"], "string")
+
+    def test_read_tool_dispatch_ref_query(self):
+        called_args = {}
+        async def mock_read(s_id, u_id, page=1, keyword="", refresh=False, ref="", **kwargs):
+            called_args["page"] = page
+            called_args["keyword"] = keyword
+            called_args["refresh"] = refresh
+            called_args["ref"] = ref
+            return f"Ref 查询结果: {ref}"
+        self.mock_page_handler.read_page = mock_read
+
+        with patch("asyncio.wait_for", fake_wait_for):
+            res = run_coro(self.read_tool.call(self.mock_context_wrapper, ref="12"))
+        self.assertEqual(called_args.get("ref"), "12")
+        self.assertEqual(res, "Ref 查询结果: 12")
+
     def test_read_tool_schema(self):
         props = PW_READ_SCHEMA["properties"]
         self.assertIn("page", props)

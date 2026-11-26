@@ -40,6 +40,10 @@ PW_READ_SCHEMA = {
             "type": "string",
             "description": "页面内容关键词定位检索，若提供则返回包含关键词的上下文片段与元素 (可选)",
         },
+        "ref": {
+            "type": "string",
+            "description": "要查询详细信息或目标 URL 的元素 Ref 编号（如 '1', '2'）。传入时将直接返回该 Ref 对应的类型、标题及完整链接/图片地址 (可选)",
+        },
         "refresh": {
             "type": "boolean",
             "description": "是否强制重新获取当前网页快照（例如等待动态内容加载完成或确认页面有最新更新时使用，默认为 False）",
