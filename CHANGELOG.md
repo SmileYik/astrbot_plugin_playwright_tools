@@ -4,6 +4,16 @@
 
 ---
 
+## [v1.4.2] - 2026-11-27
+
+### 工具调用前消减机制与白名单精准拦截 (Pre-Tool Execution History Cleanup & Whitelist Guard)
+- **触发时机迁移至 `on_using_llm_tool`**：将工具历史记录的双水位线检测与副 AI 压缩触发时机从会话开头的 `on_llm_request` 迁移至每次大模型准备调用工具前（`on_using_llm_tool`）。在此阶段，本次工具调用的新输出尚未产生并天然免除，而同轮多步调用（如连续调用 `pw_page`、`pw_read`、`pw_interact`）或先前交互中产生的膨胀历史能被及时消减。
+- **白名单工具严格过滤**：仅当大模型即将调用本插件四大核心工具（`pw_page`、`pw_read`、`pw_interact`、`pw_media`）时才触发历史消减流程，对其他工具直接放行。
+- **Agent 运行时上下文精准捕获**：通过 `@filter.on_agent_begin` 捕获 `run_context` 并暂存至事件元数据，在 `on_using_llm_tool` 中直接操作其维护的 `run_context.messages`，并在 `@filter.on_agent_done` 结束时主动注销引用，防范内存泄露。
+- **多态上下文与 ContentPart 支持**：`HistoryCleaner.process_contexts` 多态兼容 `list[Message]`、`run_context` 与 `req.contexts`；`_get_content` 支持多部件（`ContentPart` / `TextPart`）文本提取。
+
+---
+
 ## [v1.4.1] - 2026-11-27
 
 ### 历史清理实时运行日志与双重审计持久化 (History Cleanup Real-Time Logging & Dual-Audit Persistence)
