@@ -166,7 +166,7 @@
           "aria_snapshot"
         ],
         "labels": [
-          "内联交互 Markdown (Inline Markdown) [推荐]",
+          "内联交互 Markdown (Inline Markdown)",
           "无障碍语义树快照 (ARIA Snapshot)"
         ],
         "subtitles": [
@@ -222,7 +222,7 @@
           "custom"
         ],
         "labels": [
-          "Chromium (推荐)",
+          "Chromium",
           "Firefox",
           "WebKit",
           "其他 (自定义路径)"
@@ -397,7 +397,7 @@
         "type": "int",
         "description": "审计保留天数",
         "hint": "审计记录保存天数，超过将自动清理",
-        "default": 30,
+        "default": 7,
         "slider": {
           "min": 1,
           "max": 365,
@@ -436,8 +436,8 @@
         "default": 8000,
         "slider": {
           "min": 2000,
-          "max": 30000,
-          "step": 500
+          "max": 1024000,
+          "step": 1000
         },
         "condition": {
           "enable_cleanup": true
@@ -450,8 +450,8 @@
         "default": 3000,
         "slider": {
           "min": 1000,
-          "max": 15000,
-          "step": 500
+          "max": 1024000,
+          "step": 1000
         },
         "condition": {
           "enable_cleanup": true
@@ -468,7 +468,7 @@
         ],
         "labels": [
           "直接删除 (占位清空)",
-          "副 AI 压缩 (总结提炼)"
+          "AI 压缩 (总结提炼)"
         ],
         "subtitles": [
           "直接将历史正文清空替换为简短占位符，零额外开销",
@@ -496,7 +496,7 @@
         "default": 0,
         "slider": {
           "min": 0,
-          "max": 50000,
+          "max": 1024000,
           "step": 1000
         },
         "condition": {
