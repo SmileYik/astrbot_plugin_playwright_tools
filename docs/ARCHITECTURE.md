@@ -82,6 +82,7 @@ flowchart TD
 - **`ContextManager`**: 管理多租户 `BrowserSessionContext` 实例。负责个人模式与会话模式的上下文隔离路由、协作者授权、Cookie 注入、空闲定时回收、维护单调递增的 Ref 编号计数器，并在创建上下文异常时自动执行回滚清理。同时负责底层浏览器进程生命周期的智能空闲回收（无活跃上下文超过 `browser_idle_timeout_minutes` 自动关闭底层驱动）、崩溃失联事件（`disconnected`）感知自愈，以及在插件终止时通过并发 5.0 秒总超时熔断机制批量注销存量上下文。
 - **`SecurityManager`**: 权限与白名单守卫。执行域名通配符匹配（如 `*.bing.com`）、12 项原子动作权限细粒度校验，在页面创建和路由阶段拦截未授权顶层跳转、弹出新窗口与 iframe 导航，同时对放行网页自动保留内部第三方静态资源的正常加载。
 - **`AuditLogger`**: SQLite 审计记录器。异步记录全量调用（起止时间、会话、上下文、目标域名、入参与结果），并在初始化与周期轮询中自动清理超期数据。
+- **`HistoryCleaner`**: 上下文历史清理器。基于高低双水位线在请求发送前自动消减已产生的工具调用记录，支持直接清理与副 AI 紧凑事实摘要压缩，配合 `AuditLogger` 实现工具调用与生命周期双重审计落盘。
 - **`readers/`（双阅读提炼器）**:
   - **`InlineMarkdownReader`**: 将网页标题、段落、列表、表格、图片及带 Ref ID 的控件融合成语义清晰的 Markdown 文档；底层 DOM 提炼逻辑与 Python 完全解耦（独立为 `core/readers/markdown_extractor.js`），内联控件排版全面采用原生 Markdown 引用脚注风格（`[文本][Ref]`、`![图片: 描述][Ref]`），显著精简元素语法骨架并在密集链接区减少约 30% 字符冗余；引入表格感知智能分页，表格跨页时在后续切片首部自动补齐表头行与分隔行，并配合行级/切片级微切分兜底，确保单页总字符严格受控于 `page_chunk_char_limit` 预算。
   - **`AriaSnapshotReader`**: 原生调用 Playwright 官方 `page.locator(':root').aria_snapshot(mode='ai')` 生成标准化无障碍树快照，过滤并剥离 `- /url: <url>` 子行与末尾多余冒号，对超链接无障碍名称本身为 URL 的情况自动化简为 `link [ref=...]`；并发拉取图片元素的真实 `src` 并关联父级嵌套超链接，产出与 Markdown 模式完全对齐的标准 `ref_map` 契约，原生支持 `pw_read(ref=...)` 结构化查询。
@@ -231,6 +232,12 @@ flowchart TD
 - **协议结构安全保障**：
   - 严格保持 `assistant(tool_calls)` 与 `tool(tool_call_id)` 结构完整，仅替换 `content`；
   - 直接删除模式替换为安全占位符；副 AI 压缩模式按轮次聚合生成紧凑摘要，非末尾工具填入并入标记，末尾工具写回摘要。
+- **全流程实时日志追踪**：
+  - 消减全链路使用 AstrBot 官方标准的 `from astrbot.api import logger` 输出规范化日志；
+  - 包含超标触发日志（当前字符数、高水位与低水位目标）、逐组消减执行日志（调用数与释放字符数）、副 AI 压缩调用及节省率日志、异常降级警告日志以及全局消减汇总日志。
+- **双重审计持久化机制 (HistoryCleaner 与 AuditLogger 协作)**：
+  - **工具调用审计 (`tool_audit_logs`)**：调用 `AuditLogger.log_action` 记录 `pw_history:compress` 或 `pw_history:delete` 动作，将处理组索引、调用数量、原始字符数、压缩后字符数与执行耗时持久化至工具审计表；
+  - **生命周期审计 (`context_lifecycle_logs`)**：调用 `AuditLogger.log_lifecycle` 记录 `history_compress` 或 `history_cleanup` 事件，将清理策略、字符变化、节省比例及副 AI 模型等结构化详情记录至生命周期事件表，与上下文生命周期审计闭环对齐。
 - **自动持久化机制**：
   - 深度结合 AstrBot 原生 `context_observer`，钩子完成时自动调用 `stage_history()` 将变更写回会话数据库，避免二次重复压缩与无谓 Token 消耗。
 

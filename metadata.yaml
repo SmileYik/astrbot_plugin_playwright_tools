@@ -1,7 +1,7 @@
 name: astrbot_plugin_playwright_tools 
 display_name: PlaywrightTool 
 desc: 给大模型用的网页浏览器插件。支持打开网页、阅读文章与点击填表。采用元素编号避免乱点并减少 Token 消耗，支持双水位线工具历史消减与副 AI 压缩，自带防网站拦截与后台管理控制台。
-version: v1.4.0
+version: "v1.4.1"
 author: SmileYik
 repo: https://github.com/SmileYik/astrbot_plugin_playwright_tools
 views:

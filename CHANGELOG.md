@@ -4,6 +4,16 @@
 
 ---
 
+## [v1.4.1] - 2026-11-27
+
+### 历史清理实时运行日志与双重审计持久化 (History Cleanup Real-Time Logging & Dual-Audit Persistence)
+- **全流程实时运行日志**：`HistoryCleaner` 在执行高低双水位线历史消减全过程中，全程输出标准 `logger.info` 与 `logger.warning` 规范化日志，包含高水位超标触发、逐组消减进度、副 AI 压缩调用与字符节省率统计、副 AI 失败平滑降级提示以及上下文最终字符消减汇总。
+- **双重审计落盘体系与数据持久化**：
+  - **工具调用审计 (`tool_audit_logs`)**：通过 `AuditLogger.log_action` 记录 `pw_history:compress` 或 `pw_history:delete` 动作，记录消减组索引、工具调用数量、原始字符、压缩后字符及执行耗时。
+  - **生命周期审计 (`context_lifecycle_logs`)**：通过 `AuditLogger.log_lifecycle` 记录 `history_compress` 或 `history_cleanup` 事件，将消减策略、水位线阈值、节省字符数、副 AI 提供商等结构化元数据持久化落盘，与会话生命周期审计深度对齐。
+
+---
+
 ## [v1.4.0] - 2026-11-27
 
 ### 纯双水位线工具历史消减与副 AI 压缩 (Double Watermark Tool History Cleanup & Compression)

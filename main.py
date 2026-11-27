@@ -8,6 +8,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
 
 PLUGIN_NAME = "astrbot_plugin_playwright_tools"
+__version__ = "v1.4.1"
 
 from .api.audit_api import AuditApiHandler
 from .api.lifecycle_api import LifecycleApiHandler
@@ -29,7 +30,7 @@ from .tools.tools import PwPageTool, PwReadTool, PwInteractTool, PwMediaTool
     "PlaywrightTool",
     "SmileYik",
     "给大模型用的网页浏览器插件。支持打开网页、阅读文章与点击填表。采用元素编号避免乱点并减少 Token 消耗，支持双水位线工具历史消减与副 AI 压缩，自带防网站拦截与后台管理控制台。",
-    "v1.4.0"
+    "v1.4.1"
 )
 class PlaywrightToolPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):

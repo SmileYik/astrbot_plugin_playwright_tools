@@ -2,10 +2,10 @@
 
 # PlaywrightTool 
 
-<img src="logo.png" alt="logo" width="40%" />
+<img src="https://github.com/SmileYik/astrbot_plugin_playwright_tools/blob/master/logo.png?raw=true" alt="logo" width="25%" />
 
 
-[![Moe Counter](https://count.getloli.com/@Playwright-Tool?theme=booru-touhoulat&padding=7&offset=0&align=top&scale=0.5&pixelated=1&darkmode=auto)](https://github.com/SmileYik/astrbot_plugin_playwright_tools)
+[![Moe Counter](https://count.getloli.com/@Playwright-Tool?theme=booru-touhoulat&padding=7&offset=0&align=top&scale=0.3&pixelated=1&darkmode=auto)](https://github.com/SmileYik/astrbot_plugin_playwright_tools)
 
 基于 Playwright (首选 Camoufox 驱动) 的 AstrBot 网页浏览与自动化操作插件。  
 为大模型提供低 Token 消耗、高精准度的元素编号（Ref ID）交互与长页面结构化阅读能力，具备完善的多租户隐私隔离、细粒度白名单防护与可视化运维审计。
@@ -25,7 +25,7 @@
   - **高低双水位线管理**：当本插件工具累计字符超过高水位（`high_watermark`）时自动介入，从最旧轮次按 FIFO 退水直至回落至低水位（`low_watermark`），最新完成的工具调用自然保留在队尾供即时追问。
   - **直接删除与副 AI 智能压缩**：支持将旧工具内容替换为安全占位符，或唤起配置的副 AI 生成结构化事实摘要写回；绝不破坏 `tool_call_id` 配对骨架，杜绝 400 报错。
   - **人设面具融合与输入上限控制**：支持为副 AI 指定或默认继承系统人设面具；支持通过 `compress_max_input_chars` 设定副 AI 输入预算（0 为不限长度，大于 0 直接截断），并在副 AI 异常时自动降级为安全占位。
-  - **事件流自动持久化**：深度契合 AstrBot 上下文观察器机制，清理/压缩后的历史自动同步写回会话数据库，无二次重复压缩开销。
+  - **事件流自动持久化与双重审计**：深度契合 AstrBot 上下文观察器机制，清理/压缩后的历史自动同步写回会话数据库，无二次重复压缩开销；具备全流程实时运行日志输出，并支持双重审计持久化（`context_lifecycle_logs` 生命周期事件与 `tool_audit_logs` 工具调用审计）。
 - **全面键鼠交互与智能报错脱敏**：
   - 原生支持点击、输入、下拉选择、鼠标悬停（hover）、焦点管理（focus/blur）、元素拖拽（drag）、键盘按键及平滑滚动。
   - 自动剥离底层冗余指针跟踪日志，遇到超时、弹层遮挡时输出单行脱敏提示并自动附加下一步行动建议（`[推荐操作: ...]`）。
