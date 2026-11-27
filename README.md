@@ -23,10 +23,12 @@
   - **自适应分页预算**：基于字符预算（`page_chunk_char_limit`）平滑切分超长文档，大模型可按页阅读或定向关键词检索。
 - **纯双水位线工具历史消减与副 AI 压缩**：
   - **工具执行切面拦截与全场景支持**：将消减器直接注入至四大核心工具内部，在工具每次执行前就地检测并消减运行时上下文（`run_context.messages`）。无论是由主代理直接调用还是由子代理（如 `researcher` 编排、`transfer_to_*` 等）异步调用，长网页阅读结果均可在多步交互中即时压缩释放。
-  - **高低双水位线管理**：当本插件工具累计字符超过高水位（`high_watermark`）时自动介入，从最旧轮次按 FIFO 退水直至回落至低水位（`low_watermark`），最新完成的工具调用自然保留在队尾供即时追问。
-  - **直接删除与副 AI 智能压缩**：支持将旧工具内容替换为安全占位符，或唤起配置的副 AI 生成结构化事实摘要写回；绝不破坏 `tool_call_id` 配对骨架，杜绝 400 报错。
+  - **高低双水位线管理**：当本插件工具累计字符超过高水位（`high_watermark`）时自动介入，从最旧记录按 FIFO 退水直至回落至低水位（`low_watermark`），最新完成的工具调用自然保留在队尾供即时追问。
+  - **单批次聚合消减 (Single-Pass Batch Compression)**：避免在多轮工具调用下重复发起多次副 AI 请求。按 FIFO 一次性贪心聚合候选工具条目至低水位目标，仅发起 1 次副 AI 请求完成结构化压缩，前 N-1 条写入合并占位符，末条写入聚合摘要。
+  - **历史摘要计入水位选项 (`include_compressed_in_watermark`)**：可按需配置是否将已生成的历史摘要计入水位统计并参与滚动重压缩。默认为 `false`（不计入且不重复压缩）；开启后计入水位统计并在再次超限时参与新一轮滚动重压缩。
+  - **直接删除与协议安全保障**：支持直接删除策略将旧内容替换为占位符；保留 `assistant(tool_calls)` 与 `tool(tool_call_id)` 结构配对，仅更新 `content`，避免协议校验异常。
   - **人设面具融合与输入上限控制**：支持为副 AI 指定或默认继承系统人设面具；支持通过 `compress_max_input_chars` 设定副 AI 输入预算（0 为不限长度，大于 0 直接截断），并在副 AI 异常时自动降级为安全占位。
-  - **事件流自动持久化与双重审计**：深度契合 AstrBot 上下文观察器机制，清理/压缩后的历史自动同步写回会话数据库，无二次重复压缩开销；具备全流程实时运行日志输出，并支持双重审计持久化（`context_lifecycle_logs` 生命周期事件与 `tool_audit_logs` 工具调用审计）。
+  - **事件流自动持久化与双重审计**：深度契合 AstrBot 上下文观察器机制，清理/压缩后的历史自动同步写回会话数据库，避免二次重复计算；具备全流程实时运行日志输出，并支持双重审计持久化（`context_lifecycle_logs` 生命周期事件与 `tool_audit_logs` 工具调用审计）。
 - **全面键鼠交互与智能报错脱敏**：
   - 原生支持点击、输入、下拉选择、鼠标悬停（hover）、焦点管理（focus/blur）、元素拖拽（drag）、键盘按键及平滑滚动。
   - 自动剥离底层冗余指针跟踪日志，遇到超时、弹层遮挡时输出单行脱敏提示并自动附加下一步行动建议（`[推荐操作: ...]`）。
@@ -93,7 +95,7 @@ playwright install chromium
 
 ### 2. WebUI 配置说明 (`_conf_schema.json`)
 
-配置已划分为 5 大业务分组，支持在 AstrBot WebUI 中折叠与展开：
+配置已划分为 6 大业务分组，支持在 AstrBot WebUI 中折叠与展开：
 
 #### ① 安全与权限 (`security`)
 | 配置项 | 类型 | 默认值 | 作用描述 |
@@ -147,6 +149,20 @@ playwright install chromium
 | `audit_retention_days` | int (slider) | `30` | 审计保留天数：审计记录保存天数 (1~365 天)，超期自动清理 |
 | `audit_max_output_chars` | int | `0` | 审计字符上限：单条工具输出最大字符上限 (0 表示不限长度) |
 | `audit_save_screenshots` | bool | `true` | 审计持久化截图：是否在审计数据库中关联保存截图文件 |
+
+#### ⑥ 工具历史消减与压缩 (`history_cleanup`, 默认折叠)
+| 配置项 | 类型 | 默认值 | 作用描述 |
+|---|---|---|---|
+| `enable_cleanup` | bool | `false` | 启用历史消减：开启后监控本插件工具调用字符并在超标时自动消减 |
+| `high_watermark` | int (slider) | `8000` | 高水位阈值：历史工具调用总字符超过此时触发清理 (2000~30000 字符) |
+| `low_watermark` | int (slider) | `3000` | 低水位目标：触发清理后消减到的目标字符数 (1000~15000 字符) |
+| `cleanup_strategy` | string (select) | `"delete"` | 消减策略：`delete` (直接占位清空) 或 `compress` (副 AI 总结提炼) |
+| `compress_provider_id` | string | `""` | 压缩模型提供商：执行压缩提炼的 AI 提供商，留空使用会话默认模型 |
+| `compress_max_input_chars` | int (slider) | `0` | 副 AI 输入上限：最大输入字符预算，0 代表不限制，超长直接截断 (0~50000 字符) |
+| `compress_prompt` | text | `"你是一个精炼的内容总结器..."` | 压缩提示词：副 AI 执行提炼时遵循的核心提示词 |
+| `compress_use_persona` | bool | `false` | 启用人设面具：是否在压缩时注入人设设定 |
+| `compress_persona_id` | string | `""` | 指定人设面具：用于压缩的人设面具，留空使用系统默认人设 |
+| `include_compressed_in_watermark` | bool | `false` | 历史摘要计入水位：开启后此前已生成的历史摘要计入水位统计并参与滚动重压缩；关闭后不计入且不重复压缩 |
 
 ---
 

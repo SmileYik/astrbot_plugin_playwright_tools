@@ -230,21 +230,36 @@ flowchart TD
   - 将 `HistoryCleaner` 实例直接注入至四大核心工具（`PwPageTool`、`PwReadTool`、`PwInteractTool`、`PwMediaTool`）；
   - 在每个工具的 `call(context, **kwargs)` 方法入口统一前置执行 `_execute_history_cleaner`；
   - 传入的 `context` 为当前运行时的 `run_context`，天然持有当前代理的实时消息列表 `context.messages`；
-  - 无论是由主代理还是子代理（如 `researcher` 编排委派、`SpawnAgentTool` 等）调用工具，均能精准获取并就地消减上下文，彻底免除了对 AstrBot 顶层事件钩子广播的依赖。
-- **纯高低双水位线驱动**：
-  - 当本插件已产生的未压缩工具总字符突破高水位（`high_watermark`，默认 8000）时，触发基于先进先出（FIFO）队列的逐轮消减，直至字符数回退至低水位（`low_watermark`，默认 3000）以内；
-  - 最新完成的工具记录自然处于队列尾部得到完整保留。
+  - 无论是由主代理还是子代理（如 `researcher` 编排委派、`SpawnAgentTool` 等）调用工具，均能精准获取并就地消减上下文，免除了对 AstrBot 顶层事件钩子广播的依赖。
+- **单批次聚合消减与 FIFO 贪心收集算法 (Single-Pass Batch Accumulation)**：
+  - **水位阈值检查**：计算当前有效工具字符数 `current_chars = self.calculate_uncompressed_chars(contexts)`；若 `current_chars <= high_watermark` 则直接跳过；
+  - **FIFO 贪心收集**：遍历 `contexts` 中的消息，从最旧记录开始按先进先出顺序筛选属于本插件且满足 `is_candidate_tool` 的工具消息索引加入候选批次 `batch_indices`，累加候选条目字符数；
+  - **低水位终止**：当 `current_chars - accumulated_chars <= low_watermark` 时终止贪心收集，确保保留在队尾的最新工具调用完整不受影响。
+- **提示词组装与单次副 AI 调用 (Prompt Assembly & Single LLM Call)**：
+  - **结构化合并拼装**：对 `batch_indices` 中的每个候选条目：
+    - 普通工具条目拼装为：`【工具: {tool_name}】\n{content}`
+    - 前序历史摘要条目拼装为：`【前序历史摘要】\n{content去除前缀}`
+    以双换行 `\n\n` 拼接为整体待压缩文本；
+  - **输入预算控制**：若配置了 `compress_max_input_chars > 0` 且总文本超长，原位截断并附加超长截断说明；
+  - **单次请求**：将合并后的文本以单次请求发送给副 AI 提供商（`provider.text_chat`），避免多轮工具调用下产生多次副 AI 请求导致的端到端延迟；
+  - **批量写回规则**：
+    - 压缩成功：`batch_indices` 中前 `0` 到 `N-2` 个工具消息内容原位替换为合并占位符 `[已并入本轮浏览摘要]`，最后一个条目（第 `N-1` 个）写入聚合摘要 `[历史浏览摘要]:\n{summary}`；
+    - 压缩失败降级或 `delete` 模式：`batch_indices` 中的所有条目均原位替换为删除占位符 `[该历史工具调用结果已按策略清理]`。
+- **历史摘要计入水位语义 (`include_compressed_in_watermark`)**：
+  - `is_candidate_tool` 判定：`DELETE_PLACEHOLDER` 与 `MERGE_PLACEHOLDER` 始终忽略，不计入水位；
+  - 遇到以 `[历史浏览摘要]` 开头的工具条目：
+    - 当 `include_compressed_in_watermark = False`（默认）：不计入有效水位统计，且后续清理中不再对其重复压缩；
+    - 当 `include_compressed_in_watermark = True`：计入水位统计，并在总字符再次突破高水位时作为候选条目选入批次，以 `【前序历史摘要】` 形式参与滚动重压缩。
 - **协议结构安全保障**：
-  - 严格保持 `assistant(tool_calls)` 与 `tool(tool_call_id)` 结构完整，仅替换 `content`；
-  - 直接删除模式替换为安全占位符；副 AI 压缩模式按轮次聚合生成紧凑摘要，非末尾工具填入并入标记，末尾工具写回摘要。
+  - 严格保持 `assistant(tool_calls)` 与 `tool(tool_call_id)` 结构完整配对，仅更新 `content` 字段文本；避免因删除整条消息破坏消息骨架引发大模型 API 校验 400 错误。
 - **全流程实时日志追踪**：
   - 消减全链路使用 AstrBot 官方标准的 `from astrbot.api import logger` 输出规范化日志；
-  - 包含超标触发日志（当前字符数、高水位与低水位目标）、逐组消减执行日志（调用数与释放字符数）、副 AI 压缩调用及节省率日志、异常降级警告日志以及全局消减汇总日志。
+  - 包含超标触发日志（当前字符数、高水位与低水位目标）、批次消减执行日志（批次条目数与释放字符数）、副 AI 压缩调用及节省率日志、异常降级警告日志以及全局消减汇总日志。
 - **双重审计持久化机制 (HistoryCleaner 与 AuditLogger 协作)**：
-  - **工具调用审计 (`tool_audit_logs`)**：调用 `AuditLogger.log_action` 记录 `pw_history:compress` 或 `pw_history:delete` 动作，将处理组索引、调用数量、原始字符数、压缩后字符数与执行耗时持久化至工具审计表；
+  - **工具调用审计 (`tool_audit_logs`)**：调用 `AuditLogger.log_action` 记录 `pw_history:compress` 或 `pw_history:delete` 动作，将批次大小（`batch_size`）、包含工具列表（`tools`）、原始字符数（`original_chars`）与执行耗时持久化至工具审计表；
   - **生命周期审计 (`context_lifecycle_logs`)**：调用 `AuditLogger.log_lifecycle` 记录 `history_compress` 或 `history_cleanup` 事件，将清理策略、字符变化、节省比例及副 AI 模型等结构化详情记录至生命周期事件表，与上下文生命周期审计闭环对齐。
 - **自动持久化机制**：
-  - 深度结合 AstrBot 原生 `context_observer`，钩子完成时自动调用 `stage_history()` 将变更写回会话数据库，避免二次重复压缩与无谓 Token 消耗。
+  - 深度结合 AstrBot 原生 `context_observer`，钩子完成时自动调用 `stage_history()` 将变更写回会话数据库，避免二次重复计算。
 
 ---
 

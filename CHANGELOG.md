@@ -4,6 +4,22 @@
 
 ---
 
+## [v1.4.3] - 2026-11-27
+
+### 单批次聚合消减与水位配置演进 (Single-Pass Batch Compression & Watermark Option)
+- **单批次聚合压缩机制 (Single-Pass Batch Compression)**：
+  - 重构 `HistoryCleaner` 处理逻辑，废弃逐组循环请求副 AI 的旧机制。
+  - 当本插件历史工具消息总字符数超过高水位阈值时，按先进先出（FIFO）队列贪心收集候选条目，一次性消减至低水位以下，仅向副 AI 发起 1 次结构化压缩请求，显著降低多轮工具调用下的端到端响应延迟。
+  - 压缩成功后，前 N-1 个消息原位写入 `[已并入本轮浏览摘要]`，末尾消息写入 `[历史浏览摘要]:\n{summary}`；压缩失败或直接删除模式下，候选条目全部原位替换为删除占位符。
+- **历史摘要计入水位配置项 (`include_compressed_in_watermark`)**：
+  - 新增 `history_cleanup.include_compressed_in_watermark` 配置项（默认为 `false`）。
+  - 为 `false` 时，已生成的 `[历史浏览摘要]` 不计入水位统计，亦不参与后续重压缩；
+  - 为 `true` 时，已生成的 `[历史浏览摘要]` 计入水位统计，超限时在提示词中拼装为 `【前序历史摘要】` 参与新一轮滚动聚合压缩。
+- **代码与测试清理**：
+  - 移除原逐组切分方法 `group_tool_calls` 及旧版循环压缩实现，同步清理过时的单测用例，维持代码简洁。
+
+---
+
 ## [v1.4.2] - 2026-11-27
 
 ### 工具执行切面消减机制与全场景支持 (Pre-Tool Execution History Cleanup & Subagent Support)
