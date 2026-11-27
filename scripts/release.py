@@ -15,10 +15,32 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Explicit whitelist of allowed files and directories in release branch
+ALLOWED_ROOT_FILES = {
+    "main.py",
+    "requirements.txt",
+    "_conf_schema.json",
+    "metadata.yaml",
+    ".gitignore",
+    "logo.png",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+}
+
+ALLOWED_ROOT_DIRS = {
+    "adapts",
+    "api",
+    "core",
+    "tools",
+    "views",
+    "skills",
+}
+
 
 def extract_version(content: str) -> str:
     """Extract version string from metadata.yaml content."""
-    match = re.search(r'version:\s*["\']?([^"\'\s]+)["\']?', content)
+    match = re.search(r'(?m)^\s*version:\s*["\']?([^"\'\s]+)["\']?', content)
     if not match:
         raise ValueError("Could not find version field in metadata content")
     return match.group(1).strip()
@@ -26,56 +48,48 @@ def extract_version(content: str) -> str:
 
 def is_path_allowed(rel_path: Path | str) -> bool:
     """Check whether a path from master is allowed in the release branch."""
-    path = Path(rel_path)
-    parts = list(path.parts)
-    if not parts:
+    posix = str(rel_path).replace("\\", "/")
+    if posix.startswith("./"):
+        posix = posix[2:]
+    posix = posix.strip("/")
+    if not posix:
         return False
-    if parts[0] == ".":
-        parts = parts[1:]
+
+    parts = [p for p in posix.split("/") if p and p != "."]
     if not parts:
         return False
 
     root_part = parts[0]
-    posix = "/".join(parts)
 
-    # Excluded directories at root level
-    if root_part in {
-        "tests",
-        "web-src",
-        "scripts",
-        ".superpowers",
-        ".venv",
-        "__pycache__",
-        "data",
-        ".git",
-    }:
-        return False
-
-    # Excluded specific files at root level
-    if posix in {"AGENT.md", "HOW-TO-CODE.md"}:
-        return False
-
-    # Special rules for docs/ directory
-    if root_part == "docs":
-        if len(parts) > 1 and parts[1] in {"superpowers", "old"}:
-            return False
-        if posix in {"docs/ARCHITECTURE.md", "docs/EXTERNAL_API.md"} or (
-            len(parts) > 1 and parts[1] == "images"
-        ):
-            return True
-        return False
-
-    # Exclude any compiled python artifacts or pycache
+    # Block pycache or compiled artifacts
     if any(p == "__pycache__" or p.endswith(".pyc") for p in parts):
         return False
 
-    return True
+    # Single root file check
+    if len(parts) == 1:
+        return root_part in ALLOWED_ROOT_FILES
+
+    # Allowed root directories check
+    if root_part in ALLOWED_ROOT_DIRS:
+        return True
+
+    # docs/ directory specific whitelist
+    if root_part == "docs":
+        if len(parts) > 1 and parts[1] in {"superpowers", "old"}:
+            return False
+        if posix in {"docs/ARCHITECTURE.md", "docs/EXTERNAL_API.md"}:
+            return True
+        if len(parts) > 1 and parts[1] == "images":
+            return True
+        return False
+
+    return False
 
 
 def run_git(args: list[str], cwd: Path | None = None) -> tuple[int, str, str]:
     """Execute a git command and return (returncode, stdout, stderr)."""
     proc = subprocess.run(
-        ["git"] + args,
+        ["git", "-c", "core.quotePath=false"] + args,
         cwd=cwd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -95,11 +109,17 @@ def get_repo_root() -> Path:
 
 
 def get_current_branch(repo_dir: Path) -> str:
-    """Return currently checked out branch name."""
+    """Return currently checked out branch name, or 'HEAD (detached)'."""
     code, stdout, stderr = run_git(["branch", "--show-current"], cwd=repo_dir)
-    if code != 0 or not stdout:
-        raise RuntimeError(f"Failed to get current branch: {stderr}")
-    return stdout
+    if code == 0 and stdout:
+        return stdout
+
+    # If --show-current is empty, check if we are in detached HEAD state
+    code_ref, stdout_ref, _ = run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_dir)
+    if code_ref == 0 and stdout_ref == "HEAD":
+        return "HEAD (detached)"
+
+    return stdout or "unknown"
 
 
 def get_commit_hash(repo_dir: Path, ref: str = "HEAD") -> str:
@@ -116,12 +136,24 @@ def is_working_tree_clean(repo_dir: Path) -> bool:
     return code == 0 and len(stdout) == 0
 
 
-def get_tracked_files_from_git(repo_dir: Path) -> list[Path]:
-    """Return list of all files tracked by git in current HEAD."""
-    code, stdout, stderr = run_git(["ls-tree", "-r", "--name-only", "HEAD"], cwd=repo_dir)
+def get_candidate_files(repo_dir: Path, allow_dirty: bool = False) -> list[Path]:
+    """Return list of candidate files from master to consider for release sync."""
+    code, stdout, stderr = run_git(["ls-files"], cwd=repo_dir)
     if code != 0:
         raise RuntimeError(f"Failed to list tracked files: {stderr}")
-    return [Path(line.strip()) for line in stdout.splitlines() if line.strip()]
+
+    files_set = {Path(line.strip()) for line in stdout.splitlines() if line.strip()}
+
+    if allow_dirty:
+        code_oth, out_oth, _ = run_git(["ls-files", "--others", "--exclude-standard"], cwd=repo_dir)
+        if code_oth == 0:
+            for line in out_oth.splitlines():
+                if line.strip():
+                    files_set.add(Path(line.strip()))
+
+    # Only keep files that actually exist on disk (prevents FileNotFoundError on deleted files)
+    existing_files = [p for p in files_set if (repo_dir / p).is_file()]
+    return sorted(existing_files)
 
 
 def ensure_release_branch_exists(repo_dir: Path) -> None:
@@ -158,12 +190,19 @@ def run_release(
     # 1. Check current branch
     current_branch = get_current_branch(repo_dir)
     if current_branch != "master":
-        print(f"[!] Error: Release can only be run from 'master' branch (currently on '{current_branch}')", file=sys.stderr)
+        print(
+            f"[!] Error: Release can only be run from 'master' branch (currently on '{current_branch}')",
+            file=sys.stderr,
+        )
         return 1
 
     # 2. Check cleanliness
-    if not is_working_tree_clean(repo_dir) and not allow_dirty:
-        print("[!] Error: Working tree has uncommitted changes. Commit or stash them, or pass --allow-dirty.", file=sys.stderr)
+    is_clean = is_working_tree_clean(repo_dir)
+    if not is_clean and not allow_dirty:
+        print(
+            "[!] Error: Working tree has uncommitted changes. Commit or stash them, or pass --allow-dirty.",
+            file=sys.stderr,
+        )
         return 1
 
     # 3. Read metadata version
@@ -174,12 +213,13 @@ def run_release(
 
     version = extract_version(metadata_path.read_text(encoding="utf-8"))
     commit_hash = get_commit_hash(repo_dir, "HEAD")
-    print(f"[*] Target release version: {version} (sync from master commit {commit_hash})")
+    dirty_marker = " (dirty)" if not is_clean else ""
+    print(f"[*] Target release version: {version} (sync from master commit {commit_hash}{dirty_marker})")
 
     # 4. Resolve tracked files and filter
-    tracked_files = get_tracked_files_from_git(repo_dir)
-    allowed_files = [p for p in tracked_files if is_path_allowed(p)]
-    excluded_files = [p for p in tracked_files if not is_path_allowed(p)]
+    candidate_files = get_candidate_files(repo_dir, allow_dirty=allow_dirty)
+    allowed_files = [p for p in candidate_files if is_path_allowed(p)]
+    excluded_files = [p for p in candidate_files if not is_path_allowed(p)]
 
     print(f"[*] Filtered {len(allowed_files)} files to keep in release branch ({len(excluded_files)} excluded).")
 
@@ -220,14 +260,19 @@ def run_release(
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
 
-        # 9. Check git status in worktree
-        run_git(["add", "-A"], cwd=temp_dir)
-        code_status, status_out, _ = run_git(["status", "--porcelain"], cwd=temp_dir)
+        # 9. Stage and check git status in worktree
+        code_add, _, err_add = run_git(["add", "-A"], cwd=temp_dir)
+        if code_add != 0:
+            raise RuntimeError(f"git add -A failed in worktree: {err_add}")
+
+        code_status, status_out, err_status = run_git(["status", "--porcelain"], cwd=temp_dir)
+        if code_status != 0:
+            raise RuntimeError(f"git status failed in worktree: {err_status}")
 
         if not status_out.strip():
             print("[+] Release branch is already up-to-date with master. Nothing to commit.")
         else:
-            commit_msg = message or f"release: {version} (sync from master {commit_hash})"
+            commit_msg = message or f"release: {version} (sync from master {commit_hash}{dirty_marker})"
             print(f"[*] Committing to release branch with message: '{commit_msg}'...")
             code_commit, commit_out, err_commit = run_git(["commit", "-m", commit_msg], cwd=temp_dir)
             if code_commit != 0:
@@ -283,17 +328,17 @@ def main() -> None:
 
     try:
         repo_dir = get_repo_root()
+        code = run_release(
+            repo_dir=repo_dir,
+            allow_dirty=args.allow_dirty,
+            push=args.push,
+            message=args.message,
+            dry_run=args.dry_run,
+        )
     except Exception as e:
         print(f"[!] Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        code = 1
 
-    code = run_release(
-        repo_dir=repo_dir,
-        allow_dirty=args.allow_dirty,
-        push=args.push,
-        message=args.message,
-        dry_run=args.dry_run,
-    )
     sys.exit(code)
 
 
