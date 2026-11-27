@@ -6,10 +6,10 @@
 
 ## [v1.4.2] - 2026-11-27
 
-### 工具调用前消减机制与白名单精准拦截 (Pre-Tool Execution History Cleanup & Whitelist Guard)
-- **触发时机迁移至 `on_using_llm_tool`**：将工具历史记录的双水位线检测与副 AI 压缩触发时机从会话开头的 `on_llm_request` 迁移至每次大模型准备调用工具前（`on_using_llm_tool`）。在此阶段，本次工具调用的新输出尚未产生并天然免除，而同轮多步调用（如连续调用 `pw_page`、`pw_read`、`pw_interact`）或先前交互中产生的膨胀历史能被及时消减。
-- **白名单工具严格过滤**：仅当大模型即将调用本插件四大核心工具（`pw_page`、`pw_read`、`pw_interact`、`pw_media`）时才触发历史消减流程，对其他工具直接放行。
-- **Agent 运行时上下文精准捕获**：通过 `@filter.on_agent_begin` 捕获 `run_context` 并暂存至事件元数据，在 `on_using_llm_tool` 中直接操作其维护的 `run_context.messages`，并在 `@filter.on_agent_done` 结束时主动注销引用，防范内存泄露。
+### 工具执行切面消减机制与全场景支持 (Pre-Tool Execution History Cleanup & Subagent Support)
+- **切面注入至四大复合工具 (`FunctionTool.call`)**：将 `self.history_cleaner` 直接注入至 `pw_page`、`pw_read`、`pw_interact`、`pw_media` 四大复合工具中，在工具执行前通过前置切面检查并就地消减上下文历史。
+- **全场景代理运行支持（主代理与子代理一致性）**：全面支持 AstrBot 子代理编排（如 `transfer_to_researcher`、`SpawnAgentTool` 等）。由于子代理内部工具调用由 `ToolLoopAgentRunner` 直接驱动工具 `call(context, **kwargs)`，切面拦截直接获取并操作子代理运行时的 `run_context.messages`，在子代理多步读取网页累积长上下文时，于下次工具执行前及时压缩释放。
+- **架构极简收敛**：移除 `main.py` 中过渡性的 `@filter.on_using_llm_tool`、`@filter.on_agent_begin` 与 `@filter.on_agent_done` 监听钩子及 `event.set_extra` 依赖，消减器仅专注于本插件核心工具，主入口代码高度精简。
 - **多态上下文与 ContentPart 支持**：`HistoryCleaner.process_contexts` 多态兼容 `list[Message]`、`run_context` 与 `req.contexts`；`_get_content` 支持多部件（`ContentPart` / `TextPart`）文本提取。
 
 ---

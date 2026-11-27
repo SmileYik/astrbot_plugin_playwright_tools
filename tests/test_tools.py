@@ -532,6 +532,79 @@ class TestTools(unittest.TestCase):
             run_coro(self.read_tool.call(self.mock_context_wrapper, page=1, ref="e5"))
         self.assertEqual(called_kwargs.get("ref"), "e5")
 
+    def test_tool_triggers_history_cleaner_before_execution(self):
+        from unittest.mock import AsyncMock
+        mock_cleaner = MagicMock()
+        mock_cleaner.process_contexts = AsyncMock(return_value=True)
+
+        async def mock_open(s_id, u_id, url, **kwargs):
+            return "ok"
+        self.mock_page_handler.open_url = mock_open
+
+        tool = PwPageTool(self.mock_page_handler, timeout_seconds=5, history_cleaner=mock_cleaner)
+        context = MagicMock()
+        context.messages = [{"role": "user", "content": "test"}]
+        context.event.session_id = "s1"
+        context.event.get_sender_id.return_value = "u1"
+
+        with patch("asyncio.wait_for", fake_wait_for):
+            res = run_coro(tool.call(context, action="open", url="https://example.com"))
+        self.assertEqual(res, "ok")
+        mock_cleaner.process_contexts.assert_awaited_once_with(context.event, context.messages)
+
+    def test_all_tools_trigger_history_cleaner(self):
+        from unittest.mock import AsyncMock
+        mock_cleaner = MagicMock()
+        mock_cleaner.process_contexts = AsyncMock(return_value=True)
+
+        self.mock_page_handler.read_page = MagicMock(return_value="read_ok")
+        async def mock_read(*args, **kwargs):
+            return "read_ok"
+        self.mock_page_handler.read_page = mock_read
+
+        async def mock_click(*args, **kwargs):
+            return "click_ok"
+        self.mock_interact_handler.click = mock_click
+
+        async def mock_ss(*args, **kwargs):
+            return "ss_ok"
+        self.mock_media_handler.screenshot_viewport = mock_ss
+
+        context = MagicMock()
+        context.messages = [{"role": "user", "content": "subagent msg"}]
+        context.event.session_id = "s1"
+        context.event.get_sender_id.return_value = "u1"
+
+        r_tool = PwReadTool(self.mock_page_handler, timeout_seconds=5, history_cleaner=mock_cleaner)
+        i_tool = PwInteractTool(self.mock_interact_handler, timeout_seconds=5, history_cleaner=mock_cleaner)
+        m_tool = PwMediaTool(self.mock_media_handler, timeout_seconds=5, history_cleaner=mock_cleaner)
+
+        with patch("asyncio.wait_for", fake_wait_for):
+            run_coro(r_tool.call(context, page=1))
+            run_coro(i_tool.call(context, action="click", ref="1"))
+            run_coro(m_tool.call(context, action="screenshot_viewport"))
+
+        self.assertEqual(mock_cleaner.process_contexts.await_count, 3)
+
+    def test_tool_history_cleaner_exception_isolated(self):
+        from unittest.mock import AsyncMock
+        mock_cleaner = MagicMock()
+        mock_cleaner.process_contexts = AsyncMock(side_effect=RuntimeError("Cleaner failure"))
+
+        async def mock_close(*args, **kwargs):
+            return "closed"
+        self.mock_page_handler.close_browser = mock_close
+
+        tool = PwPageTool(self.mock_page_handler, timeout_seconds=5, history_cleaner=mock_cleaner)
+        context = MagicMock()
+        context.messages = [{"role": "user", "content": "test"}]
+        context.event.session_id = "s1"
+        context.event.get_sender_id.return_value = "u1"
+
+        with patch("asyncio.wait_for", fake_wait_for):
+            res = run_coro(tool.call(context, action="close"))
+        self.assertEqual(res, "closed")
+
 
 if __name__ == "__main__":
     unittest.main()

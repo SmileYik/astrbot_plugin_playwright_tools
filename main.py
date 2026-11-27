@@ -154,17 +154,33 @@ class PlaywrightToolPlugin(Star):
             mask_password_inputs=self.mask_password_inputs,
         )
 
-        self.pw_page_tool = PwPageTool(page_handler=self.page_handler, timeout_seconds=tool_timeout)
-        self.pw_read_tool = PwReadTool(page_handler=self.page_handler, timeout_seconds=tool_timeout)
-        self.pw_interact_tool = PwInteractTool(interact_handler=self.interact_handler, timeout_seconds=tool_timeout)
+        # 4. 初始化上下文历史消减器与复合 FunctionTool
+        self.history_cleaner = HistoryCleaner(self.context, self.config, audit_logger=self.audit_logger)
+
+        self.pw_page_tool = PwPageTool(
+            page_handler=self.page_handler,
+            timeout_seconds=tool_timeout,
+            history_cleaner=self.history_cleaner,
+        )
+        self.pw_read_tool = PwReadTool(
+            page_handler=self.page_handler,
+            timeout_seconds=tool_timeout,
+            history_cleaner=self.history_cleaner,
+        )
+        self.pw_interact_tool = PwInteractTool(
+            interact_handler=self.interact_handler,
+            timeout_seconds=tool_timeout,
+            history_cleaner=self.history_cleaner,
+        )
         self.pw_media_tool = PwMediaTool(
             media_handler=self.media_handler,
             timeout_seconds=tool_timeout,
             screenshot_max_height_px=screenshot_max_height,
             screenshot_timeout_seconds=screenshot_timeout,
+            history_cleaner=self.history_cleaner,
         )
 
-        # 4. 面向对象注册 FunctionTool
+        # 面向对象注册 FunctionTool
         if hasattr(self.context, "add_llm_tools"):
             self.context.add_llm_tools(self.pw_page_tool, self.pw_read_tool, self.pw_interact_tool, self.pw_media_tool)
 
@@ -186,9 +202,8 @@ class PlaywrightToolPlugin(Star):
         self._retention_days = retention_days
         self._cleanup_task: asyncio.Task | None = None
 
-        # 6. 初始化跨插件浏览器共享服务基座与上下文历史消减器
+        # 6. 初始化跨插件浏览器共享服务基座
         self.service = PlaywrightServiceAPI(self, self.context_manager)
-        self.history_cleaner = HistoryCleaner(self.context, self.config, audit_logger=self.audit_logger)
 
     def _sync_event_admin(self, event: AstrMessageEvent) -> None:
         """从当前消息事件中提取并动态同步全局管理员标识。"""
@@ -357,52 +372,7 @@ class PlaywrightToolPlugin(Star):
                 "- /browser kill <context_key> : 强行关闭指定浏览器上下文(仅管理员)"
             )
 
-    # ==================== 大模型请求系统提示词注入与生命周期钩子 ====================
-
-    @filter.on_agent_begin()
-    async def on_agent_begin(self, event: AstrMessageEvent, run_context: Any):
-        """当 Agent 运行时捕获 run_context，便于后续在工具调用前进行针对性历史上下文消减。"""
-        try:
-            if hasattr(event, "set_extra"):
-                event.set_extra("_active_run_context", run_context)
-        except Exception as e:
-            logger.debug(f"[PlaywrightTool] on_agent_begin 记录 run_context 异常: {e}")
-
-    @filter.on_agent_done()
-    async def on_agent_done(self, event: AstrMessageEvent, run_context: Any):
-        """当 Agent 执行完毕后清理临时引用的 run_context。"""
-        try:
-            if hasattr(event, "set_extra"):
-                event.set_extra("_active_run_context", None)
-        except Exception as e:
-            logger.debug(f"[PlaywrightTool] on_agent_done 清理 run_context 异常: {e}")
-
-    @filter.on_using_llm_tool()
-    async def on_using_llm_tool(self, event: AstrMessageEvent, tool: Any, tool_args: dict | None = None):
-        """当大模型准备调用工具前触发。仅拦截并处理本插件的四大核心工具，防止未压缩历史过度膨胀。"""
-        if isinstance(tool, str):
-            tool_name = tool
-        elif isinstance(tool, dict):
-            tool_name = str(tool.get("name", ""))
-        else:
-            tool_name = str(getattr(tool, "name", "") or "")
-
-        logger.debug(f"[PlaywrightTool] on_using_llm_tool 当前工具为: {tool_name}")
-        if not self.history_cleaner.is_plugin_tool(tool_name):
-            return
-
-        run_context = None
-        if hasattr(event, "get_extra"):
-            run_context = event.get_extra("_active_run_context")
-
-        messages = getattr(run_context, "messages", None) if run_context else None
-        target = messages if messages is not None else run_context
-
-        if target is not None:
-            try:
-                await self.history_cleaner.process_contexts(event, target)
-            except Exception as e:
-                logger.warning(f"[PlaywrightTool] 工具调用前历史消减处理异常: {e}")
+    # ==================== 大模型请求系统提示词注入 ====================
 
     @filter.on_llm_request()
     async def on_llm_request(self, event: AstrMessageEvent, req: Any):

@@ -13,8 +13,6 @@ flowchart TD
     AstrBot[AstrBot Runtime / Event System]
     PluginEntry[Plugin Entry: main.py]
     PromptHook["Prompt Hook: @filter.on_llm_request"]
-    ToolHook["Tool Pre-Execution Hook: @filter.on_using_llm_tool"]
-    AgentHooks["Agent Lifecycle Hooks: @filter.on_agent_begin / done"]
     Cmds["User Commands: /browser"]
     WebUI["AstrBot WebUI / Dashboard"]
     BrowserView["Plugin View: views/browser/ (Vite + React SPA)"]
@@ -29,6 +27,7 @@ flowchart TD
         PwRead[PwReadTool: pw_read]
         PwInteract[PwInteractTool: pw_interact]
         PwMedia[PwMediaTool: pw_media]
+        CleanerAspect["Pre-Tool Execution: HistoryCleaner"]
         TimeoutWrapper["Global Timeout Guard: asyncio.wait_for"]
     end
 
@@ -227,13 +226,11 @@ flowchart TD
   - 后续请求将透明触发适配器重新启动新浏览器进程，恢复系统服务可用性。
 
 ### 5.4 纯双水位线工具历史消减与持久化机制 (HistoryCleaner)
-- **工具调用前置拦截与白名单机制**：
-  - 挂载于 `@filter.on_using_llm_tool()` 事件，在大模型即将调用工具时进行预检；
-  - 严格校验待执行工具名称是否属于本插件四大核心工具（`pw_page`、`pw_read`、`pw_interact`、`pw_media`），非本插件工具直接放行；
-  - 本次调用的新内容尚未产生，天然免除于消减范围，而多步交互中早先步骤产生的大量上下文能在此刻被精准治理。
-- **Agent 运行时上下文联动 (`run_context.messages`)**：
-  - 通过 `@filter.on_agent_begin()` 捕获并暂存 `run_context` 至事件元数据字典（`_active_run_context`）；
-  - 消减器直接处理 `run_context.messages` 这一正在与模型交互的实时上下文；并在 `@filter.on_agent_done()` 触发时清空引用，保障生命周期与内存安全。
+- **工具执行切面拦截与全场景代理支持**：
+  - 将 `HistoryCleaner` 实例直接注入至四大核心工具（`PwPageTool`、`PwReadTool`、`PwInteractTool`、`PwMediaTool`）；
+  - 在每个工具的 `call(context, **kwargs)` 方法入口统一前置执行 `_execute_history_cleaner`；
+  - 传入的 `context` 为当前运行时的 `run_context`，天然持有当前代理的实时消息列表 `context.messages`；
+  - 无论是由主代理还是子代理（如 `researcher` 编排委派、`SpawnAgentTool` 等）调用工具，均能精准获取并就地消减上下文，彻底免除了对 AstrBot 顶层事件钩子广播的依赖。
 - **纯高低双水位线驱动**：
   - 当本插件已产生的未压缩工具总字符突破高水位（`high_watermark`，默认 8000）时，触发基于先进先出（FIFO）队列的逐轮消减，直至字符数回退至低水位（`low_watermark`，默认 3000）以内；
   - 最新完成的工具记录自然处于队列尾部得到完整保留。

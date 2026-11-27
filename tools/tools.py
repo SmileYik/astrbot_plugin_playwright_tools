@@ -99,6 +99,25 @@ def _extract_event_and_ids(context: Any) -> tuple[Any, str, str]:
     return ev, s_id, u_id
 
 
+async def _execute_history_cleaner(cleaner: Any, context: Any, tool_name: str) -> None:
+    """在工具执行前执行历史上下文消减检测与副 AI 压缩。无论主代理还是子代理运行均能可靠生效。"""
+    if not cleaner:
+        return
+    messages = getattr(context, "messages", None)
+    if messages is None:
+        inner = getattr(context, "context", None)
+        if inner:
+            messages = getattr(inner, "messages", None)
+
+    if messages is not None and isinstance(messages, list):
+        try:
+            ev, _, _, _, _ = _extract_event_and_metadata(context)
+            logger.debug(f"[PlaywrightTool] [{tool_name}] 工具执行前检查历史消减 (当前上下文消息数: {len(messages)})")
+            await cleaner.process_contexts(ev, messages)
+        except Exception as e:
+            logger.warning(f"[PlaywrightTool] [{tool_name}] 工具执行前历史消减异常: {e}")
+
+
 async def _invoke_handler(fn, *args, **kwargs):
     """自适应调用 handler，若其签名不支持部分扩展 kwargs（如简单测试 mock）则自动过滤。"""
     try:
@@ -141,6 +160,7 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
     name: str = "pw_page"
     description: str = "管理浏览器页面的打开、标签页切换、弹窗响应与关闭。"
     parameters: dict = field(default_factory=lambda: PW_PAGE_SCHEMA)
+    history_cleaner: Any = None
 
     def __post_init__(self):
         if self.page_handler is None:
@@ -153,6 +173,7 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
             pass
         object.__setattr__(self, "page_handler", page_handler)
         object.__setattr__(self, "timeout_seconds", timeout_seconds)
+        object.__setattr__(self, "history_cleaner", self.history_cleaner)
         self._actions = {
             "open": self._action_open,
             "switch_tab": self._action_switch_tab,
@@ -199,6 +220,7 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
         )
 
     async def call(self, context: AstrAgentContext, **kwargs) -> str:
+        await _execute_history_cleaner(self.history_cleaner, context, self.name)
         event, session_id, sender_id, session_name, sender_name = _extract_event_and_metadata(context)
         action = kwargs.get("action")
         handler = self._actions.get(action)
@@ -220,6 +242,7 @@ class PwReadTool(FunctionTool[AstrAgentContext]):
     name: str = "pw_read"
     description: str = "读取当前网页的内容与可交互操作元素，支持分页与关键词检索定位。"
     parameters: dict = field(default_factory=lambda: PW_READ_SCHEMA)
+    history_cleaner: Any = None
 
     def __post_init__(self):
         if self.page_handler is None:
@@ -242,8 +265,10 @@ class PwReadTool(FunctionTool[AstrAgentContext]):
             pass
         object.__setattr__(self, "page_handler", page_handler)
         object.__setattr__(self, "timeout_seconds", timeout_seconds)
+        object.__setattr__(self, "history_cleaner", self.history_cleaner)
 
     async def call(self, context: AstrAgentContext, **kwargs) -> str:
+        await _execute_history_cleaner(self.history_cleaner, context, self.name)
         event, session_id, sender_id, session_name, sender_name = _extract_event_and_metadata(context)
         raw_page = kwargs.get("page", 1)
         try:
@@ -284,6 +309,7 @@ class PwInteractTool(FunctionTool[AstrAgentContext]):
     name: str = "pw_interact"
     description: str = "对页面元素进行点击、输入、选择、鼠标悬停、聚焦/失焦、拖拽、按键及滚动。"
     parameters: dict = field(default_factory=lambda: PW_INTERACT_SCHEMA)
+    history_cleaner: Any = None
 
     def __post_init__(self):
         if self.interact_handler is None:
@@ -296,6 +322,7 @@ class PwInteractTool(FunctionTool[AstrAgentContext]):
             pass
         object.__setattr__(self, "interact_handler", interact_handler)
         object.__setattr__(self, "timeout_seconds", timeout_seconds)
+        object.__setattr__(self, "history_cleaner", self.history_cleaner)
         self._actions = {
             "click": self._action_click,
             "fill": self._action_fill,
@@ -401,6 +428,7 @@ class PwInteractTool(FunctionTool[AstrAgentContext]):
         )
 
     async def call(self, context: AstrAgentContext, **kwargs) -> str:
+        await _execute_history_cleaner(self.history_cleaner, context, self.name)
         event, session_id, sender_id, session_name, sender_name = _extract_event_and_metadata(context)
         action = kwargs.get("action")
         handler = self._actions.get(action)
@@ -427,6 +455,7 @@ class PwMediaTool(FunctionTool[AstrAgentContext]):
     name: str = "pw_media"
     description: str = "执行当前视口截图、全页面长截图或下载指定文件。"
     parameters: dict = field(default_factory=lambda: PW_MEDIA_SCHEMA)
+    history_cleaner: Any = None
 
     def __post_init__(self):
         if self.media_handler is None:
@@ -443,6 +472,7 @@ class PwMediaTool(FunctionTool[AstrAgentContext]):
         object.__setattr__(self, "timeout_seconds", timeout_seconds)
         object.__setattr__(self, "screenshot_max_height_px", screenshot_max_height_px)
         object.__setattr__(self, "screenshot_timeout_seconds", screenshot_timeout_seconds)
+        object.__setattr__(self, "history_cleaner", self.history_cleaner)
         self._actions = {
             "screenshot_viewport": self._action_screenshot_viewport,
             "screenshot_full": self._action_screenshot_full,
@@ -481,6 +511,7 @@ class PwMediaTool(FunctionTool[AstrAgentContext]):
         )
 
     async def call(self, context: AstrAgentContext, **kwargs) -> str:
+        await _execute_history_cleaner(self.history_cleaner, context, self.name)
         event, session_id, sender_id, session_name, sender_name = _extract_event_and_metadata(context)
         action = kwargs.get("action")
         handler = self._actions.get(action)
