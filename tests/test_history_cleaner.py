@@ -85,6 +85,53 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(cleaner.is_processed_tool("[历史浏览摘要]:\n这是一段摘要"))
         self.assertFalse(cleaner.is_processed_tool("Normal page markdown content"))
 
+    def test_is_candidate_tool(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        cleaner_default = HistoryCleaner(self.context, {"history_cleanup": {"include_compressed_in_watermark": False}})
+        self.assertFalse(cleaner_default.is_candidate_tool(None))
+        self.assertFalse(cleaner_default.is_candidate_tool(""))
+        self.assertFalse(cleaner_default.is_candidate_tool("[该历史工具调用结果已按策略清理]"))
+        self.assertFalse(cleaner_default.is_candidate_tool("[已并入本轮浏览摘要]"))
+        self.assertFalse(cleaner_default.is_candidate_tool("[历史浏览摘要]:\n这是一段摘要"))
+        self.assertTrue(cleaner_default.is_candidate_tool("Normal page markdown content"))
+
+        cleaner_include = HistoryCleaner(self.context, {"history_cleanup": {"include_compressed_in_watermark": True}})
+        self.assertFalse(cleaner_include.is_candidate_tool(None))
+        self.assertFalse(cleaner_include.is_candidate_tool(""))
+        self.assertFalse(cleaner_include.is_candidate_tool("[该历史工具调用结果已按策略清理]"))
+        self.assertFalse(cleaner_include.is_candidate_tool("[已并入本轮浏览摘要]"))
+        self.assertTrue(cleaner_include.is_candidate_tool("[历史浏览摘要]:\n这是一段摘要"))
+        self.assertTrue(cleaner_include.is_candidate_tool("Normal page markdown content"))
+
+    def test_calculate_uncompressed_chars_with_summary(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        contexts = [
+            {"role": "user", "content": "hello"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call_1", "type": "function", "function": {"name": "pw_read", "arguments": "{}"}},
+                    {"id": "call_2", "type": "function", "function": {"name": "pw_read", "arguments": "{}"}},
+                    {"id": "call_3", "type": "function", "function": {"name": "pw_page", "arguments": "{}"}},
+                    {"id": "call_4", "type": "function", "function": {"name": "pw_page", "arguments": "{}"}},
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "name": "pw_read", "content": "A" * 1000},
+            {"role": "tool", "tool_call_id": "call_2", "name": "pw_read", "content": "[历史浏览摘要]:\n" + "S" * 200},
+            {"role": "tool", "tool_call_id": "call_3", "name": "pw_page", "content": "[该历史工具调用结果已按策略清理]"},
+            {"role": "tool", "tool_call_id": "call_4", "name": "pw_page", "content": "[已并入本轮浏览摘要]"},
+        ]
+        summary_len = len("[历史浏览摘要]:\n" + "S" * 200)
+
+        cleaner_default = HistoryCleaner(self.context, {"history_cleanup": {"include_compressed_in_watermark": False}})
+        self.assertEqual(cleaner_default.calculate_uncompressed_chars(contexts), 1000)
+        self.assertEqual(cleaner_default.calculate_watermark_chars(contexts), 1000)
+
+        cleaner_include = HistoryCleaner(self.context, {"history_cleanup": {"include_compressed_in_watermark": True}})
+        self.assertEqual(cleaner_include.calculate_uncompressed_chars(contexts), 1000 + summary_len)
+        self.assertEqual(cleaner_include.calculate_watermark_chars(contexts), 1000 + summary_len)
+
     def test_calculate_uncompressed_chars_dict(self):
         from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
         cleaner = HistoryCleaner(self.context, self.config)

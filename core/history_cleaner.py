@@ -198,6 +198,17 @@ class HistoryCleaner:
             or text.startswith(SUMMARY_PREFIX)
         )
 
+    def is_candidate_tool(self, content: Any) -> bool:
+        """判断工具消息内容是否作为待消减/压缩的候选对象。"""
+        if not content:
+            return False
+        text = str(content)
+        if text.startswith(DELETE_PLACEHOLDER) or text.startswith(MERGE_PLACEHOLDER):
+            return False
+        if text.startswith(SUMMARY_PREFIX):
+            return self.include_compressed_in_watermark
+        return True
+
     def _get_role(self, msg: Any) -> str:
         if isinstance(msg, dict):
             return str(msg.get("role", "")).lower()
@@ -297,10 +308,12 @@ class HistoryCleaner:
             if not self.is_plugin_tool(name):
                 continue
             content = self._get_content(msg)
-            if self.is_processed_tool(content):
+            if not self.is_candidate_tool(content):
                 continue
             total_chars += len(content)
         return total_chars
+
+    calculate_watermark_chars = calculate_uncompressed_chars
 
     def group_tool_calls(self, contexts: list[Any]) -> list[list[int]]:
         """按轮次边界将连续属于本插件的未处理/可处理工具消息聚合为调用组。"""
