@@ -236,6 +236,10 @@ flowchart TD
   - **FIFO 贪心收集**：遍历 `contexts` 中的消息，从最旧记录开始按先进先出顺序筛选属于本插件且满足 `is_candidate_tool` 的工具消息索引加入候选批次 `batch_indices`，累加候选条目字符数；
   - **低水位终止**：当 `current_chars - accumulated_chars <= low_watermark` 时终止贪心收集，确保保留在队尾的最新工具调用完整不受影响。
 - **提示词组装与单次副 AI 调用 (Prompt Assembly & Single LLM Call)**：
+  - **用户目标动态注入 (`{{user_input}}` 占位符与逆序意图提取)**：
+    - 在 `compress_prompt` 中支持引入 `{{user_input}}` 动态占位符；
+    - 运行时由 `_extract_user_input` 逆序遍历 `contexts`（`reversed(contexts)`）提取最近一条 `role == "user"` 消息的文本内容（多态兼容纯字符串 `str` 与 `[TextPart]` 消息部件）；若无上下文消息则安全回退尝试从 `event` 中获取；
+    - 在 `_resolve_system_prompt` 中将提示词中的 `{{user_input}}` 全局替换为提取的用户提问，引导副 AI 执行目标导向的聚焦摘要（Query-Focused Summarization）；若未提取到有效用户消息则安全替换为 `""`，保持向后兼容；
   - **结构化合并拼装**：对 `batch_indices` 中的每个候选条目：
     - 普通工具条目拼装为：`【工具: {tool_name}】\n{content}`
     - 前序历史摘要条目拼装为：`【前序历史摘要】\n{content去除前缀}`

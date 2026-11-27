@@ -4,6 +4,20 @@
 
 ---
 
+## [v1.4.5] - 2026-11-27
+
+### 副 AI 压缩提示词用户意图动态占位符 (Dynamic {{user_input}} Placeholder in Compress Prompt)
+- **`{{user_input}}` 动态占位符支持**：
+  - 在副 AI 压缩提示词（`history_cleanup.items.compress_prompt`）中引入 `{{user_input}}` 占位符支持，使副 AI 能够获知用户当前核心问题与目标，执行目标导向的聚焦摘要（Query-Focused Summarization），避免盲目压缩丢失关键业务事实。
+- **多态上下文逆序意图提取 (`_extract_user_input`)**：
+  - 支持从当前上下文列表（`contexts`）中逆序检索最近一条 `role == "user"` 消息，自动解构多部件内容（兼容纯字符串 `str` 与 `TextPart` 列表）；
+  - 若上下文中无用户消息，自动平滑回退至从当前事件（`event.message_str` / `event.get_message_str()`）提取；若均无则安全回退为 `""`，避免异常或残留占位符。
+- **100% 向后兼容与配置模式引导**：
+  - 未使用 `{{user_input}}` 的静态系统提示词保持原有行为完全不变；
+  - 更新 `_conf_schema.json` 中 `compress_prompt` 的配置说明与提示，引导用户配置针对性提炼模板。
+
+---
+
 ## [v1.4.4] - 2026-11-27
 
 ### 历史消减全量原始输入审计与专属对比视图 (Full History Audit Input Recording & Dedicated SideDrawer View)
