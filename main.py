@@ -17,6 +17,7 @@ from .core.security_manager import SecurityManager
 from .core.readers import InlineMarkdownReader, AriaSnapshotReader
 from .core.context_manager import ContextManager
 from .core.service_api import PlaywrightServiceAPI
+from .core.history_cleaner import HistoryCleaner
 from .adapts.factory import AdapterFactory
 
 from .tools.handlers.page_handler import PageHandler
@@ -184,8 +185,9 @@ class PlaywrightToolPlugin(Star):
         self._retention_days = retention_days
         self._cleanup_task: asyncio.Task | None = None
 
-        # 6. 初始化跨插件浏览器共享服务基座
+        # 6. 初始化跨插件浏览器共享服务基座与上下文历史消减器
         self.service = PlaywrightServiceAPI(self, self.context_manager)
+        self.history_cleaner = HistoryCleaner(self.context, self.config)
 
     def _sync_event_admin(self, event: AstrMessageEvent) -> None:
         """从当前消息事件中提取并动态同步全局管理员标识。"""
@@ -358,8 +360,13 @@ class PlaywrightToolPlugin(Star):
 
     @filter.on_llm_request()
     async def on_llm_request(self, event: AstrMessageEvent, req: Any):
-        """在向大模型发起请求前同步管理员标识，并在配置了系统提示词时进行动态追加注入。"""
+        """在向大模型发起请求前同步管理员标识，执行工具历史记录双水位线消减/压缩，并在配置了系统提示词时进行动态追加注入。"""
         self._sync_event_admin(event)
+        try:
+            await self.history_cleaner.process_contexts(event, req)
+        except Exception as e:
+            logger.warning(f"[PlaywrightTool] 工具历史消减处理异常: {e}")
+
         if not self.system_prompt_injection:
             return
         if hasattr(req, "system_prompt"):

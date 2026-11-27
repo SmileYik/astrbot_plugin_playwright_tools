@@ -649,5 +649,22 @@ class TestPluginMain(unittest.TestCase):
             plugin.adapter.stop.assert_called_once()
 
 
+    def test_history_cleaner_integration(self):
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / "test_hc_integration.db")
+        mock_ctx = MagicMock()
+        plugin = main.PlaywrightToolPlugin(mock_ctx, config={"audit_db_path": db_file})
+        self.assertTrue(hasattr(plugin, "history_cleaner"))
+
+        mock_event = MagicMock()
+        mock_event.get_sender_id.return_value = "u123"
+        mock_req = MagicMock()
+        mock_req.system_prompt = "Hello"
+
+        plugin.history_cleaner.process_contexts = AsyncMock(return_value=True)
+        run_coro(plugin.on_llm_request(mock_event, mock_req))
+        plugin.history_cleaner.process_contexts.assert_awaited_once_with(mock_event, mock_req)
+
+
 if __name__ == "__main__":
     unittest.main()
