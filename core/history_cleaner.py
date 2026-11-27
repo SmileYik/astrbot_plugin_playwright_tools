@@ -315,34 +315,6 @@ class HistoryCleaner:
 
     calculate_watermark_chars = calculate_uncompressed_chars
 
-    def group_tool_calls(self, contexts: list[Any]) -> list[list[int]]:
-        """按轮次边界将连续属于本插件的未处理/可处理工具消息聚合为调用组。"""
-        if not contexts:
-            return []
-        id_map = self._build_call_id_map(contexts)
-        groups: list[list[int]] = []
-        current_group: list[int] = []
-
-        for idx, msg in enumerate(contexts):
-            role = self._get_role(msg)
-            if role == "tool":
-                name = self._get_tool_name(msg, id_map)
-                if self.is_plugin_tool(name):
-                    current_group.append(idx)
-                else:
-                    if current_group:
-                        groups.append(current_group)
-                        current_group = []
-            else:
-                if current_group:
-                    groups.append(current_group)
-                    current_group = []
-
-        if current_group:
-            groups.append(current_group)
-
-        return groups
-
     async def _record_tool_audit(
         self,
         event_info: dict[str, str],

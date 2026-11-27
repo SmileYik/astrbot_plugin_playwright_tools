@@ -181,40 +181,6 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         total = cleaner.calculate_uncompressed_chars(contexts)
         self.assertEqual(total, 3000)
 
-    def test_group_tool_calls(self):
-        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
-        cleaner = HistoryCleaner(self.context, self.config)
-
-        contexts = [
-            {"role": "user", "content": "step 1"},
-            {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [
-                    {"id": "c1", "type": "function", "function": {"name": "pw_page", "arguments": "{}"}},
-                    {"id": "c2", "type": "function", "function": {"name": "pw_read", "arguments": "{}"}},
-                ],
-            },
-            {"role": "tool", "tool_call_id": "c1", "content": "opened"},
-            {"role": "tool", "tool_call_id": "c2", "content": "read page 1"},
-            {"role": "assistant", "content": "Found something"},
-            {"role": "user", "content": "step 2"},
-            {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [
-                    {"id": "c3", "type": "function", "function": {"name": "pw_interact", "arguments": "{}"}},
-                ],
-            },
-            {"role": "tool", "tool_call_id": "c3", "content": "clicked button"},
-            {"role": "assistant", "content": "Done clicking"},
-        ]
-
-        groups = cleaner.group_tool_calls(contexts)
-        self.assertEqual(len(groups), 2)
-        self.assertEqual(groups[0], [2, 3])  # c1, c2 indices
-        self.assertEqual(groups[1], [7])     # c3 index
-
     async def test_process_contexts_delete_watermark(self):
         from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
         cleaner = HistoryCleaner(self.context, self.config)
