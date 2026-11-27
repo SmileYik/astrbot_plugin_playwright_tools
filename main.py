@@ -30,7 +30,7 @@ from .tools.tools import PwPageTool, PwReadTool, PwInteractTool, PwMediaTool
     "PlaywrightTool",
     "SmileYik",
     "给大模型用的网页浏览器插件。支持打开网页、阅读文章与点击填表。采用元素编号避免乱点并减少 Token 消耗，支持双水位线工具历史消减与副 AI 压缩，自带防网站拦截与后台管理控制台。",
-    "v1.4.5"
+    __version__
 )
 class PlaywrightToolPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
