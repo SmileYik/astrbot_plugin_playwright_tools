@@ -34,22 +34,22 @@
 - Modify: `core/history_cleaner.py:548-646`
 - Modify: `tests/test_history_cleaner.py`
 
-- [ ] **Step 1: 编写单元测试断言 `original_input` 全量记录**
+- [x] **Step 1: 编写单元测试断言 `original_input` 全量记录**
   在 `tests/test_history_cleaner.py` 中：
   - 更新 `test_compress_audit_and_logging_success`：断言 `input_args["original_input"]` 存在且长度大于 6000 字符，包含 `"Opened page"` 与 `"A" * 6000`；
   - 更新 `test_compress_audit_fallback_on_error`：断言失败时的 `pw_history:compress` 与降级 `pw_history:delete` 的 `input_args["original_input"]` 均完整保存；
   - 更新 `test_delete_strategy_audit_and_logging`：断言 `pw_history:delete` 的 `input_args["original_input"]` 包含 `"A" * 6000`。
   运行测试确认失败：`uv run python -m unittest tests/test_history_cleaner.py`
 
-- [ ] **Step 2: 在 `core/history_cleaner.py` 中记录全量 `original_input`**
+- [x] **Step 2: 在 `core/history_cleaner.py` 中记录全量 `original_input`**
   - 在 `_compress_batch` 中：将待压缩文本完整保留为 `full_input = "\n\n".join(contents_to_compress)`，传入 `_record_tool_audit` 的 `input_args`（使用 `"original_input": full_input`，移除 200 字符的 `"preview"` 限制）；
   - 在 `process_contexts` 的直接删除与降级删除逻辑中：以相同格式拼装被清理条目的完整文本 `full_deleted_input`，传入 `pw_history:delete` 的 `input_args["original_input"]`。
 
-- [ ] **Step 3: 运行测试并验证**
+- [x] **Step 3: 运行测试并验证**
   运行 `uv run python -m unittest tests/test_history_cleaner.py`，确认测试全部通过。
   运行 `uv run python -m unittest discover tests`，确认全量测试无回归。
 
-- [ ] **Step 4: 提交后端变更**
+- [x] **Step 4: 提交后端变更**
   提交代码：`git commit -am "feat(cleaner): record full original input in history cleanup tool audit"`
 
 ---
@@ -60,7 +60,7 @@
 - Modify: `web-src/src/components/SideDrawer.tsx`
 - Modify: `views/browser/` (build artifacts)
 
-- [ ] **Step 1: 优化 `SideDrawer.tsx` 中的历史审计展示**
+- [x] **Step 1: 优化 `SideDrawer.tsx` 中的历史审计展示**
   - 在 `parsedArgs` 中提取 `original_input`：
     ```ts
     const originalInputText = parsedArgs?.original_input || "";
@@ -71,10 +71,10 @@
     - 新增“消减前完整输入”卡片（标题根据 compress/delete 显示“压缩前完整输入”或“删除前完整输入”），带 `({originalInputText.length} 字符)`、独立复制按钮与多行滚动框；
     - “输出结果”卡片标题根据 compress/delete 标为“压缩后结构化摘要”或“清理执行结果”。
 
-- [ ] **Step 2: 执行前端构建**
+- [x] **Step 2: 执行前端构建**
   在 `web-src` 目录下运行 `npm run build`，编译产出至 `views/browser/assets/`。
 
-- [ ] **Step 3: 验证构建产物并提交**
+- [x] **Step 3: 验证构建产物并提交**
   检查 `views/browser/` 产物更新情况。
   提交代码：`git commit -am "feat(webui): add dedicated full input/output view in audit drawer"`
 
@@ -86,12 +86,12 @@
 - Modify: `docs/ARCHITECTURE.md`
 - Modify: `CHANGELOG.md`
 
-- [ ] **Step 1: 更新架构文档与变更日志**
+- [x] **Step 1: 更新架构文档与变更日志**
   - 在 `CHANGELOG.md` 中增加 `[v1.4.4] - 2026-11-27` 条目，说明审计日志中完整输入输出记录与 WebUI 专属长文本对比视图；
   - 在 `docs/ARCHITECTURE.md` Section 5.4 中更新工具调用审计说明。
 
-- [ ] **Step 2: 运行全量测试**
+- [x] **Step 2: 运行全量测试**
   运行 `uv run python -m unittest discover tests`，确认 100% 通过。
 
-- [ ] **Step 3: 提交文档更新**
+- [x] **Step 3: 提交文档更新**
   提交代码：`git commit -am "docs: update changelog and architecture for audit full input recording"`

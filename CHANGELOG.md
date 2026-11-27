@@ -4,6 +4,19 @@
 
 ---
 
+## [v1.4.4] - 2026-11-27
+
+### 历史消减全量原始输入审计与专属对比视图 (Full History Audit Input Recording & Dedicated SideDrawer View)
+- **消减前全量原始输入落盘 (`original_input`)**：
+  - 在 `HistoryCleaner` 执行副 AI 压缩（`pw_history:compress`）与直接删除（`pw_history:delete`）时，将候选批次中所有工具调用与前序历史摘要拼装为全量文本完整存入 `input_args["original_input"]`，去除原有 200 字符 preview 截断限制。
+  - 无论副 AI 压缩成功、副 AI 报错降级删除还是直接删除策略，均 100% 完整留存消减前原始输入，审计回溯完整可靠。
+- **WebUI 抽屉专属长文本排版与对比卡片**：
+  - 在前端控制台审计详情侧边抽屉（`SideDrawer.tsx`）中，对 `pw_history:*` 工具自动将超长 `original_input` 从入参 JSON 区域解耦剥离；
+  - 入参 JSON 区域仅展示结构化元数据（批次大小、包含工具、原始/释放字符数），紧凑清爽；
+  - 新增专属“消减前完整输入”（根据动作动态标为“压缩前完整输入”或“删除前完整输入”）多行文本卡片，带字符数统计与独立“复制完整输入”按钮；配合“压缩后结构化摘要”或“清理执行结果”卡片，实现消减前后效果清晰可视。
+
+---
+
 ## [v1.4.3] - 2026-11-27
 
 ### 单批次聚合消减与水位配置演进 (Single-Pass Batch Compression & Watermark Option)

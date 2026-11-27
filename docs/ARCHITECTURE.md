@@ -256,7 +256,14 @@ flowchart TD
   - 消减全链路使用 AstrBot 官方标准的 `from astrbot.api import logger` 输出规范化日志；
   - 包含超标触发日志（当前字符数、高水位与低水位目标）、批次消减执行日志（批次条目数与释放字符数）、副 AI 压缩调用及节省率日志、异常降级警告日志以及全局消减汇总日志。
 - **双重审计持久化机制 (HistoryCleaner 与 AuditLogger 协作)**：
-  - **工具调用审计 (`tool_audit_logs`)**：调用 `AuditLogger.log_action` 记录 `pw_history:compress` 或 `pw_history:delete` 动作，将批次大小（`batch_size`）、包含工具列表（`tools`）、原始字符数（`original_chars`）与执行耗时持久化至工具审计表；
+  - **工具调用审计 (`tool_audit_logs`)**：调用 `AuditLogger.log_action` 记录 `pw_history:compress` 或 `pw_history:delete` 动作：
+    - `input_args["original_input"]`：完整留存批次内全部工具调用与前序摘要的 100% 原始输入文本（`【工具: ...】\n...` 格式），去除截断限制，确保无论是副 AI 压缩成功、异常降级还是直接删除均可精准回溯原始明文；
+    - `input_args` 元数据：包含批次大小（`batch_size`）、包含工具列表（`tools`）、原始字符数（`original_chars`）或释放字符数（`freed_chars`）；
+    - `output_result`：记录副 AI 生成的压缩后结构化摘要或直接删除占位符；
+  - **WebUI 审计抽屉专属对比视图 (`SideDrawer.tsx`)**：
+    - 详情抽屉识别 `pw_history:*` 记录并自动将超长 `original_input` 从入参 JSON 区域解耦剥离；
+    - 入参 JSON 区域仅展示结构化元数据（批次大小、包含工具、原始/释放字符数等），保持紧凑清爽；
+    - 新增专属“消减前完整输入”原生多行文本卡片（动态展示为“压缩前完整输入”或“删除前完整输入”），具备字符数统计与独立“复制完整输入”按钮；与下方的“压缩后结构化摘要”或“清理执行结果”形成清晰的前后对比；
   - **生命周期审计 (`context_lifecycle_logs`)**：调用 `AuditLogger.log_lifecycle` 记录 `history_compress` 或 `history_cleanup` 事件，将清理策略、字符变化、节省比例及副 AI 模型等结构化详情记录至生命周期事件表，与上下文生命周期审计闭环对齐。
 - **自动持久化机制**：
   - 深度结合 AstrBot 原生 `context_observer`，钩子完成时自动调用 `stage_history()` 将变更写回会话数据库，避免二次重复计算。
