@@ -7,7 +7,7 @@ class TestConfSchema(unittest.TestCase):
         with open("_conf_schema.json", "r", encoding="utf-8") as f:
             schema = json.load(f)
 
-        expected_groups = {"security", "runtime", "browser", "media", "storage_audit"}
+        expected_groups = {"security", "runtime", "browser", "media", "storage_audit", "history_cleanup"}
         self.assertEqual(set(schema.keys()), expected_groups)
 
         for group_name, group in schema.items():
@@ -122,6 +122,26 @@ class TestConfSchema(unittest.TestCase):
         self.assertIn("page_chunk_char_limit", schema["runtime"]["items"])
         self.assertEqual(schema["runtime"]["items"]["page_chunk_char_limit"]["default"], 2000)
         self.assertTrue(schema["security"]["items"]["mask_password_inputs"]["default"])
+
+    def test_history_cleanup_schema(self):
+        with open("_conf_schema.json", "r", encoding="utf-8") as f:
+            schema = json.load(f)
+        self.assertIn("history_cleanup", schema)
+        hc = schema["history_cleanup"]
+        self.assertEqual(hc["type"], "object")
+        items = hc["items"]
+        self.assertIn("enable_cleanup", items)
+        self.assertFalse(items["enable_cleanup"]["default"])
+        self.assertEqual(items["high_watermark"]["default"], 8000)
+        self.assertEqual(items["low_watermark"]["default"], 3000)
+        self.assertEqual(items["cleanup_strategy"]["default"], "delete")
+        self.assertEqual(items["cleanup_strategy"]["options"], ["delete", "compress"])
+        self.assertEqual(items["compress_max_input_chars"]["default"], 0)
+        self.assertEqual(items["compress_provider_id"]["_special"], "select_provider")
+        self.assertEqual(items["compress_persona_id"]["_special"], "select_persona")
+        self.assertFalse(items["compress_use_persona"]["default"])
+        self.assertEqual(items["compress_provider_id"]["condition"], {"enable_cleanup": True, "cleanup_strategy": "compress"})
+        self.assertEqual(items["compress_max_input_chars"]["condition"], {"enable_cleanup": True, "cleanup_strategy": "compress"})
 
     def test_storage_paths_default_in_schema(self):
         with open("_conf_schema.json", "r", encoding="utf-8") as f:

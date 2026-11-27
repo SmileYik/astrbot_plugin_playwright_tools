@@ -417,5 +417,125 @@
         "default": true
       }
     }
+  },
+  "history_cleanup": {
+    "type": "object",
+    "description": "工具历史消减与压缩",
+    "hint": "当大模型对话中累积的本插件工具调用字符过多时，自动执行消减或由副 AI 压缩，防止超出上下文限制",
+    "items": {
+      "enable_cleanup": {
+        "type": "bool",
+        "description": "启用历史消减",
+        "hint": "开启后，将监控本插件工具调用字符并在超标时自动消减",
+        "default": false
+      },
+      "high_watermark": {
+        "type": "int",
+        "description": "高水位阈值 (字符)",
+        "hint": "历史工具调用总字符超过此时触发清理（建议 5000 ~ 12000）",
+        "default": 8000,
+        "slider": {
+          "min": 2000,
+          "max": 30000,
+          "step": 500
+        },
+        "condition": {
+          "enable_cleanup": true
+        }
+      },
+      "low_watermark": {
+        "type": "int",
+        "description": "低水位目标 (字符)",
+        "hint": "触发清理后消减到的目标字符数（建议设为高水位的 30% ~ 50%）",
+        "default": 3000,
+        "slider": {
+          "min": 1000,
+          "max": 15000,
+          "step": 500
+        },
+        "condition": {
+          "enable_cleanup": true
+        }
+      },
+      "cleanup_strategy": {
+        "type": "string",
+        "description": "消减策略",
+        "hint": "直接替换为占位符删除，或调用另外一个 AI 生成紧凑摘要",
+        "default": "delete",
+        "options": [
+          "delete",
+          "compress"
+        ],
+        "labels": [
+          "直接删除 (占位清空)",
+          "副 AI 压缩 (总结提炼)"
+        ],
+        "subtitles": [
+          "直接将历史正文清空替换为简短占位符，零额外开销",
+          "唤起副 AI 提取网页关键事实与操作结论，保留历史认知"
+        ],
+        "condition": {
+          "enable_cleanup": true
+        }
+      },
+      "compress_provider_id": {
+        "type": "string",
+        "description": "压缩模型提供商",
+        "hint": "选择负责执行压缩摘要的 AI 提供商；留空则使用当前会话默认模型",
+        "default": "",
+        "_special": "select_provider",
+        "condition": {
+          "enable_cleanup": true,
+          "cleanup_strategy": "compress"
+        }
+      },
+      "compress_max_input_chars": {
+        "type": "int",
+        "description": "副 AI 输入上限 (字符)",
+        "hint": "送给副 AI 压缩的最大字符预算，设置为 0 代表不限制长度；大于 0 时若超出则直接截断",
+        "default": 0,
+        "slider": {
+          "min": 0,
+          "max": 50000,
+          "step": 1000
+        },
+        "condition": {
+          "enable_cleanup": true,
+          "cleanup_strategy": "compress"
+        }
+      },
+      "compress_prompt": {
+        "type": "text",
+        "description": "压缩提示词",
+        "hint": "副 AI 执行总结提炼时遵循的核心指导原则",
+        "default": "你是一个精炼的内容总结器。请对以下浏览器历史操作及网页正文进行结构化提炼：保留核心事实、关键结论、数据指标及必要链接，剔除冗余修饰与排版，输出不超过 300 字的紧凑摘要。",
+        "condition": {
+          "enable_cleanup": true,
+          "cleanup_strategy": "compress"
+        }
+      },
+      "compress_use_persona": {
+        "type": "bool",
+        "description": "启用人设面具",
+        "hint": "是否在压缩时注入人设设定",
+        "default": false,
+        "condition": {
+          "enable_cleanup": true,
+          "cleanup_strategy": "compress"
+        }
+      },
+      "compress_persona_id": {
+        "type": "string",
+        "description": "指定人设面具",
+        "hint": "选择用于压缩的人设面具；留空则自动选用当前系统默认人设",
+        "default": "",
+        "_special": "select_persona",
+        "condition": {
+          "enable_cleanup": true,
+          "cleanup_strategy": "compress",
+          "compress_use_persona": true
+        }
+      }
+    }
   }
 }
