@@ -209,6 +209,18 @@ class HistoryCleaner:
             return ""
         if isinstance(c, str):
             return c
+        if isinstance(c, list):
+            parts: list[str] = []
+            for part in c:
+                if isinstance(part, str):
+                    parts.append(part)
+                elif hasattr(part, "text"):
+                    parts.append(str(part.text))
+                elif isinstance(part, dict) and "text" in part:
+                    parts.append(str(part["text"]))
+                else:
+                    parts.append(str(part))
+            return "".join(parts)
         return str(c)
 
     def _set_content(self, msg: Any, text: str) -> None:
@@ -370,12 +382,19 @@ class HistoryCleaner:
         except Exception as e:
             logger.warning(f"[HistoryCleaner] 记录生命周期审计异常: {e}")
 
-    async def process_contexts(self, event: Any, req: Any) -> bool:
-        """执行上下文水位检测与消减。"""
+    async def process_contexts(self, event: Any, target: Any) -> bool:
+        """执行上下文水位检测与消减。支持传入原生列表、包含 messages 的 run_context 或包含 contexts 的 req。"""
         if not self.enable_cleanup:
             return False
 
-        contexts = getattr(req, "contexts", None)
+        contexts = None
+        if isinstance(target, list):
+            contexts = target
+        elif hasattr(target, "messages") and isinstance(target.messages, list):
+            contexts = target.messages
+        elif hasattr(target, "contexts") and isinstance(target.contexts, list):
+            contexts = target.contexts
+
         if not contexts or not isinstance(contexts, list):
             return False
 

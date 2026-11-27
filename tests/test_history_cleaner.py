@@ -750,6 +750,55 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(contexts[2]["content"], "[该历史工具调用结果已按策略清理]")
         self.assertEqual(cleaner.calculate_uncompressed_chars(contexts), 0)
 
+    async def test_process_contexts_with_direct_list(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        cleaner = HistoryCleaner(self.context, self.config)
+        messages = [
+            Message(role="user", content="hello"),
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[ToolCall(id="call_direct", name="pw_read", args="{}")],
+            ),
+            Message(role="tool", content="X" * 6000, tool_call_id="call_direct"),
+            Message(role="assistant", content="answer"),
+        ]
+        mock_event = MagicMock()
+        changed = await cleaner.process_contexts(mock_event, messages)
+        self.assertTrue(changed)
+        self.assertEqual(messages[2].content, "[该历史工具调用结果已按策略清理]")
+
+    async def test_process_contexts_with_run_context(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        cleaner = HistoryCleaner(self.context, self.config)
+        messages = [
+            Message(role="user", content="hello"),
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[ToolCall(id="call_rc", name="pw_page", args="{}")],
+            ),
+            Message(role="tool", content="Y" * 7000, tool_call_id="call_rc"),
+            Message(role="assistant", content="done"),
+        ]
+        run_context = MagicMock(spec=["messages"])
+        run_context.messages = messages
+        mock_event = MagicMock()
+        changed = await cleaner.process_contexts(mock_event, run_context)
+        self.assertTrue(changed)
+        self.assertEqual(messages[2].content, "[该历史工具调用结果已按策略清理]")
+
+    def test_get_content_with_content_parts(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        cleaner = HistoryCleaner(self.context, self.config)
+        class DummyPart:
+            def __init__(self, text):
+                self.text = text
+        msg = MagicMock(spec=["content"])
+        msg.content = [DummyPart("Part 1: Hello. "), DummyPart("Part 2: World!")]
+        content = cleaner._get_content(msg)
+        self.assertEqual(content, "Part 1: Hello. Part 2: World!")
+
 
 if __name__ == "__main__":
     unittest.main()
