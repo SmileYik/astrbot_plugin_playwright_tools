@@ -33,23 +33,10 @@ def extract_query_param(req: Any, key: str, default: Any = None, type_conv: Any 
                 containers.append(c)
 
     for container in containers:
-        try:
-            from unittest.mock import Mock
-            if isinstance(container, Mock) and not getattr(container, "_mock_return_value", None) and not getattr(container, "side_effect", None) and not (hasattr(container, "__contains__") and key in container):
-                continue
-        except ImportError:
-            pass
-
         if hasattr(container, "get") and callable(container.get):
             try:
                 res = container.get(key)
-                try:
-                    from unittest.mock import Mock
-                    if isinstance(res, Mock):
-                        res = None
-                except ImportError:
-                    pass
-                if res is not None:
+                if isinstance(res, (str, int, float, bool)):
                     val = res
                     break
             except Exception as e:

@@ -11,7 +11,7 @@ else:
         Browser = None
         BrowserContext = None
 
-# 支持外部 mock 或动态导入
+# 动态导入 Camoufox 驱动
 try:
     from camoufox.async_api import AsyncCamoufox
 except ImportError:

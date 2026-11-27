@@ -61,10 +61,7 @@ class HistoryCleaner:
             if val is None:
                 return ""
             if isinstance(val, (str, int, float)):
-                s = str(val).strip()
-                if s.startswith("<MagicMock") or s.startswith("<Mock"):
-                    return ""
-                return s
+                return str(val).strip()
             return ""
 
         def _call_or_get(obj: Any, name: str) -> Any:
@@ -502,7 +499,7 @@ class HistoryCleaner:
             for msg in reversed(contexts):
                 if self._get_role(msg) == "user":
                     content = self._get_content(msg).strip()
-                    if content and not (content.startswith("<MagicMock") or content.startswith("<Mock")):
+                    if content:
                         return content
 
         if event is not None:
@@ -510,10 +507,7 @@ class HistoryCleaner:
                 if val is None:
                     return ""
                 if isinstance(val, (str, int, float)):
-                    s = str(val).strip()
-                    if s.startswith("<MagicMock") or s.startswith("<Mock"):
-                        return ""
-                    return s
+                    return str(val).strip()
                 return ""
 
             msg_str = getattr(event, "message_str", None)

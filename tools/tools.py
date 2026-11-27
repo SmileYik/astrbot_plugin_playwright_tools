@@ -78,7 +78,7 @@ def _extract_event_and_metadata(context: Any) -> tuple[Any, str, str, str, str]:
                     session_name = g_name.strip()
                 else:
                     g_id = getattr(group, "group_id", None)
-                    if g_id is not None and not hasattr(g_id, "_mock_return_value"):
+                    if isinstance(g_id, (str, int)) and str(g_id).strip():
                         session_name = f"群聊: {g_id}"
             else:
                 session_name = f"私聊: {sender_name}"
@@ -119,7 +119,7 @@ async def _execute_history_cleaner(cleaner: Any, context: Any, tool_name: str) -
 
 
 async def _invoke_handler(fn, *args, **kwargs):
-    """自适应调用 handler，若其签名不支持部分扩展 kwargs（如简单测试 mock）则自动过滤。"""
+    """自适应调用 handler，若其签名不支持部分扩展 kwargs 则自动过滤。"""
     try:
         sig = inspect.signature(fn)
         has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())

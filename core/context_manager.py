@@ -908,26 +908,14 @@ class ContextManager:
                                     t_val = await asyncio.wait_for(t_res, timeout=2.0)
                                 except (RuntimeError, NotImplementedError):
                                     t_val = await t_res
-                                if isinstance(t_val, (str, int, float, bool)):
-                                    title_str = str(t_val)
-                                elif hasattr(t_val, "_mock_name") or type(t_val).__name__.endswith("Mock"):
-                                    title_str = ""
-                                else:
-                                    title_str = str(t_val)
+                                if isinstance(t_val, str):
+                                    title_str = t_val.strip()
                             else:
-                                if isinstance(t_res, (str, int, float, bool)):
-                                    title_str = str(t_res)
-                                elif hasattr(t_res, "_mock_name") or type(t_res).__name__.endswith("Mock"):
-                                    title_str = ""
-                                else:
-                                    title_str = str(t_res)
+                                if isinstance(t_res, str):
+                                    title_str = t_res.strip()
                         else:
-                            if isinstance(p.title, (str, int, float, bool)):
-                                title_str = str(p.title)
-                            elif hasattr(p.title, "_mock_name") or type(p.title).__name__.endswith("Mock"):
-                                title_str = ""
-                            else:
-                                title_str = str(p.title)
+                            if isinstance(p.title, str):
+                                title_str = p.title.strip()
                 except Exception as e:
                     logger.debug(f"[ContextManager] 获取标签页标题失败降级: {e}")
                     title_str = ""
