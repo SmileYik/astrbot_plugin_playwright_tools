@@ -62,16 +62,27 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({ item, onClose }) => {
     }
   };
 
-  const formatJson = (raw: string) => {
-    try {
-      const parsed = JSON.parse(raw);
-      return JSON.stringify(parsed, null, 2);
-    } catch {
-      return raw;
-    }
-  };
+  let originalInputText = "";
+  let formattedArgs = item.input_args;
 
-  const formattedArgs = formatJson(item.input_args);
+  try {
+    const parsed = JSON.parse(item.input_args);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      if (typeof parsed.original_input === "string" && parsed.original_input.length > 0) {
+        originalInputText = parsed.original_input;
+        const metadataOnly = { ...parsed };
+        delete metadataOnly.original_input;
+        formattedArgs = JSON.stringify(metadataOnly, null, 2);
+      } else {
+        formattedArgs = JSON.stringify(parsed, null, 2);
+      }
+    } else {
+      formattedArgs = JSON.stringify(parsed, null, 2);
+    }
+  } catch {
+    formattedArgs = item.input_args;
+  }
+
   const sessionDisplayName = item.session_name || item.session_id || "未知会话";
   const senderDisplayName = item.sender_name || item.sender_id || "未知用户";
 
@@ -201,11 +212,46 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({ item, onClose }) => {
             </div>
           )}
 
+          {/* 消减前完整输入 */}
+          {originalInputText && (
+            <div className={styles.outputResultContainer}>
+              <div className={styles.sectionHeaderRow}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span className={styles.sectionHeaderTitle}>
+                    {item.tool_name === "pw_history:compress"
+                      ? "压缩前完整输入"
+                      : item.tool_name === "pw_history:delete"
+                      ? "删除前完整输入"
+                      : "消减前完整输入"}
+                  </span>
+                  <span style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>
+                    ({originalInputText.length} 字符)
+                  </span>
+                </div>
+                <button
+                  onClick={() => handleCopy(originalInputText, "original_input")}
+                  className={styles.copyBtn}
+                >
+                  {copiedType === "original_input" ? "✓ 已复制" : "📋 复制完整输入"}
+                </button>
+              </div>
+              <div className={styles.outputResultBox}>
+                {originalInputText}
+              </div>
+            </div>
+          )}
+
           {/* 输出结果 / DOM 快照长文本 */}
           <div className={styles.outputResultContainer}>
             <div className={styles.sectionHeaderRow}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <span className={styles.sectionHeaderTitle}>输出结果 / 快照内容</span>
+                <span className={styles.sectionHeaderTitle}>
+                  {item.tool_name === "pw_history:compress"
+                    ? "压缩后结构化摘要"
+                    : item.tool_name === "pw_history:delete"
+                    ? "清理执行结果"
+                    : "输出结果 / 快照内容"}
+                </span>
                 <span style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>
                   ({(item.output_result || "").length} 字符)
                 </span>
