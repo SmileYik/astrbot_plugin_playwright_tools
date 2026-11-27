@@ -4,7 +4,7 @@
 
 - adapts: 浏览器适配器代码
 - api: 网页 Web API 路由与业务代码
-- core: 核心逻辑组件代码（含 readers 页面阅读提炼器）
+- core: 核心逻辑组件代码（含 readers 页面阅读提炼器、history_cleaner 上下文历史消减器）
 - tools: AI 工具代码（handlers 与复合工具门面）
 - docs: 项目文档（架构设计与技术文档）
 - views: 可视化界面预构建静态资源

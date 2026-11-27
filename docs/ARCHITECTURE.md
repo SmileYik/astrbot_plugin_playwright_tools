@@ -44,6 +44,7 @@ flowchart TD
         CtxMgr[ContextManager]
         SecMgr[SecurityManager]
         AuditLog[AuditLogger]
+        HistoryCleaner[HistoryCleaner]
         Readers["Readers: InlineMarkdownReader / AriaSnapshotReader"]
     end
 
@@ -221,6 +222,17 @@ flowchart TD
   - 适配器层监听 Playwright 底层 `disconnected` 事件，并向 `ContextManager` 触发断开回调。
   - `ContextManager._on_browser_disconnected` 收到通知后，立即清空存量僵死上下文映射并清理互斥锁，向审计系统记录 `terminate (reason="browser_crash")`。
   - 后续请求将透明触发适配器重新启动新浏览器进程，恢复系统服务可用性。
+
+### 5.4 纯双水位线工具历史消减与持久化机制 (HistoryCleaner)
+- **纯高低双水位线驱动**：
+  - 在 `@filter.on_llm_request()` 拦截当前对话请求，统计本插件已产生的未压缩工具总字符数；
+  - 当总字符突破高水位（`high_watermark`，默认 8000）时，触发基于先进先出（FIFO）队列的逐轮消减，直至字符数回退至低水位（`low_watermark`，默认 3000）以内；
+  - 最新完成的工具记录自然处于队列尾部得到完整保留。
+- **协议结构安全保障**：
+  - 严格保持 `assistant(tool_calls)` 与 `tool(tool_call_id)` 结构完整，仅替换 `content`；
+  - 直接删除模式替换为安全占位符；副 AI 压缩模式按轮次聚合生成紧凑摘要，非末尾工具填入并入标记，末尾工具写回摘要。
+- **自动持久化机制**：
+  - 深度结合 AstrBot 原生 `context_observer`，钩子完成时自动调用 `stage_history()` 将变更写回会话数据库，避免二次重复压缩与无谓 Token 消耗。
 
 ---
 

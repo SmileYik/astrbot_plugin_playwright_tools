@@ -4,6 +4,20 @@
 
 ---
 
+## [v1.4.0] - 2026-11-27
+
+### 纯双水位线工具历史消减与副 AI 压缩 (Double Watermark Tool History Cleanup & Compression)
+- **纯高低双水位线上下文消减**：新增 `history_cleanup` 配置组（`high_watermark` 与 `low_watermark`），在 `@filter.on_llm_request` 请求前拦截，当本插件历史工具调用累计字符超过高水位时，从最旧记录按 FIFO 逐组消减直至回落至低水位以内，最新完成的工具调用自然位于队尾完整保留 100% 原始明文。
+- **严格 API 协议兼容（防 400 报错）**：绝不破坏 OpenAI/Gemini/Claude 等厂商要求的 `assistant(tool_calls)` 与 `tool(tool_call_id)` 结构配对，保留消息骨架并替换 `content` 内容，彻底消除孤立消息与丢失 ID 引发的 400 异常。
+- **两种消减策略与智能折叠**：
+  - **直接删除模式 (`delete`)**：将历史工具消息正文原位替换为精炼占位符 `"[该历史工具调用结果已按策略清理]"`，零额外 Token 开销。
+  - **副 AI 压缩模式 (`compress`)**：通过 `_special: "select_provider"` 选取模型生成紧凑摘要，组内非末尾工具填入 `"[已并入本轮浏览摘要]"`，末尾工具写入结构化摘要，因果链清晰。
+- **副 AI 输入上限控制与直接截断**：新增 WebUI 配置项 `compress_max_input_chars`（默认为 0 代表不限制长度）；大于 0 时若超长直接截断并附加提示，杜绝副 AI 上下文爆炸。
+- **人设面具融合与安全降级**：副 AI 支持配置人设面具注入（`compress_use_persona` 与 `_special: "select_persona"`，未指定时自动回退继承系统默认人设）；当副 AI 超时或抛出异常时，平滑降级为直接删除占位策略，保障主会话稳定。
+- **事件流自动回写持久化**：深度契合 AstrBot 内部 `context_observer("plugin")` 触发机制，在钩子完成时自动调用 `stage_history()` 将变更持久化回写至会话数据库，避免未来轮次重复计算。
+
+---
+
 ## [v1.3.0] - 2026-11-26
 
 ### 阅读器 Ref 规范化与按需 URL 查询 (Reader Ref Standardization & On-Demand URL Query)
