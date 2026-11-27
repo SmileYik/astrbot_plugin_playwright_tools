@@ -215,10 +215,14 @@ class HistoryCleaner:
                 if isinstance(part, str):
                     parts.append(part)
                 elif hasattr(part, "text"):
-                    parts.append(str(part.text))
+                    txt = getattr(part, "text", None)
+                    if txt is not None:
+                        parts.append(str(txt))
                 elif isinstance(part, dict) and "text" in part:
-                    parts.append(str(part["text"]))
-                else:
+                    txt = part.get("text")
+                    if txt is not None:
+                        parts.append(str(txt))
+                elif part is not None:
                     parts.append(str(part))
             return "".join(parts)
         return str(c)

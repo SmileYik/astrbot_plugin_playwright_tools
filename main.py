@@ -380,7 +380,14 @@ class PlaywrightToolPlugin(Star):
     @filter.on_using_llm_tool()
     async def on_using_llm_tool(self, event: AstrMessageEvent, tool: Any, tool_args: dict | None = None):
         """当大模型准备调用工具前触发。仅拦截并处理本插件的四大核心工具，防止未压缩历史过度膨胀。"""
-        tool_name = getattr(tool, "name", "")
+        if isinstance(tool, str):
+            tool_name = tool
+        elif isinstance(tool, dict):
+            tool_name = str(tool.get("name", ""))
+        else:
+            tool_name = str(getattr(tool, "name", "") or "")
+
+        logger.debug(f"[PlaywrightTool] on_using_llm_tool 当前工具为: {tool_name}")
         if not self.history_cleaner.is_plugin_tool(tool_name):
             return
 
