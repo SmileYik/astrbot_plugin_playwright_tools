@@ -496,9 +496,59 @@ class HistoryCleaner:
             full_text = full_text[: self.compress_max_input_chars] + "\n...[超出副 AI 最大输入限制，已截断]"
         return full_text
 
-    async def _resolve_system_prompt(self) -> str:
+    def _extract_user_input(self, contexts: list[Any] | None = None, event: Any = None) -> str:
+        """从上下文列表中提取最近的一条用户消息文本，若无则从事件中提取。"""
+        if contexts:
+            for msg in reversed(contexts):
+                if self._get_role(msg) == "user":
+                    content = self._get_content(msg).strip()
+                    if content and not (content.startswith("<MagicMock") or content.startswith("<Mock")):
+                        return content
+
+        if event is not None:
+            def _clean(val: Any) -> str:
+                if val is None:
+                    return ""
+                if isinstance(val, (str, int, float)):
+                    s = str(val).strip()
+                    if s.startswith("<MagicMock") or s.startswith("<Mock"):
+                        return ""
+                    return s
+                return ""
+
+            msg_str = getattr(event, "message_str", None)
+            if msg_str is not None:
+                if callable(msg_str):
+                    try:
+                        res = msg_str()
+                        cleaned = _clean(res)
+                        if cleaned:
+                            return cleaned
+                    except Exception:
+                        pass
+                else:
+                    cleaned = _clean(msg_str)
+                    if cleaned:
+                        return cleaned
+
+            get_message_str = getattr(event, "get_message_str", None)
+            if callable(get_message_str):
+                try:
+                    res = get_message_str()
+                    cleaned = _clean(res)
+                    if cleaned:
+                        return cleaned
+                except Exception:
+                    pass
+
+        return ""
+
+    async def _resolve_system_prompt(self, user_input: str = "") -> str:
         """组装副 AI 系统提示词（包含基础压缩指令与人设面具融合）。"""
         base_prompt = self.compress_prompt
+        if "{{user_input}}" in base_prompt:
+            base_prompt = base_prompt.replace("{{user_input}}", user_input)
+
         if not self.compress_use_persona:
             return base_prompt
 
@@ -590,7 +640,8 @@ class HistoryCleaner:
             if not provider:
                 raise RuntimeError("未找到可用的副 AI 提供商，无法执行压缩")
 
-            sys_prompt = await self._resolve_system_prompt()
+            user_input = self._extract_user_input(contexts, event)
+            sys_prompt = await self._resolve_system_prompt(user_input=user_input)
             res = provider.text_chat(prompt=prompt_text, system_prompt=sys_prompt)
             if hasattr(res, "__await__"):
                 llm_resp = await res

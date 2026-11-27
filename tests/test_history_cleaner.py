@@ -985,6 +985,146 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         # Final item (idx 8) has new summary
         self.assertEqual(contexts[8]["content"], "[历史浏览摘要]:\n滚动重压缩聚合摘要")
 
+    def test_extract_user_input_from_string_and_content_parts(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        cleaner = HistoryCleaner(self.context, self.config)
+
+        # 1. Plain string content
+        contexts_str = [
+            {"role": "user", "content": "hello world"},
+            {"role": "assistant", "content": "hi"},
+        ]
+        self.assertEqual(cleaner._extract_user_input(contexts_str), "hello world")
+
+        # 2. Content parts (list of objects with text attribute)
+        class DummyPart:
+            def __init__(self, text):
+                self.text = text
+
+        msg = MagicMock()
+        msg.role = "user"
+        msg.content = [DummyPart("search for "), DummyPart("AstrBot documentation")]
+        contexts_parts = [msg]
+        self.assertEqual(cleaner._extract_user_input(contexts_parts), "search for AstrBot documentation")
+
+    def test_extract_user_input_latest_in_multi_turn(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        cleaner = HistoryCleaner(self.context, self.config)
+
+        contexts = [
+            {"role": "user", "content": "first question"},
+            {"role": "assistant", "content": "first answer"},
+            {"role": "tool", "name": "pw_read", "content": "tool output"},
+            {"role": "user", "content": "latest question"},
+            {"role": "assistant", "content": "second answer"},
+        ]
+        self.assertEqual(cleaner._extract_user_input(contexts), "latest question")
+
+    def test_extract_user_input_fallback_to_event(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        cleaner = HistoryCleaner(self.context, self.config)
+
+        contexts_no_user = [
+            {"role": "assistant", "content": "hello"},
+            {"role": "tool", "content": "tool output"},
+        ]
+
+        # 1. Event with message_str
+        mock_event1 = MagicMock()
+        mock_event1.message_str = "query from message_str"
+        self.assertEqual(cleaner._extract_user_input(contexts_no_user, event=mock_event1), "query from message_str")
+
+        # 2. Event with get_message_str() method
+        mock_event2 = MagicMock(spec=["get_message_str"])
+        mock_event2.get_message_str.return_value = "query from get_message_str"
+        self.assertEqual(cleaner._extract_user_input(contexts_no_user, event=mock_event2), "query from get_message_str")
+
+        # 3. Contexts empty/None and event None
+        self.assertEqual(cleaner._extract_user_input([], event=None), "")
+        self.assertEqual(cleaner._extract_user_input(None, event=None), "")
+
+    async def test_resolve_system_prompt_with_user_input_placeholder(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+
+        # 1. With placeholder and user_input
+        cfg1 = {
+            "history_cleanup": {
+                "compress_prompt": "结合当前用户目标'{{user_input}}'，提炼网页关键事实：",
+            }
+        }
+        cleaner1 = HistoryCleaner(self.context, cfg1)
+        res1 = await cleaner1._resolve_system_prompt(user_input="查看天气预报")
+        self.assertEqual(res1, "结合当前用户目标'查看天气预报'，提炼网页关键事实：")
+
+        # 2. With placeholder and empty user_input
+        res2 = await cleaner1._resolve_system_prompt(user_input="")
+        self.assertEqual(res2, "结合当前用户目标''，提炼网页关键事实：")
+
+        # 3. Multiple placeholder occurrences
+        cfg3 = {
+            "history_cleanup": {
+                "compress_prompt": "问题: {{user_input}} -> 请根据 {{user_input}} 总结",
+            }
+        }
+        cleaner3 = HistoryCleaner(self.context, cfg3)
+        res3 = await cleaner3._resolve_system_prompt(user_input="测试问答")
+        self.assertEqual(res3, "问题: 测试问答 -> 请根据 测试问答 总结")
+
+        # 4. Without placeholder (backward compatible)
+        cfg4 = {
+            "history_cleanup": {
+                "compress_prompt": "静态提炼提示词",
+            }
+        }
+        cleaner4 = HistoryCleaner(self.context, cfg4)
+        res4 = await cleaner4._resolve_system_prompt(user_input="一些输入")
+        self.assertEqual(res4, "静态提炼提示词")
+
+    async def test_compress_batch_injects_user_input(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+
+        mock_provider = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.completion_text = "提炼后的天气数据"
+        mock_provider.text_chat = AsyncMock(return_value=mock_resp)
+        self.context.get_provider_by_id.return_value = mock_provider
+
+        cfg = {
+            "history_cleanup": {
+                "enable_cleanup": True,
+                "high_watermark": 5000,
+                "low_watermark": 2000,
+                "cleanup_strategy": "compress",
+                "compress_provider_id": "mock_p",
+                "compress_prompt": "用户意图为【{{user_input}}】，请据此总结：",
+            }
+        }
+        cleaner = HistoryCleaner(self.context, cfg)
+
+        contexts = [
+            {"role": "user", "content": "明天北京天气怎么样？"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": "pw_page", "arguments": "{}"}},
+                    {"id": "c2", "type": "function", "function": {"name": "pw_read", "arguments": "{}"}},
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "Opened weather page"},
+            {"role": "tool", "tool_call_id": "c2", "content": "Weather info: " + "W" * 6000},
+            {"role": "assistant", "content": "thinking"},
+        ]
+        req = MagicMock()
+        req.contexts = contexts
+        mock_event = MagicMock()
+
+        changed = await cleaner.process_contexts(mock_event, req)
+        self.assertTrue(changed)
+        mock_provider.text_chat.assert_awaited_once()
+        call_kwargs = mock_provider.text_chat.await_args.kwargs
+        self.assertIn("用户意图为【明天北京天气怎么样？】，请据此总结：", call_kwargs["system_prompt"])
+
 
 if __name__ == "__main__":
     unittest.main()
