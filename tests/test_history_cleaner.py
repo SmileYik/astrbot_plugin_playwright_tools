@@ -397,6 +397,99 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(contexts[3]["content"], "[该历史工具调用结果已按策略清理]")
         self.assertEqual(cleaner.calculate_uncompressed_chars(contexts), 0)
 
+    def test_init_with_audit_logger(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        mock_audit = MagicMock()
+        cleaner = HistoryCleaner(self.context, self.config, audit_logger=mock_audit)
+        self.assertEqual(cleaner.audit_logger, mock_audit)
+
+        cleaner_default = HistoryCleaner(self.context, self.config)
+        self.assertIsNone(cleaner_default.audit_logger)
+
+    def test_extract_event_info_normal(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        cleaner = HistoryCleaner(self.context, self.config)
+
+        # 1. Event with methods and attributes
+        mock_event = MagicMock()
+        mock_event.get_session_id.return_value = "session_123"
+        mock_event.get_sender_id.return_value = "user_456"
+        mock_event.get_sender_name.return_value = "Alice"
+        mock_event.session_name = "TechGroup"
+        mock_event.context_key = "ctx_tech_123"
+
+        info = cleaner._extract_event_info(mock_event)
+        self.assertEqual(info["session_id"], "session_123")
+        self.assertEqual(info["sender_id"], "user_456")
+        self.assertEqual(info["sender_name"], "Alice")
+        self.assertEqual(info["session_name"], "TechGroup")
+        self.assertEqual(info["context_key"], "ctx_tech_123")
+
+        # 2. Event with unified_msg_origin object
+        mock_event_umo = MagicMock(spec=["unified_msg_origin"])
+        mock_umo = MagicMock()
+        mock_umo.group_id = "group_789"
+        mock_umo.group_name = "AstrBotDev"
+        mock_umo.user_id = "user_999"
+        mock_umo.user_name = "Bob"
+        mock_umo.context_key = "umo_ctx_789"
+        mock_event_umo.unified_msg_origin = mock_umo
+
+        info_umo = cleaner._extract_event_info(mock_event_umo)
+        self.assertEqual(info_umo["session_id"], "group_789")
+        self.assertEqual(info_umo["session_name"], "AstrBotDev")
+        self.assertEqual(info_umo["sender_id"], "user_999")
+        self.assertEqual(info_umo["sender_name"], "Bob")
+        self.assertEqual(info_umo["context_key"], "umo_ctx_789")
+
+        # 3. Context key fallback to session_id when not provided
+        mock_event_simple = MagicMock()
+        mock_event_simple.get_session_id.return_value = "sess_fallback"
+        mock_event_simple.get_sender_id.return_value = "user_simple"
+        mock_event_simple.get_sender_name.return_value = ""
+        mock_event_simple.session_name = ""
+        mock_event_simple.context_key = ""
+        mock_event_simple.unified_msg_origin = None
+
+        info_simple = cleaner._extract_event_info(mock_event_simple)
+        self.assertEqual(info_simple["session_id"], "sess_fallback")
+        self.assertEqual(info_simple["context_key"], "sess_fallback")
+
+    def test_extract_event_info_none_or_partial(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        cleaner = HistoryCleaner(self.context, self.config)
+
+        # 1. event = None
+        info_none = cleaner._extract_event_info(None)
+        self.assertIsInstance(info_none, dict)
+        self.assertEqual(info_none["session_id"], "")
+        self.assertEqual(info_none["session_name"], "")
+        self.assertEqual(info_none["sender_id"], "")
+        self.assertEqual(info_none["sender_name"], "")
+        self.assertEqual(info_none["context_key"], "")
+
+        # 2. empty custom object
+        class EmptyEvent:
+            pass
+
+        info_empty = cleaner._extract_event_info(EmptyEvent())
+        self.assertEqual(info_empty["session_id"], "")
+        self.assertEqual(info_empty["session_name"], "")
+        self.assertEqual(info_empty["sender_id"], "")
+        self.assertEqual(info_empty["sender_name"], "")
+        self.assertEqual(info_empty["context_key"], "")
+
+        # 3. Partial event with only session_id
+        class PartialEvent:
+            session_id = "partial_sess"
+
+        info_partial = cleaner._extract_event_info(PartialEvent())
+        self.assertEqual(info_partial["session_id"], "partial_sess")
+        self.assertEqual(info_partial["context_key"], "partial_sess")
+        self.assertEqual(info_partial["sender_id"], "")
+        self.assertEqual(info_partial["sender_name"], "")
+        self.assertEqual(info_partial["session_name"], "")
+
 
 if __name__ == "__main__":
     unittest.main()

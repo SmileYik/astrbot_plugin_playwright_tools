@@ -11,8 +11,9 @@ SUMMARY_PREFIX = "[历史浏览摘要]"
 class HistoryCleaner:
     """管理大模型上下文中的本插件工具历史记录，基于高低双水位线实现直接清理或副 AI 压缩。"""
 
-    def __init__(self, context: Any, config: dict[str, Any] | None = None):
+    def __init__(self, context: Any, config: dict[str, Any] | None = None, audit_logger: Any = None):
         self.context = context
+        self.audit_logger = audit_logger
         cfg = config or {}
         hc_cfg = cfg.get("history_cleanup", {}) if isinstance(cfg.get("history_cleanup"), dict) else {}
 
@@ -40,6 +41,142 @@ class HistoryCleaner:
         ).strip()
         self.compress_use_persona = bool(hc_cfg.get("compress_use_persona", cfg.get("compress_use_persona", False)))
         self.compress_persona_id = str(hc_cfg.get("compress_persona_id", cfg.get("compress_persona_id", ""))).strip()
+
+    def _extract_event_info(self, event: Any) -> dict[str, str]:
+        """从事件对象中安全提取会话、发送者及上下文标识元数据。"""
+        info = {
+            "session_id": "",
+            "session_name": "",
+            "sender_id": "",
+            "sender_name": "",
+            "context_key": "",
+        }
+        if event is None:
+            return info
+
+        def _clean_str(val: Any) -> str:
+            if val is None:
+                return ""
+            if isinstance(val, (str, int, float)):
+                s = str(val).strip()
+                if s.startswith("<MagicMock") or s.startswith("<Mock"):
+                    return ""
+                return s
+            return ""
+
+        def _call_or_get(obj: Any, name: str) -> Any:
+            if not hasattr(obj, name):
+                return None
+            try:
+                attr = getattr(obj, name)
+                if callable(attr):
+                    return attr()
+                return attr
+            except Exception:
+                return None
+
+        if isinstance(event, dict):
+            s_id = _clean_str(event.get("session_id"))
+            return {
+                "session_id": s_id,
+                "session_name": _clean_str(event.get("session_name")),
+                "sender_id": _clean_str(event.get("sender_id")),
+                "sender_name": _clean_str(event.get("sender_name")),
+                "context_key": _clean_str(event.get("context_key")) or s_id,
+            }
+
+        # 1. session_id
+        session_id = _clean_str(_call_or_get(event, "get_session_id")) or _clean_str(getattr(event, "session_id", None))
+
+        # 2. sender_id
+        sender_id = _clean_str(_call_or_get(event, "get_sender_id")) or _clean_str(getattr(event, "sender_id", None))
+
+        # 3. sender_name
+        sender_name = _clean_str(_call_or_get(event, "get_sender_name")) or _clean_str(getattr(event, "sender_name", None))
+
+        # 4. session_name
+        session_name = _clean_str(_call_or_get(event, "get_session_name")) or _clean_str(getattr(event, "session_name", None))
+
+        # 5. context_key
+        context_key = _clean_str(_call_or_get(event, "get_context_key")) or _clean_str(getattr(event, "context_key", None))
+
+        # 6. 从 unified_msg_origin 补充
+        umo = getattr(event, "unified_msg_origin", None)
+        if umo is not None:
+            if isinstance(umo, (str, int, float)):
+                umo_str = _clean_str(umo)
+                if not context_key:
+                    context_key = umo_str
+                if not session_id:
+                    session_id = umo_str
+            elif isinstance(umo, dict):
+                if not session_id:
+                    session_id = _clean_str(umo.get("session_id")) or _clean_str(umo.get("group_id"))
+                if not session_name:
+                    session_name = _clean_str(umo.get("session_name")) or _clean_str(umo.get("group_name"))
+                if not sender_id:
+                    sender_id = _clean_str(umo.get("sender_id")) or _clean_str(umo.get("user_id"))
+                if not sender_name:
+                    sender_name = _clean_str(umo.get("sender_name")) or _clean_str(umo.get("user_name"))
+                if not context_key:
+                    context_key = _clean_str(umo.get("context_key"))
+            else:
+                if not session_id:
+                    session_id = (
+                        _clean_str(_call_or_get(umo, "get_session_id"))
+                        or _clean_str(getattr(umo, "session_id", None))
+                        or _clean_str(getattr(umo, "group_id", None))
+                    )
+                if not session_name:
+                    session_name = (
+                        _clean_str(_call_or_get(umo, "get_session_name"))
+                        or _clean_str(getattr(umo, "session_name", None))
+                        or _clean_str(getattr(umo, "group_name", None))
+                    )
+                if not sender_id:
+                    sender_id = (
+                        _clean_str(_call_or_get(umo, "get_sender_id"))
+                        or _clean_str(getattr(umo, "sender_id", None))
+                        or _clean_str(getattr(umo, "user_id", None))
+                    )
+                if not sender_name:
+                    sender_name = (
+                        _clean_str(_call_or_get(umo, "get_sender_name"))
+                        or _clean_str(getattr(umo, "sender_name", None))
+                        or _clean_str(getattr(umo, "user_name", None))
+                    )
+                if not context_key:
+                    context_key = (
+                        _clean_str(_call_or_get(umo, "get_context_key"))
+                        or _clean_str(getattr(umo, "context_key", None))
+                    )
+
+        # 7. 从 message_obj 补充
+        msg_obj = getattr(event, "message_obj", None)
+        if msg_obj is not None:
+            group = getattr(msg_obj, "group", None)
+            if group is not None and not session_name:
+                session_name = _clean_str(getattr(group, "group_name", None))
+            sender = getattr(msg_obj, "sender", None)
+            if sender is not None:
+                if not sender_id:
+                    sender_id = _clean_str(getattr(sender, "user_id", None))
+                if not sender_name:
+                    sender_name = (
+                        _clean_str(getattr(sender, "nickname", None))
+                        or _clean_str(getattr(sender, "name", None))
+                    )
+
+        # 8. context_key 回退
+        if not context_key:
+            context_key = session_id
+
+        info["session_id"] = session_id
+        info["session_name"] = session_name
+        info["sender_id"] = sender_id
+        info["sender_name"] = sender_name
+        info["context_key"] = context_key
+        return info
 
     def is_plugin_tool(self, name: str | None) -> bool:
         """判断工具名称是否属于本插件的四大核心工具。"""
