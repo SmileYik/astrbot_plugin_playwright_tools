@@ -357,16 +357,50 @@ class PlaywrightToolPlugin(Star):
                 "- /browser kill <context_key> : 强行关闭指定浏览器上下文(仅管理员)"
             )
 
-    # ==================== 大模型请求系统提示词注入 ====================
+    # ==================== 大模型请求系统提示词注入与生命周期钩子 ====================
+
+    @filter.on_agent_begin()
+    async def on_agent_begin(self, event: AstrMessageEvent, run_context: Any):
+        """当 Agent 运行时捕获 run_context，便于后续在工具调用前进行针对性历史上下文消减。"""
+        try:
+            if hasattr(event, "set_extra"):
+                event.set_extra("_active_run_context", run_context)
+        except Exception as e:
+            logger.debug(f"[PlaywrightTool] on_agent_begin 记录 run_context 异常: {e}")
+
+    @filter.on_agent_done()
+    async def on_agent_done(self, event: AstrMessageEvent, run_context: Any):
+        """当 Agent 执行完毕后清理临时引用的 run_context。"""
+        try:
+            if hasattr(event, "set_extra"):
+                event.set_extra("_active_run_context", None)
+        except Exception as e:
+            logger.debug(f"[PlaywrightTool] on_agent_done 清理 run_context 异常: {e}")
+
+    @filter.on_using_llm_tool()
+    async def on_using_llm_tool(self, event: AstrMessageEvent, tool: Any, tool_args: dict | None = None):
+        """当大模型准备调用工具前触发。仅拦截并处理本插件的四大核心工具，防止未压缩历史过度膨胀。"""
+        tool_name = getattr(tool, "name", "")
+        if not self.history_cleaner.is_plugin_tool(tool_name):
+            return
+
+        run_context = None
+        if hasattr(event, "get_extra"):
+            run_context = event.get_extra("_active_run_context")
+
+        messages = getattr(run_context, "messages", None) if run_context else None
+        target = messages if messages is not None else run_context
+
+        if target is not None:
+            try:
+                await self.history_cleaner.process_contexts(event, target)
+            except Exception as e:
+                logger.warning(f"[PlaywrightTool] 工具调用前历史消减处理异常: {e}")
 
     @filter.on_llm_request()
     async def on_llm_request(self, event: AstrMessageEvent, req: Any):
-        """在向大模型发起请求前同步管理员标识，执行工具历史记录双水位线消减/压缩，并在配置了系统提示词时进行动态追加注入。"""
+        """在向大模型发起请求前同步管理员标识，并在配置了系统提示词时进行动态追加注入。"""
         self._sync_event_admin(event)
-        try:
-            await self.history_cleaner.process_contexts(event, req)
-        except Exception as e:
-            logger.warning(f"[PlaywrightTool] 工具历史消减处理异常: {e}")
 
         if not self.system_prompt_injection:
             return

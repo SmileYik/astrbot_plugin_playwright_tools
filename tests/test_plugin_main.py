@@ -21,6 +21,9 @@ mock_event = MagicMock()
 mock_filter = MagicMock()
 mock_filter.command.side_effect = _mock_dec
 mock_filter.on_llm_request.side_effect = _mock_dec
+mock_filter.on_agent_begin.side_effect = _mock_dec
+mock_filter.on_agent_done.side_effect = _mock_dec
+mock_filter.on_using_llm_tool.side_effect = _mock_dec
 mock_filter.llm_tool.side_effect = _mock_dec
 mock_event.filter = mock_filter
 
@@ -649,7 +652,7 @@ class TestPluginMain(unittest.TestCase):
             plugin.adapter.stop.assert_called_once()
 
 
-    def test_history_cleaner_integration(self):
+    def test_history_cleaner_on_using_llm_tool_integration(self):
         TEMP_DIR.mkdir(parents=True, exist_ok=True)
         db_file = str(TEMP_DIR / "test_hc_integration.db")
         mock_ctx = MagicMock()
@@ -659,12 +662,71 @@ class TestPluginMain(unittest.TestCase):
 
         mock_event = MagicMock()
         mock_event.get_sender_id.return_value = "u123"
+        mock_run_context = MagicMock()
+        mock_run_context.messages = [{"role": "user", "content": "hi"}]
+        mock_event.get_extra.return_value = mock_run_context
+
+        plugin.history_cleaner.process_contexts = AsyncMock(return_value=True)
+
+        # 1. 针对非本插件工具：直接放行，不调用 process_contexts
+        other_tool = MagicMock()
+        other_tool.name = "other_calc"
+        run_coro(plugin.on_using_llm_tool(mock_event, other_tool, {}))
+        plugin.history_cleaner.process_contexts.assert_not_called()
+
+        # 2. 针对本插件工具：触发历史清理并传入 run_context.messages
+        pw_tool = MagicMock()
+        pw_tool.name = "pw_read"
+        run_coro(plugin.on_using_llm_tool(mock_event, pw_tool, {}))
+        plugin.history_cleaner.process_contexts.assert_awaited_once_with(mock_event, mock_run_context.messages)
+
+    def test_on_agent_begin_and_done_lifecycle(self):
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / "test_agent_lifecycle.db")
+        mock_ctx = MagicMock()
+        plugin = main.PlaywrightToolPlugin(mock_ctx, config={"audit_db_path": db_file})
+
+        mock_event = MagicMock()
+        mock_rc = MagicMock()
+
+        # 1. on_agent_begin 记录 _active_run_context
+        run_coro(plugin.on_agent_begin(mock_event, mock_rc))
+        mock_event.set_extra.assert_called_with("_active_run_context", mock_rc)
+
+        # 2. on_agent_done 释放 _active_run_context
+        mock_event.reset_mock()
+        run_coro(plugin.on_agent_done(mock_event, mock_rc))
+        mock_event.set_extra.assert_called_with("_active_run_context", None)
+
+    def test_on_using_llm_tool_without_run_context_safe(self):
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / "test_hc_norc.db")
+        mock_ctx = MagicMock()
+        plugin = main.PlaywrightToolPlugin(mock_ctx, config={"audit_db_path": db_file})
+        plugin.history_cleaner.process_contexts = AsyncMock()
+
+        mock_event = MagicMock()
+        mock_event.get_extra.return_value = None
+
+        pw_tool = MagicMock()
+        pw_tool.name = "pw_page"
+        run_coro(plugin.on_using_llm_tool(mock_event, pw_tool, {}))
+        plugin.history_cleaner.process_contexts.assert_not_called()
+
+    def test_on_llm_request_does_not_trigger_history_cleanup(self):
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / "test_hc_on_llm.db")
+        mock_ctx = MagicMock()
+        plugin = main.PlaywrightToolPlugin(mock_ctx, config={"audit_db_path": db_file})
+        plugin.history_cleaner.process_contexts = AsyncMock()
+
+        mock_event = MagicMock()
+        mock_event.get_sender_id.return_value = "u123"
         mock_req = MagicMock()
         mock_req.system_prompt = "Hello"
 
-        plugin.history_cleaner.process_contexts = AsyncMock(return_value=True)
         run_coro(plugin.on_llm_request(mock_event, mock_req))
-        plugin.history_cleaner.process_contexts.assert_awaited_once_with(mock_event, mock_req)
+        plugin.history_cleaner.process_contexts.assert_not_called()
 
     def test_history_cleaner_receives_audit_logger(self):
         TEMP_DIR.mkdir(parents=True, exist_ok=True)
