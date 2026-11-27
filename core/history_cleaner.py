@@ -438,6 +438,12 @@ class HistoryCleaner:
 
         if not compress_success:
             # 直接删除模式（策略为 delete 或 compress 失败降级）
+            full_deleted_input = "\n\n".join(
+                f"【工具: {self._get_tool_name(contexts[idx], id_map)}】\n{self._get_content(contexts[idx])}"
+                if not self._get_content(contexts[idx]).startswith(SUMMARY_PREFIX)
+                else f"【前序历史摘要】\n{self._get_content(contexts[idx])[len(SUMMARY_PREFIX):].lstrip(':：\r\n ')}"
+                for idx in batch_indices
+            )
             for idx in batch_indices:
                 self._set_content(contexts[idx], DELETE_PLACEHOLDER)
 
@@ -452,6 +458,7 @@ class HistoryCleaner:
                     "group_size": len(batch_indices),
                     "tools": tool_names,
                     "freed_chars": accumulated_chars,
+                    "original_input": full_deleted_input,
                 },
                 output_result=DELETE_PLACEHOLDER,
             )
@@ -570,6 +577,7 @@ class HistoryCleaner:
                 tool_name = self._get_tool_name(msg, id_map)
                 contents_to_compress.append(f"【工具: {tool_name}】\n{content}")
 
+        full_input = "\n\n".join(contents_to_compress)
         prompt_text = self._prepare_compress_input(contents_to_compress, separator="\n\n")
         prompt_preview = prompt_text[:200]
 
@@ -619,6 +627,7 @@ class HistoryCleaner:
                     "tools": tool_names,
                     "original_chars": accumulated_chars,
                     "preview": prompt_preview,
+                    "original_input": full_input,
                 },
                 output_result=summary,
                 is_error=False,
@@ -638,6 +647,7 @@ class HistoryCleaner:
                     "tools": tool_names,
                     "original_chars": accumulated_chars,
                     "preview": prompt_preview,
+                    "original_input": full_input,
                 },
                 output_result="",
                 is_error=True,

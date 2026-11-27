@@ -591,6 +591,10 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(input_args["tools"], ["pw_page", "pw_read"])
         self.assertEqual(input_args["original_chars"], len("Opened page") + 6000)
         self.assertIn("preview", input_args)
+        self.assertIn("original_input", input_args)
+        self.assertIn("Opened page", input_args["original_input"])
+        self.assertIn("A" * 6000, input_args["original_input"])
+        self.assertGreater(len(input_args["original_input"]), 6000)
 
         # 3. 验证 context_lifecycle_logs 记录
         mock_audit.log_lifecycle.assert_awaited_once()
@@ -666,12 +670,16 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(call1["is_error"])
         self.assertIn("Sub-AI Provider Timeout", call1["error_message"])
         self.assertEqual(call1["input_args"]["batch_size"], 2)
+        self.assertIn("original_input", call1["input_args"])
+        self.assertIn("A" * 6000, call1["input_args"]["original_input"])
 
         call2 = mock_audit.log_action.await_args_list[1].kwargs
         self.assertEqual(call2["tool_name"], "pw_history:delete")
         self.assertFalse(call2["is_error"])
         self.assertEqual(call2["output_result"], "[该历史工具调用结果已按策略清理]")
         self.assertEqual(call2["input_args"]["batch_size"], 2)
+        self.assertIn("original_input", call2["input_args"])
+        self.assertIn("A" * 6000, call2["input_args"]["original_input"])
 
         # 3. 验证生命周期审计记录为 history_cleanup
         mock_audit.log_lifecycle.assert_awaited_once()
@@ -733,6 +741,8 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_kwargs["input_args"]["freed_chars"], 6000)
         self.assertEqual(call_kwargs["input_args"]["batch_size"], 1)
         self.assertEqual(call_kwargs["input_args"]["group_size"], 1)
+        self.assertIn("original_input", call_kwargs["input_args"])
+        self.assertIn("A" * 6000, call_kwargs["input_args"]["original_input"])
 
         # 3. 验证生命周期审计
         mock_audit.log_lifecycle.assert_awaited_once()
