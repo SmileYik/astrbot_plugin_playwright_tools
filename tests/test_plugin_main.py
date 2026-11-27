@@ -655,6 +655,7 @@ class TestPluginMain(unittest.TestCase):
         mock_ctx = MagicMock()
         plugin = main.PlaywrightToolPlugin(mock_ctx, config={"audit_db_path": db_file})
         self.assertTrue(hasattr(plugin, "history_cleaner"))
+        self.assertIs(plugin.history_cleaner.audit_logger, plugin.audit_logger)
 
         mock_event = MagicMock()
         mock_event.get_sender_id.return_value = "u123"
@@ -664,6 +665,13 @@ class TestPluginMain(unittest.TestCase):
         plugin.history_cleaner.process_contexts = AsyncMock(return_value=True)
         run_coro(plugin.on_llm_request(mock_event, mock_req))
         plugin.history_cleaner.process_contexts.assert_awaited_once_with(mock_event, mock_req)
+
+    def test_history_cleaner_receives_audit_logger(self):
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / "test_hc_audit.db")
+        mock_ctx = MagicMock()
+        plugin = main.PlaywrightToolPlugin(mock_ctx, config={"audit_db_path": db_file})
+        self.assertIs(plugin.history_cleaner.audit_logger, plugin.audit_logger)
 
 
 if __name__ == "__main__":

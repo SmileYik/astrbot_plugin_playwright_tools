@@ -187,7 +187,7 @@ class PlaywrightToolPlugin(Star):
 
         # 6. 初始化跨插件浏览器共享服务基座与上下文历史消减器
         self.service = PlaywrightServiceAPI(self, self.context_manager)
-        self.history_cleaner = HistoryCleaner(self.context, self.config)
+        self.history_cleaner = HistoryCleaner(self.context, self.config, audit_logger=self.audit_logger)
 
     def _sync_event_admin(self, event: AstrMessageEvent) -> None:
         """从当前消息事件中提取并动态同步全局管理员标识。"""
