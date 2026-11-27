@@ -54,6 +54,17 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cleaner.high_watermark, 4000)
         self.assertEqual(cleaner.low_watermark, 2000)
 
+    def test_include_compressed_in_watermark_config(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        cleaner = HistoryCleaner(self.context, {})
+        self.assertFalse(cleaner.include_compressed_in_watermark)
+
+        cleaner_with_hc = HistoryCleaner(self.context, {"history_cleanup": {"include_compressed_in_watermark": True}})
+        self.assertTrue(cleaner_with_hc.include_compressed_in_watermark)
+
+        cleaner_with_root = HistoryCleaner(self.context, {"include_compressed_in_watermark": True})
+        self.assertTrue(cleaner_with_root.include_compressed_in_watermark)
+
     def test_tool_recognition(self):
         from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
         cleaner = HistoryCleaner(self.context, self.config)

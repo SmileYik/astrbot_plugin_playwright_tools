@@ -41,6 +41,9 @@ class HistoryCleaner:
         ).strip()
         self.compress_use_persona = bool(hc_cfg.get("compress_use_persona", cfg.get("compress_use_persona", False)))
         self.compress_persona_id = str(hc_cfg.get("compress_persona_id", cfg.get("compress_persona_id", ""))).strip()
+        self.include_compressed_in_watermark = bool(
+            hc_cfg.get("include_compressed_in_watermark", cfg.get("include_compressed_in_watermark", False))
+        )
 
     def _extract_event_info(self, event: Any) -> dict[str, str]:
         """从事件对象中安全提取会话、发送者及上下文标识元数据。"""

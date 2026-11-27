@@ -142,6 +142,10 @@ class TestConfSchema(unittest.TestCase):
         self.assertFalse(items["compress_use_persona"]["default"])
         self.assertEqual(items["compress_provider_id"]["condition"], {"enable_cleanup": True, "cleanup_strategy": "compress"})
         self.assertEqual(items["compress_max_input_chars"]["condition"], {"enable_cleanup": True, "cleanup_strategy": "compress"})
+        self.assertIn("include_compressed_in_watermark", items)
+        self.assertEqual(items["include_compressed_in_watermark"]["type"], "bool")
+        self.assertFalse(items["include_compressed_in_watermark"]["default"])
+        self.assertEqual(items["include_compressed_in_watermark"]["condition"], {"enable_cleanup": True})
 
     def test_storage_paths_default_in_schema(self):
         with open("_conf_schema.json", "r", encoding="utf-8") as f:

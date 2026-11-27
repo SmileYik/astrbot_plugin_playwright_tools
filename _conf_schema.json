@@ -535,6 +535,15 @@
           "cleanup_strategy": "compress",
           "compress_use_persona": true
         }
+      },
+      "include_compressed_in_watermark": {
+        "type": "bool",
+        "description": "历史摘要计入水位",
+        "hint": "开启后，此前已生成的 [历史浏览摘要] 也将计入水位统计并在再次超限时参与滚动重压缩；关闭后已压缩摘要不计入水位且不再重复压缩",
+        "default": false,
+        "condition": {
+          "enable_cleanup": true
+        }
       }
     }
   }
