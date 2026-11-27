@@ -41,6 +41,19 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
             }
         }
 
+    def test_watermark_inversion_defense(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        cfg = {
+            "history_cleanup": {
+                "enable_cleanup": True,
+                "high_watermark": 4000,
+                "low_watermark": 5000,
+            }
+        }
+        cleaner = HistoryCleaner(self.context, cfg)
+        self.assertEqual(cleaner.high_watermark, 4000)
+        self.assertEqual(cleaner.low_watermark, 2000)
+
     def test_tool_recognition(self):
         from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
         cleaner = HistoryCleaner(self.context, self.config)
@@ -85,6 +98,26 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
                 ],
             },
             {"role": "tool", "tool_call_id": "call_3", "name": "pw_page", "content": "[该历史工具调用结果已按策略清理]"},
+        ]
+
+        total = cleaner.calculate_uncompressed_chars(contexts)
+        self.assertEqual(total, 3000)
+
+    def test_calculate_uncompressed_chars_objects(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        cleaner = HistoryCleaner(self.context, self.config)
+
+        tc1 = ToolCall(id="call_1", name="pw_read")
+        tc2 = ToolCall(id="call_2", name="other_tool")
+        tc3 = ToolCall(id="call_3", name="pw_page")
+
+        contexts = [
+            Message(role="user", content="hello"),
+            Message(role="assistant", content="", tool_calls=[tc1, tc2]),
+            Message(role="tool", tool_call_id="call_1", content="A" * 3000),
+            Message(role="tool", tool_call_id="call_2", content="B" * 5000),
+            Message(role="assistant", content="", tool_calls=[tc3]),
+            Message(role="tool", tool_call_id="call_3", content="[该历史工具调用结果已按策略清理]"),
         ]
 
         total = cleaner.calculate_uncompressed_chars(contexts)

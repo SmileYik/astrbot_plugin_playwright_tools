@@ -19,6 +19,13 @@ class HistoryCleaner:
         self.enable_cleanup = bool(hc_cfg.get("enable_cleanup", cfg.get("enable_cleanup", False)))
         self.high_watermark = int(hc_cfg.get("high_watermark", cfg.get("high_watermark", 8000)))
         self.low_watermark = int(hc_cfg.get("low_watermark", cfg.get("low_watermark", 3000)))
+        if self.low_watermark >= self.high_watermark:
+            corrected_low = max(1, int(self.high_watermark * 0.5))
+            logger.warning(
+                f"[HistoryCleaner] 低水位 ({self.low_watermark}) >= 高水位 ({self.high_watermark})，自动调整为高水位的 50%: {corrected_low}"
+            )
+            self.low_watermark = corrected_low
+
         self.cleanup_strategy = str(hc_cfg.get("cleanup_strategy", cfg.get("cleanup_strategy", "delete"))).strip().lower()
         self.compress_provider_id = str(hc_cfg.get("compress_provider_id", cfg.get("compress_provider_id", ""))).strip()
         self.compress_max_input_chars = int(hc_cfg.get("compress_max_input_chars", cfg.get("compress_max_input_chars", 0)))
@@ -198,7 +205,7 @@ class HistoryCleaner:
                 continue
 
             if self.cleanup_strategy == "compress":
-                # 副 AI 压缩模式 (在 Task 3 中完整实现)
+                # 副 AI 压缩模式
                 success = await self._compress_tool_group(group, contexts, event)
                 if success:
                     changed = True
@@ -260,7 +267,10 @@ class HistoryCleaner:
         """获取负责执行压缩任务的 Provider 实例。"""
         prov = None
         if self.compress_provider_id and hasattr(self.context, "get_provider_by_id"):
-            prov = self.context.get_provider_by_id(self.compress_provider_id)
+            try:
+                prov = self.context.get_provider_by_id(self.compress_provider_id)
+            except Exception as e:
+                logger.warning(f"[HistoryCleaner] 获取指定提供商 '{self.compress_provider_id}' 失败: {e}")
 
         if not prov and hasattr(self.context, "get_using_provider_async"):
             umo = getattr(event, "unified_msg_origin", None) if event else None
@@ -280,22 +290,22 @@ class HistoryCleaner:
 
     async def _compress_tool_group(self, group: list[int], contexts: list[Any], event: Any) -> bool:
         """调用副 AI 对单组工具调用进行结构化总结，并原位写回摘要与占位符。"""
-        id_map = self._build_call_id_map(contexts)
-        contents_to_compress: list[str] = []
-        for idx in group:
-            msg = contexts[idx]
-            tool_name = self._get_tool_name(msg, id_map)
-            c = self._get_content(msg)
-            contents_to_compress.append(f"【工具: {tool_name}】\n{c}")
-
-        prompt_text = self._prepare_compress_input(contents_to_compress)
-        provider = await self._resolve_compress_provider(event)
-        if not provider:
-            logger.warning("[HistoryCleaner] 未找到可用的副 AI 提供商，无法执行压缩")
-            return False
-
-        sys_prompt = await self._resolve_system_prompt()
         try:
+            id_map = self._build_call_id_map(contexts)
+            contents_to_compress: list[str] = []
+            for idx in group:
+                msg = contexts[idx]
+                tool_name = self._get_tool_name(msg, id_map)
+                c = self._get_content(msg)
+                contents_to_compress.append(f"【工具: {tool_name}】\n{c}")
+
+            prompt_text = self._prepare_compress_input(contents_to_compress)
+            provider = await self._resolve_compress_provider(event)
+            if not provider:
+                logger.warning("[HistoryCleaner] 未找到可用的副 AI 提供商，无法执行压缩")
+                return False
+
+            sys_prompt = await self._resolve_system_prompt()
             res = provider.text_chat(prompt=prompt_text, system_prompt=sys_prompt)
             if hasattr(res, "__await__"):
                 llm_resp = await res
