@@ -59,9 +59,28 @@
 
 需要及时更新文档内关于当前插件的结构/架构和整体功能实现. 其中还需要包含当前项目中具体存在的功能和对应的实现方法.
 
-## 版本管理
+## 版本管理与分支发布规范
 
 每次 [metadata.yaml](metadata.yaml) 消息变化后, 都需要在 [main.py](main.py) 中更新对应信息.
+
+### 分支管理策略
+本项目采用双分支管理策略：
+- **`master` 分支**：全量开发分支，包含全量源码、单测套件、前端源代码、AI 工作流与完整开发文档。所有日常开发、重构与调试工作均在此分支进行。
+- **`release` 分支**：正式发布分支（主要分支），仅包含经测试验证、供 AstrBot 直接安装运行的正式代码、必要配置、构建后前端视图产物及对外技术文档。
+
+### 文件分布准则
+- **release 保留**：`adapts/`, `api/`, `core/`, `tools/`, `main.py`, `requirements.txt`, `_conf_schema.json`, `metadata.yaml`, `views/`, `logo.png`, `skills/`, `README.md`, `CHANGELOG.md`, `LICENSE`, `docs/ARCHITECTURE.md`, `docs/EXTERNAL_API.md`, `docs/images/`, `.gitignore`。
+- **release 排除**：`tests/`, `web-src/`, `docs/superpowers/`, `docs/old/`, `HOW-TO-CODE.md`, `AGENT.md`, `scripts/`。
+
+### 版本发布流程
+1. 确保在 `master` 分支通过所有单元测试 (`python -m unittest discover tests`)。
+2. 确认 `metadata.yaml` 与 `main.py` 中的版本号同步更新。
+3. 若修改了前端源码 `web-src/`，必须提前编译输出至 `views/` 目录。
+4. 运行发布同步脚本：
+   ```bash
+   python scripts/release.py
+   ```
+   （若需推送到远程仓库，附加 `--push` 参数）
 
 ## 环境
 
