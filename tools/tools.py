@@ -101,6 +101,7 @@ def _extract_event_and_ids(context: Any) -> tuple[Any, str, str]:
 
 async def _execute_history_cleaner(cleaner: Any, context: Any, tool_name: str) -> None:
     """在工具执行前执行历史上下文消减检测与副 AI 压缩。无论主代理还是子代理运行均能可靠生效。"""
+    
     if not cleaner:
         return
     messages = getattr(context, "messages", None)
@@ -108,7 +109,6 @@ async def _execute_history_cleaner(cleaner: Any, context: Any, tool_name: str) -
         inner = getattr(context, "context", None)
         if inner:
             messages = getattr(inner, "messages", None)
-
     if messages is not None and isinstance(messages, list):
         try:
             ev, _, _, _, _ = _extract_event_and_metadata(context)
@@ -166,6 +166,7 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
         if self.page_handler is None:
             raise ValueError("PwPageTool 初始化必须传入 page_handler")
         page_handler = self.page_handler
+        history_cleaner = self.history_cleaner
         timeout_seconds = self.timeout_seconds
         try:
             super().__init__(name=self.name, description=self.description, parameters=self.parameters)
@@ -173,7 +174,7 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
             pass
         object.__setattr__(self, "page_handler", page_handler)
         object.__setattr__(self, "timeout_seconds", timeout_seconds)
-        object.__setattr__(self, "history_cleaner", self.history_cleaner)
+        object.__setattr__(self, "history_cleaner", history_cleaner)
         self._actions = {
             "open": self._action_open,
             "switch_tab": self._action_switch_tab,
@@ -248,6 +249,7 @@ class PwReadTool(FunctionTool[AstrAgentContext]):
         if self.page_handler is None:
             raise ValueError("PwReadTool 初始化必须传入 page_handler")
         page_handler = self.page_handler
+        history_cleaner = self.history_cleaner
         timeout_seconds = self.timeout_seconds
 
         # 尝试从 page_handler.reader 动态读取工具描述
@@ -265,7 +267,7 @@ class PwReadTool(FunctionTool[AstrAgentContext]):
             pass
         object.__setattr__(self, "page_handler", page_handler)
         object.__setattr__(self, "timeout_seconds", timeout_seconds)
-        object.__setattr__(self, "history_cleaner", self.history_cleaner)
+        object.__setattr__(self, "history_cleaner", history_cleaner)
 
     async def call(self, context: AstrAgentContext, **kwargs) -> str:
         await _execute_history_cleaner(self.history_cleaner, context, self.name)
@@ -315,6 +317,7 @@ class PwInteractTool(FunctionTool[AstrAgentContext]):
         if self.interact_handler is None:
             raise ValueError("PwInteractTool 初始化必须传入 interact_handler")
         interact_handler = self.interact_handler
+        history_cleaner = self.history_cleaner
         timeout_seconds = self.timeout_seconds
         try:
             super().__init__(name=self.name, description=self.description, parameters=self.parameters)
@@ -322,7 +325,7 @@ class PwInteractTool(FunctionTool[AstrAgentContext]):
             pass
         object.__setattr__(self, "interact_handler", interact_handler)
         object.__setattr__(self, "timeout_seconds", timeout_seconds)
-        object.__setattr__(self, "history_cleaner", self.history_cleaner)
+        object.__setattr__(self, "history_cleaner", history_cleaner)
         self._actions = {
             "click": self._action_click,
             "fill": self._action_fill,
@@ -461,6 +464,7 @@ class PwMediaTool(FunctionTool[AstrAgentContext]):
         if self.media_handler is None:
             raise ValueError("PwMediaTool 初始化必须传入 media_handler")
         media_handler = self.media_handler
+        history_cleaner = self.history_cleaner
         timeout_seconds = self.timeout_seconds
         screenshot_max_height_px = self.screenshot_max_height_px
         screenshot_timeout_seconds = self.screenshot_timeout_seconds
@@ -472,7 +476,7 @@ class PwMediaTool(FunctionTool[AstrAgentContext]):
         object.__setattr__(self, "timeout_seconds", timeout_seconds)
         object.__setattr__(self, "screenshot_max_height_px", screenshot_max_height_px)
         object.__setattr__(self, "screenshot_timeout_seconds", screenshot_timeout_seconds)
-        object.__setattr__(self, "history_cleaner", self.history_cleaner)
+        object.__setattr__(self, "history_cleaner", history_cleaner)
         self._actions = {
             "screenshot_viewport": self._action_screenshot_viewport,
             "screenshot_full": self._action_screenshot_full,
