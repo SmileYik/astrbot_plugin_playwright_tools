@@ -325,7 +325,7 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
         cleaner = HistoryCleaner(self.context, {"history_cleanup": {"compress_max_input_chars": 0}})
         res = cleaner._prepare_compress_input(["Line 1", "Line 2"])
-        self.assertEqual(res, "Line 1\nLine 2")
+        self.assertEqual(res, "Line 1\n\nLine 2")
 
         cleaner_limited = HistoryCleaner(self.context, {"history_cleanup": {"compress_max_input_chars": 10}})
         res_limited = cleaner_limited._prepare_compress_input(["123456789012345"])
@@ -603,8 +603,8 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         # 1. 验证运行日志输出
         info_logs = [call.args[0] for call in logger.info.call_args_list if call.args]
         self.assertTrue(any("[HistoryCleaner] 检测到未压缩历史字符数" in msg and "超过高水位" in msg for msg in info_logs))
-        self.assertTrue(any("[HistoryCleaner] 正在调用副 AI 对第 1 组工具历史" in msg for msg in info_logs))
-        self.assertTrue(any("[HistoryCleaner] 第 1 组工具历史压缩成功" in msg and "节省" in msg for msg in info_logs))
+        self.assertTrue(any("[HistoryCleaner] 正在调用副 AI 对历史工具调用" in msg and "进行批量聚合压缩" in msg for msg in info_logs))
+        self.assertTrue(any("[HistoryCleaner] 历史记录副 AI 批量压缩成功" in msg and "节省" in msg for msg in info_logs))
         self.assertTrue(any("[HistoryCleaner] 上下文历史清理完成" in msg for msg in info_logs))
 
         # 2. 验证 tool_audit_logs 记录
@@ -620,6 +620,7 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(action_kwargs["is_permitted"])
         self.assertFalse(action_kwargs["is_error"])
         input_args = action_kwargs["input_args"]
+        self.assertEqual(input_args["batch_size"], 2)
         self.assertEqual(input_args["group_size"], 2)
         self.assertEqual(input_args["tools"], ["pw_page", "pw_read"])
         self.assertEqual(input_args["original_chars"], len("Opened page") + 6000)
@@ -637,6 +638,7 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(life_kwargs["operator_name"], "副AI压缩器")
         self.assertEqual(life_kwargs["event_type"], "history_compress")
         self.assertIsInstance(life_kwargs["details"], dict)
+        self.assertEqual(life_kwargs["details"]["batch_size"], 2)
         self.assertEqual(life_kwargs["details"]["processed_groups"], 1)
         self.assertTrue(life_kwargs["details"]["reduced_chars"] > 0)
 
@@ -689,7 +691,7 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
 
         # 1. 验证警告日志输出
         warn_logs = [call.args[0] for call in logger.warning.call_args_list if call.args]
-        self.assertTrue(any("副 AI 压缩失败，自动降级为直接删除策略" in msg for msg in warn_logs))
+        self.assertTrue(any("历史记录副 AI 批量压缩失败，自动降级为直接删除策略" in msg for msg in warn_logs))
 
         # 2. 验证工具审计记录两次：一次压缩失败，一次直接删除
         self.assertEqual(mock_audit.log_action.await_count, 2)
@@ -697,17 +699,20 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call1["tool_name"], "pw_history:compress")
         self.assertTrue(call1["is_error"])
         self.assertIn("Sub-AI Provider Timeout", call1["error_message"])
+        self.assertEqual(call1["input_args"]["batch_size"], 2)
 
         call2 = mock_audit.log_action.await_args_list[1].kwargs
         self.assertEqual(call2["tool_name"], "pw_history:delete")
         self.assertFalse(call2["is_error"])
         self.assertEqual(call2["output_result"], "[该历史工具调用结果已按策略清理]")
+        self.assertEqual(call2["input_args"]["batch_size"], 2)
 
         # 3. 验证生命周期审计记录为 history_cleanup
         mock_audit.log_lifecycle.assert_awaited_once()
         life_kwargs = mock_audit.log_lifecycle.await_args.kwargs
         self.assertEqual(life_kwargs["event_type"], "history_cleanup")
         self.assertEqual(life_kwargs["operator_name"], "历史清理器")
+        self.assertEqual(life_kwargs["details"]["batch_size"], 2)
 
     async def test_delete_strategy_audit_and_logging(self):
         from astrbot.api import logger
@@ -760,6 +765,7 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_kwargs["tool_name"], "pw_history:delete")
         self.assertEqual(call_kwargs["output_result"], "[该历史工具调用结果已按策略清理]")
         self.assertEqual(call_kwargs["input_args"]["freed_chars"], 6000)
+        self.assertEqual(call_kwargs["input_args"]["batch_size"], 1)
         self.assertEqual(call_kwargs["input_args"]["group_size"], 1)
 
         # 3. 验证生命周期审计
@@ -768,6 +774,7 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(life_kwargs["event_type"], "history_cleanup")
         self.assertEqual(life_kwargs["operator_name"], "历史清理器")
         self.assertEqual(life_kwargs["details"]["reduced_chars"], 6000)
+        self.assertEqual(life_kwargs["details"]["batch_size"], 1)
 
     async def test_audit_logger_exception_isolation(self):
         from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
@@ -856,6 +863,151 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         msg.content = [DummyPart("Part 1: Hello. "), DummyPart("Part 2: World!")]
         content = cleaner._get_content(msg)
         self.assertEqual(content, "Part 1: Hello. Part 2: World!")
+
+    async def test_single_pass_batch_compression_multiple_turns(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        mock_provider = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.completion_text = "5轮跨轮次全局结构化摘要"
+        mock_provider.text_chat = AsyncMock(return_value=mock_resp)
+        self.context.get_provider_by_id.return_value = mock_provider
+
+        cfg = {
+            "history_cleanup": {
+                "enable_cleanup": True,
+                "high_watermark": 5000,
+                "low_watermark": 1000,
+                "cleanup_strategy": "compress",
+                "compress_provider_id": "mock_p",
+            }
+        }
+        cleaner = HistoryCleaner(self.context, cfg)
+
+        contexts = [
+            {"role": "user", "content": "turn 1"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "pw_read", "arguments": "{}"}}],
+            },
+            {"role": "tool", "tool_call_id": "c1", "name": "pw_read", "content": "Tool 1 content: " + "A" * 1500},
+            {"role": "assistant", "content": "thought 1"},
+            {"role": "user", "content": "turn 2"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "c2", "type": "function", "function": {"name": "pw_page", "arguments": "{}"}}],
+            },
+            {"role": "tool", "tool_call_id": "c2", "name": "pw_page", "content": "Tool 2 content: " + "B" * 1500},
+            {"role": "assistant", "content": "thought 2"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "c3", "type": "function", "function": {"name": "pw_interact", "arguments": "{}"}}],
+            },
+            {"role": "tool", "tool_call_id": "c3", "name": "pw_interact", "content": "Tool 3 content: " + "C" * 1500},
+            {"role": "user", "content": "turn 3"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "c4", "type": "function", "function": {"name": "pw_media", "arguments": "{}"}}],
+            },
+            {"role": "tool", "tool_call_id": "c4", "name": "pw_media", "content": "Tool 4 content: " + "D" * 1500},
+            {"role": "assistant", "content": "thought 3"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "c5", "type": "function", "function": {"name": "pw_read", "arguments": "{}"}}],
+            },
+            {"role": "tool", "tool_call_id": "c5", "name": "pw_read", "content": "Tool 5 content: " + "E" * 1500},
+            {"role": "assistant", "content": "final answer"},
+        ]
+        req = MagicMock()
+        req.contexts = contexts
+        event = MagicMock()
+
+        changed = await cleaner.process_contexts(event, req)
+        self.assertTrue(changed)
+
+        # Assert mock_provider.text_chat is called EXACTLY ONCE
+        mock_provider.text_chat.assert_awaited_once()
+
+        # Older items (indices 2, 6, 9, 12) have MERGE_PLACEHOLDER
+        self.assertEqual(contexts[2]["content"], "[已并入本轮浏览摘要]")
+        self.assertEqual(contexts[6]["content"], "[已并入本轮浏览摘要]")
+        self.assertEqual(contexts[9]["content"], "[已并入本轮浏览摘要]")
+        self.assertEqual(contexts[12]["content"], "[已并入本轮浏览摘要]")
+
+        # Last item (index 15) has [历史浏览摘要]:\n{summary}
+        self.assertEqual(contexts[15]["content"], "[历史浏览摘要]:\n5轮跨轮次全局结构化摘要")
+
+    async def test_batch_compression_with_existing_summary_rollup(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        mock_provider = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.completion_text = "滚动重压缩聚合摘要"
+        mock_provider.text_chat = AsyncMock(return_value=mock_resp)
+        self.context.get_provider_by_id.return_value = mock_provider
+
+        cfg = {
+            "history_cleanup": {
+                "enable_cleanup": True,
+                "high_watermark": 5000,
+                "low_watermark": 1000,
+                "cleanup_strategy": "compress",
+                "compress_provider_id": "mock_p",
+                "include_compressed_in_watermark": True,
+            }
+        }
+        cleaner = HistoryCleaner(self.context, cfg)
+
+        contexts = [
+            {"role": "user", "content": "turn 1"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "pw_page", "arguments": "{}"}}],
+            },
+            {"role": "tool", "tool_call_id": "c1", "name": "pw_page", "content": "[历史浏览摘要]:\n前序轮次已提炼摘要内容：访问了主页并搜索关键词"},
+            {"role": "assistant", "content": "turn 2"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "c2", "type": "function", "function": {"name": "pw_read", "arguments": "{}"}}],
+            },
+            {"role": "tool", "tool_call_id": "c2", "name": "pw_read", "content": "新页面正文数据: " + "X" * 3000},
+            {"role": "assistant", "content": "turn 3"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "c3", "type": "function", "function": {"name": "pw_read", "arguments": "{}"}}],
+            },
+            {"role": "tool", "tool_call_id": "c3", "name": "pw_read", "content": "详情页内容: " + "Y" * 3000},
+            {"role": "assistant", "content": "final answer"},
+        ]
+
+        req = MagicMock()
+        req.contexts = contexts
+        event = MagicMock()
+
+        changed = await cleaner.process_contexts(event, req)
+        self.assertTrue(changed)
+
+        mock_provider.text_chat.assert_awaited_once()
+        call_kwargs = mock_provider.text_chat.await_args.kwargs
+        prompt = call_kwargs["prompt"]
+
+        # Assert prompt contains 【前序历史摘要】 and 【工具: pw_read】
+        self.assertIn("【前序历史摘要】", prompt)
+        self.assertIn("前序轮次已提炼摘要内容：访问了主页并搜索关键词", prompt)
+        self.assertIn("【工具: pw_read】", prompt)
+
+        # Existing summary (idx 2) replaced with MERGE_PLACEHOLDER
+        self.assertEqual(contexts[2]["content"], "[已并入本轮浏览摘要]")
+        # Second tool (idx 5) replaced with MERGE_PLACEHOLDER
+        self.assertEqual(contexts[5]["content"], "[已并入本轮浏览摘要]")
+        # Final item (idx 8) has new summary
+        self.assertEqual(contexts[8]["content"], "[历史浏览摘要]:\n滚动重压缩聚合摘要")
 
 
 if __name__ == "__main__":
