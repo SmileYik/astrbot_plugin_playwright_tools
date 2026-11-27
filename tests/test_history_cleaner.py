@@ -490,6 +490,266 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(info_partial["sender_name"], "")
         self.assertEqual(info_partial["session_name"], "")
 
+    async def test_compress_audit_and_logging_success(self):
+        from astrbot.api import logger
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+
+        mock_audit = MagicMock()
+        mock_audit.log_action = AsyncMock()
+        mock_audit.log_lifecycle = AsyncMock()
+
+        mock_provider = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.completion_text = "这是副AI总结的网页摘要"
+        mock_provider.text_chat = AsyncMock(return_value=mock_resp)
+        self.context.get_provider_by_id.return_value = mock_provider
+
+        cfg = {
+            "history_cleanup": {
+                "enable_cleanup": True,
+                "high_watermark": 5000,
+                "low_watermark": 2000,
+                "cleanup_strategy": "compress",
+                "compress_provider_id": "mock_p",
+            }
+        }
+        cleaner = HistoryCleaner(self.context, cfg, audit_logger=mock_audit)
+
+        contexts = [
+            {"role": "user", "content": "q1"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": "pw_page", "arguments": "{}"}},
+                    {"id": "c2", "type": "function", "function": {"name": "pw_read", "arguments": "{}"}},
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "Opened page"},
+            {"role": "tool", "tool_call_id": "c2", "content": "A" * 6000},
+            {"role": "assistant", "content": "ans 1"},
+        ]
+        req = MagicMock()
+        req.contexts = contexts
+        mock_event = MagicMock()
+        mock_event.get_session_id.return_value = "sess_100"
+        mock_event.get_sender_id.return_value = "user_200"
+        mock_event.get_sender_name.return_value = "Alice"
+        mock_event.get_session_name.return_value = "GroupA"
+        mock_event.get_context_key.return_value = "ctx_100"
+
+        logger.info.reset_mock()
+        changed = await cleaner.process_contexts(mock_event, req)
+        self.assertTrue(changed)
+
+        # 1. 验证运行日志输出
+        info_logs = [call.args[0] for call in logger.info.call_args_list if call.args]
+        self.assertTrue(any("[HistoryCleaner] 检测到未压缩历史字符数" in msg and "超过高水位" in msg for msg in info_logs))
+        self.assertTrue(any("[HistoryCleaner] 正在调用副 AI 对第 1 组工具历史" in msg for msg in info_logs))
+        self.assertTrue(any("[HistoryCleaner] 第 1 组工具历史压缩成功" in msg and "节省" in msg for msg in info_logs))
+        self.assertTrue(any("[HistoryCleaner] 上下文历史清理完成" in msg for msg in info_logs))
+
+        # 2. 验证 tool_audit_logs 记录
+        mock_audit.log_action.assert_awaited_once()
+        action_kwargs = mock_audit.log_action.await_args.kwargs
+        self.assertEqual(action_kwargs["session_id"], "sess_100")
+        self.assertEqual(action_kwargs["session_name"], "GroupA")
+        self.assertEqual(action_kwargs["context_key"], "ctx_100")
+        self.assertEqual(action_kwargs["sender_id"], "user_200")
+        self.assertEqual(action_kwargs["sender_name"], "Alice")
+        self.assertEqual(action_kwargs["tool_name"], "pw_history:compress")
+        self.assertEqual(action_kwargs["output_result"], "这是副AI总结的网页摘要")
+        self.assertTrue(action_kwargs["is_permitted"])
+        self.assertFalse(action_kwargs["is_error"])
+        input_args = action_kwargs["input_args"]
+        self.assertEqual(input_args["group_size"], 2)
+        self.assertEqual(input_args["tools"], ["pw_page", "pw_read"])
+        self.assertEqual(input_args["original_chars"], len("Opened page") + 6000)
+        self.assertIn("preview", input_args)
+
+        # 3. 验证 context_lifecycle_logs 记录
+        mock_audit.log_lifecycle.assert_awaited_once()
+        life_kwargs = mock_audit.log_lifecycle.await_args.kwargs
+        self.assertEqual(life_kwargs["session_id"], "sess_100")
+        self.assertEqual(life_kwargs["session_name"], "GroupA")
+        self.assertEqual(life_kwargs["context_key"], "ctx_100")
+        self.assertEqual(life_kwargs["owner_id"], "user_200")
+        self.assertEqual(life_kwargs["owner_name"], "Alice")
+        self.assertEqual(life_kwargs["operator_id"], "system")
+        self.assertEqual(life_kwargs["operator_name"], "副AI压缩器")
+        self.assertEqual(life_kwargs["event_type"], "history_compress")
+        self.assertIsInstance(life_kwargs["details"], dict)
+        self.assertEqual(life_kwargs["details"]["processed_groups"], 1)
+        self.assertTrue(life_kwargs["details"]["reduced_chars"] > 0)
+
+    async def test_compress_audit_fallback_on_error(self):
+        from astrbot.api import logger
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+
+        mock_audit = MagicMock()
+        mock_audit.log_action = AsyncMock()
+        mock_audit.log_lifecycle = AsyncMock()
+
+        mock_provider = MagicMock()
+        mock_provider.text_chat = AsyncMock(side_effect=RuntimeError("Sub-AI Provider Timeout"))
+        self.context.get_provider_by_id.return_value = mock_provider
+
+        cfg = {
+            "history_cleanup": {
+                "enable_cleanup": True,
+                "high_watermark": 5000,
+                "low_watermark": 2000,
+                "cleanup_strategy": "compress",
+                "compress_provider_id": "mock_p",
+            }
+        }
+        cleaner = HistoryCleaner(self.context, cfg, audit_logger=mock_audit)
+
+        contexts = [
+            {"role": "user", "content": "q1"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": "pw_page", "arguments": "{}"}},
+                    {"id": "c2", "type": "function", "function": {"name": "pw_read", "arguments": "{}"}},
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "Opened page"},
+            {"role": "tool", "tool_call_id": "c2", "content": "A" * 6000},
+            {"role": "assistant", "content": "ans 1"},
+        ]
+        req = MagicMock()
+        req.contexts = contexts
+        mock_event = MagicMock()
+        mock_event.get_session_id.return_value = "sess_100"
+        mock_event.get_sender_id.return_value = "user_200"
+
+        logger.warning.reset_mock()
+        changed = await cleaner.process_contexts(mock_event, req)
+        self.assertTrue(changed)
+
+        # 1. 验证警告日志输出
+        warn_logs = [call.args[0] for call in logger.warning.call_args_list if call.args]
+        self.assertTrue(any("副 AI 压缩失败，自动降级为直接删除策略" in msg for msg in warn_logs))
+
+        # 2. 验证工具审计记录两次：一次压缩失败，一次直接删除
+        self.assertEqual(mock_audit.log_action.await_count, 2)
+        call1 = mock_audit.log_action.await_args_list[0].kwargs
+        self.assertEqual(call1["tool_name"], "pw_history:compress")
+        self.assertTrue(call1["is_error"])
+        self.assertIn("Sub-AI Provider Timeout", call1["error_message"])
+
+        call2 = mock_audit.log_action.await_args_list[1].kwargs
+        self.assertEqual(call2["tool_name"], "pw_history:delete")
+        self.assertFalse(call2["is_error"])
+        self.assertEqual(call2["output_result"], "[该历史工具调用结果已按策略清理]")
+
+        # 3. 验证生命周期审计记录为 history_cleanup
+        mock_audit.log_lifecycle.assert_awaited_once()
+        life_kwargs = mock_audit.log_lifecycle.await_args.kwargs
+        self.assertEqual(life_kwargs["event_type"], "history_cleanup")
+        self.assertEqual(life_kwargs["operator_name"], "历史清理器")
+
+    async def test_delete_strategy_audit_and_logging(self):
+        from astrbot.api import logger
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+
+        mock_audit = MagicMock()
+        mock_audit.log_action = AsyncMock()
+        mock_audit.log_lifecycle = AsyncMock()
+
+        cfg = {
+            "history_cleanup": {
+                "enable_cleanup": True,
+                "high_watermark": 5000,
+                "low_watermark": 2000,
+                "cleanup_strategy": "delete",
+            }
+        }
+        cleaner = HistoryCleaner(self.context, cfg, audit_logger=mock_audit)
+
+        contexts = [
+            {"role": "user", "content": "q1"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": "pw_read", "arguments": "{}"}},
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "A" * 6000},
+            {"role": "assistant", "content": "ans 1"},
+        ]
+        req = MagicMock()
+        req.contexts = contexts
+        mock_event = MagicMock()
+        mock_event.get_session_id.return_value = "sess_del"
+        mock_event.get_sender_id.return_value = "user_del"
+
+        logger.info.reset_mock()
+        changed = await cleaner.process_contexts(mock_event, req)
+        self.assertTrue(changed)
+
+        # 1. 验证日志输出
+        info_logs = [call.args[0] for call in logger.info.call_args_list if call.args]
+        self.assertTrue(any("已按直接删除策略清理" in msg and "释放 6000 字符" in msg for msg in info_logs))
+        self.assertTrue(any("上下文历史清理完成" in msg for msg in info_logs))
+
+        # 2. 验证工具审计
+        mock_audit.log_action.assert_awaited_once()
+        call_kwargs = mock_audit.log_action.await_args.kwargs
+        self.assertEqual(call_kwargs["tool_name"], "pw_history:delete")
+        self.assertEqual(call_kwargs["output_result"], "[该历史工具调用结果已按策略清理]")
+        self.assertEqual(call_kwargs["input_args"]["freed_chars"], 6000)
+        self.assertEqual(call_kwargs["input_args"]["group_size"], 1)
+
+        # 3. 验证生命周期审计
+        mock_audit.log_lifecycle.assert_awaited_once()
+        life_kwargs = mock_audit.log_lifecycle.await_args.kwargs
+        self.assertEqual(life_kwargs["event_type"], "history_cleanup")
+        self.assertEqual(life_kwargs["operator_name"], "历史清理器")
+        self.assertEqual(life_kwargs["details"]["reduced_chars"], 6000)
+
+    async def test_audit_logger_exception_isolation(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+
+        mock_audit = MagicMock()
+        mock_audit.log_action = AsyncMock(side_effect=RuntimeError("Database write error"))
+        mock_audit.log_lifecycle = AsyncMock(side_effect=RuntimeError("Lifecycle write error"))
+
+        cfg = {
+            "history_cleanup": {
+                "enable_cleanup": True,
+                "high_watermark": 5000,
+                "low_watermark": 2000,
+                "cleanup_strategy": "delete",
+            }
+        }
+        cleaner = HistoryCleaner(self.context, cfg, audit_logger=mock_audit)
+
+        contexts = [
+            {"role": "user", "content": "q1"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": "pw_read", "arguments": "{}"}},
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "A" * 6000},
+            {"role": "assistant", "content": "ans 1"},
+        ]
+        req = MagicMock()
+        req.contexts = contexts
+        mock_event = MagicMock()
+
+        # Should not raise exception
+        changed = await cleaner.process_contexts(mock_event, req)
+        self.assertTrue(changed)
+        self.assertEqual(contexts[2]["content"], "[该历史工具调用结果已按策略清理]")
+        self.assertEqual(cleaner.calculate_uncompressed_chars(contexts), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

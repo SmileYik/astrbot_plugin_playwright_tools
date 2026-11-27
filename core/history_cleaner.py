@@ -311,6 +311,65 @@ class HistoryCleaner:
 
         return groups
 
+    async def _record_tool_audit(
+        self,
+        event_info: dict[str, str],
+        tool_name: str,
+        input_args: dict[str, Any],
+        output_result: str,
+        is_error: bool = False,
+        error_message: str = "",
+    ) -> None:
+        """安全记录工具操作审计日志到 tool_audit_logs。"""
+        if not self.audit_logger or not hasattr(self.audit_logger, "log_action"):
+            return
+        try:
+            res = self.audit_logger.log_action(
+                session_id=event_info.get("session_id", ""),
+                context_key=event_info.get("context_key", ""),
+                sender_id=event_info.get("sender_id", ""),
+                tool_name=tool_name,
+                url="",
+                input_args=input_args,
+                output_result=output_result,
+                is_permitted=True,
+                deny_reason="",
+                is_error=is_error,
+                error_message=error_message,
+                session_name=event_info.get("session_name", ""),
+                sender_name=event_info.get("sender_name", ""),
+            )
+            if hasattr(res, "__await__"):
+                await res
+        except Exception as e:
+            logger.warning(f"[HistoryCleaner] 记录工具审计异常: {e}")
+
+    async def _record_lifecycle_audit(
+        self,
+        event_info: dict[str, str],
+        event_type: str,
+        details: dict[str, Any],
+    ) -> None:
+        """安全记录上下文生命周期审计日志到 context_lifecycle_logs。"""
+        if not self.audit_logger or not hasattr(self.audit_logger, "log_lifecycle"):
+            return
+        try:
+            res = self.audit_logger.log_lifecycle(
+                session_id=event_info.get("session_id", ""),
+                context_key=event_info.get("context_key", ""),
+                owner_id=event_info.get("sender_id", ""),
+                event_type=event_type,  # "history_compress" 或 "history_cleanup"
+                operator_id="system",
+                session_name=event_info.get("session_name", ""),
+                operator_name="副AI压缩器" if event_type == "history_compress" else "历史清理器",
+                owner_name=event_info.get("sender_name", ""),
+                details=details,
+            )
+            if hasattr(res, "__await__"):
+                await res
+        except Exception as e:
+            logger.warning(f"[HistoryCleaner] 记录生命周期审计异常: {e}")
+
     async def process_contexts(self, event: Any, req: Any) -> bool:
         """执行上下文水位检测与消减。"""
         if not self.enable_cleanup:
@@ -328,9 +387,20 @@ class HistoryCleaner:
         if not groups:
             return False
 
+        before_chars = uncompressed_chars
+        logger.info(
+            f"[HistoryCleaner] 检测到未压缩历史字符数 ({uncompressed_chars}) 超过高水位 ({self.high_watermark})，"
+            f"触发历史清理 (策略: {self.cleanup_strategy}, 目标低水位: {self.low_watermark})"
+        )
+
+        event_info = self._extract_event_info(event)
+        id_map = self._build_call_id_map(contexts)
         changed = False
+        processed_groups = 0
+        has_compressed = False
+
         # 从旧到新 (FIFO) 逐组处理
-        for group in groups:
+        for group_idx, group in enumerate(groups, 1):
             if uncompressed_chars <= self.low_watermark:
                 break
 
@@ -343,22 +413,70 @@ class HistoryCleaner:
 
             if self.cleanup_strategy == "compress":
                 # 副 AI 压缩模式
-                success = await self._compress_tool_group(group, contexts, event)
+                success = await self._compress_tool_group(
+                    group=group,
+                    contexts=contexts,
+                    event=event,
+                    group_idx=group_idx,
+                    event_info=event_info,
+                )
                 if success:
                     changed = True
+                    processed_groups += 1
+                    has_compressed = True
                     uncompressed_chars = self.calculate_uncompressed_chars(contexts)
                     continue
-                # 压缩失败时平滑降级为直接删除模式
-                logger.warning("[HistoryCleaner] 副 AI 压缩失败，自动降级为直接删除占位策略")
+                # 压缩失败时降级逻辑已在 _compress_tool_group 内部记录警告日志与失败审计，并自动降级为直接删除模式
 
-            # 直接删除模式
+            # 直接删除模式（策略为 delete 或 compress 失败降级）
+            tool_names = [self._get_tool_name(contexts[idx], id_map) for idx in group]
+            freed_chars = 0
             for idx in group:
                 msg = contexts[idx]
                 content = self._get_content(msg)
                 if not self.is_processed_tool(content):
-                    uncompressed_chars -= len(content)
+                    freed_chars += len(content)
                     self._set_content(msg, DELETE_PLACEHOLDER)
-                    changed = True
+
+            logger.info(
+                f"[HistoryCleaner] 第 {group_idx} 组工具历史已按直接删除策略清理: {len(group)} 个调用, 释放 {freed_chars} 字符"
+            )
+            await self._record_tool_audit(
+                event_info=event_info,
+                tool_name="pw_history:delete",
+                input_args={
+                    "group_size": len(group),
+                    "tools": tool_names,
+                    "freed_chars": freed_chars,
+                },
+                output_result=DELETE_PLACEHOLDER,
+            )
+            changed = True
+            processed_groups += 1
+            uncompressed_chars = self.calculate_uncompressed_chars(contexts)
+
+        if changed:
+            after_chars = self.calculate_uncompressed_chars(contexts)
+            reduced_chars = max(0, before_chars - after_chars)
+            logger.info(
+                f"[HistoryCleaner] 上下文历史清理完成: 初始未压缩字符 {before_chars} -> 最终未压缩字符 {after_chars} "
+                f"(累计消减 {reduced_chars} 字符, 处理 {processed_groups} 组)"
+            )
+            lifecycle_event_type = "history_compress" if has_compressed else "history_cleanup"
+            details = {
+                "high_watermark": self.high_watermark,
+                "low_watermark": self.low_watermark,
+                "before_chars": before_chars,
+                "after_chars": after_chars,
+                "reduced_chars": reduced_chars,
+                "processed_groups": processed_groups,
+                "strategy": self.cleanup_strategy,
+            }
+            await self._record_lifecycle_audit(
+                event_info=event_info,
+                event_type=lifecycle_event_type,
+                details=details,
+            )
 
         return changed
 
@@ -425,22 +543,40 @@ class HistoryCleaner:
 
         return prov
 
-    async def _compress_tool_group(self, group: list[int], contexts: list[Any], event: Any) -> bool:
+    async def _compress_tool_group(
+        self,
+        group: list[int],
+        contexts: list[Any],
+        event: Any,
+        group_idx: int = 1,
+        event_info: dict[str, str] | None = None,
+    ) -> bool:
         """调用副 AI 对单组工具调用进行结构化总结，并原位写回摘要与占位符。"""
-        try:
-            id_map = self._build_call_id_map(contexts)
-            contents_to_compress: list[str] = []
-            for idx in group:
-                msg = contexts[idx]
-                tool_name = self._get_tool_name(msg, id_map)
-                c = self._get_content(msg)
-                contents_to_compress.append(f"【工具: {tool_name}】\n{c}")
+        if event_info is None:
+            event_info = self._extract_event_info(event)
 
-            prompt_text = self._prepare_compress_input(contents_to_compress)
+        id_map = self._build_call_id_map(contexts)
+        tool_names = [self._get_tool_name(contexts[idx], id_map) for idx in group]
+        group_chars = sum(len(self._get_content(contexts[idx])) for idx in group)
+
+        contents_to_compress: list[str] = []
+        for idx in group:
+            msg = contexts[idx]
+            tool_name = self._get_tool_name(msg, id_map)
+            c = self._get_content(msg)
+            contents_to_compress.append(f"【工具: {tool_name}】\n{c}")
+
+        prompt_text = self._prepare_compress_input(contents_to_compress)
+        prompt_preview = prompt_text[:200]
+
+        logger.info(
+            f"[HistoryCleaner] 正在调用副 AI 对第 {group_idx} 组工具历史 ({len(group)} 个调用, 共 {group_chars} 字符) 进行结构化压缩..."
+        )
+
+        try:
             provider = await self._resolve_compress_provider(event)
             if not provider:
-                logger.warning("[HistoryCleaner] 未找到可用的副 AI 提供商，无法执行压缩")
-                return False
+                raise RuntimeError("未找到可用的副 AI 提供商，无法执行压缩")
 
             sys_prompt = await self._resolve_system_prompt()
             res = provider.text_chat(prompt=prompt_text, system_prompt=sys_prompt)
@@ -458,14 +594,47 @@ class HistoryCleaner:
                 summary = str(llm_resp).strip()
 
             if not summary:
-                logger.warning("[HistoryCleaner] 副 AI 压缩返回空文本")
-                return False
+                raise RuntimeError("副 AI 压缩返回空文本")
 
             # 前 N-1 个写入合并占位符，最后一个写入最终结构化摘要
             for idx in group[:-1]:
                 self._set_content(contexts[idx], MERGE_PLACEHOLDER)
             self._set_content(contexts[group[-1]], f"{SUMMARY_PREFIX}:\n{summary}")
+
+            savings = max(0.0, (group_chars - len(summary)) / max(1, group_chars) * 100)
+            logger.info(
+                f"[HistoryCleaner] 第 {group_idx} 组工具历史压缩成功: 原字符数 {group_chars} -> 摘要字符数 {len(summary)} (节省 {savings:.1f}%)"
+            )
+
+            await self._record_tool_audit(
+                event_info=event_info,
+                tool_name="pw_history:compress",
+                input_args={
+                    "group_size": len(group),
+                    "tools": tool_names,
+                    "original_chars": group_chars,
+                    "preview": prompt_preview,
+                },
+                output_result=summary,
+                is_error=False,
+                error_message="",
+            )
             return True
         except Exception as e:
-            logger.warning(f"[HistoryCleaner] 副 AI 压缩调用发生异常: {e}")
+            logger.warning(
+                f"[HistoryCleaner] 第 {group_idx} 组工具历史副 AI 压缩失败，自动降级为直接删除策略: {e}"
+            )
+            await self._record_tool_audit(
+                event_info=event_info,
+                tool_name="pw_history:compress",
+                input_args={
+                    "group_size": len(group),
+                    "tools": tool_names,
+                    "original_chars": group_chars,
+                    "preview": prompt_preview,
+                },
+                output_result="",
+                is_error=True,
+                error_message=str(e),
+            )
             return False
