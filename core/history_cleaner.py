@@ -218,6 +218,107 @@ class HistoryCleaner:
 
         return changed
 
+    def _prepare_compress_input(self, tool_group_contents: list[str]) -> str:
+        """拼装单轮工具组文本并根据 compress_max_input_chars 限制处理。"""
+        full_text = "\n".join(tool_group_contents)
+        if self.compress_max_input_chars > 0 and len(full_text) > self.compress_max_input_chars:
+            full_text = full_text[: self.compress_max_input_chars] + "\n...[超出副 AI 最大输入限制，已截断]"
+        return full_text
+
+    async def _resolve_system_prompt(self) -> str:
+        """组装副 AI 系统提示词（包含基础压缩指令与人设面具融合）。"""
+        base_prompt = self.compress_prompt
+        if not self.compress_use_persona:
+            return base_prompt
+
+        persona_prompt = ""
+        persona_mgr = getattr(self.context, "persona_manager", None)
+        if persona_mgr:
+            pid = self.compress_persona_id
+            if not pid:
+                pid = getattr(persona_mgr, "default_persona", "")
+            if pid and hasattr(persona_mgr, "get_persona"):
+                try:
+                    res = persona_mgr.get_persona(pid)
+                    if hasattr(res, "__await__"):
+                        p_obj = await res
+                    else:
+                        p_obj = res
+                    if p_obj:
+                        if isinstance(p_obj, dict):
+                            persona_prompt = str(p_obj.get("system_prompt", ""))
+                        else:
+                            persona_prompt = str(getattr(p_obj, "system_prompt", ""))
+                except Exception as e:
+                    logger.warning(f"[HistoryCleaner] 获取人设面具 '{pid}' 失败: {e}")
+
+        if persona_prompt:
+            return f"{persona_prompt}\n\n{base_prompt}"
+        return base_prompt
+
+    async def _resolve_compress_provider(self, event: Any) -> Any:
+        """获取负责执行压缩任务的 Provider 实例。"""
+        prov = None
+        if self.compress_provider_id and hasattr(self.context, "get_provider_by_id"):
+            prov = self.context.get_provider_by_id(self.compress_provider_id)
+
+        if not prov and hasattr(self.context, "get_using_provider_async"):
+            umo = getattr(event, "unified_msg_origin", None) if event else None
+            try:
+                prov = await self.context.get_using_provider_async(umo=umo)
+            except Exception as e:
+                logger.warning(f"[HistoryCleaner] 获取会话默认提供商失败: {e}")
+
+        if not prov and hasattr(self.context, "get_using_provider"):
+            try:
+                umo = getattr(event, "unified_msg_origin", None) if event else None
+                prov = self.context.get_using_provider(umo=umo)
+            except Exception:
+                pass
+
+        return prov
+
     async def _compress_tool_group(self, group: list[int], contexts: list[Any], event: Any) -> bool:
-        """副 AI 压缩单组工具（Task 3 扩展）。"""
-        return False
+        """调用副 AI 对单组工具调用进行结构化总结，并原位写回摘要与占位符。"""
+        id_map = self._build_call_id_map(contexts)
+        contents_to_compress: list[str] = []
+        for idx in group:
+            msg = contexts[idx]
+            tool_name = self._get_tool_name(msg, id_map)
+            c = self._get_content(msg)
+            contents_to_compress.append(f"【工具: {tool_name}】\n{c}")
+
+        prompt_text = self._prepare_compress_input(contents_to_compress)
+        provider = await self._resolve_compress_provider(event)
+        if not provider:
+            logger.warning("[HistoryCleaner] 未找到可用的副 AI 提供商，无法执行压缩")
+            return False
+
+        sys_prompt = await self._resolve_system_prompt()
+        try:
+            res = provider.text_chat(prompt=prompt_text, system_prompt=sys_prompt)
+            if hasattr(res, "__await__"):
+                llm_resp = await res
+            else:
+                llm_resp = res
+
+            summary = ""
+            if hasattr(llm_resp, "completion_text"):
+                summary = str(llm_resp.completion_text).strip()
+            elif isinstance(llm_resp, dict):
+                summary = str(llm_resp.get("completion_text", "")).strip()
+            else:
+                summary = str(llm_resp).strip()
+
+            if not summary:
+                logger.warning("[HistoryCleaner] 副 AI 压缩返回空文本")
+                return False
+
+            # 前 N-1 个写入合并占位符，最后一个写入最终结构化摘要
+            for idx in group[:-1]:
+                self._set_content(contexts[idx], MERGE_PLACEHOLDER)
+            self._set_content(contexts[group[-1]], f"{SUMMARY_PREFIX}:\n{summary}")
+            return True
+        except Exception as e:
+            logger.warning(f"[HistoryCleaner] 副 AI 压缩调用发生异常: {e}")
+            return False

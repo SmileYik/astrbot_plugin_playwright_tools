@@ -230,6 +230,140 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(changed)
         self.assertEqual(contexts[2]["content"], "A" * 2000)
 
+    def test_prepare_compress_input(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        cleaner = HistoryCleaner(self.context, {"history_cleanup": {"compress_max_input_chars": 0}})
+        res = cleaner._prepare_compress_input(["Line 1", "Line 2"])
+        self.assertEqual(res, "Line 1\nLine 2")
+
+        cleaner_limited = HistoryCleaner(self.context, {"history_cleanup": {"compress_max_input_chars": 10}})
+        res_limited = cleaner_limited._prepare_compress_input(["123456789012345"])
+        self.assertTrue(res_limited.startswith("1234567890"))
+        self.assertIn("已截断", res_limited)
+
+    async def test_resolve_system_prompt_with_persona(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        # 1. Without persona
+        cleaner = HistoryCleaner(self.context, {"history_cleanup": {"compress_use_persona": False, "compress_prompt": "Test Prompt"}})
+        prompt = await cleaner._resolve_system_prompt()
+        self.assertEqual(prompt, "Test Prompt")
+
+        # 2. With specific persona
+        mock_persona = MagicMock()
+        mock_persona.system_prompt = "Persona System Prompt"
+        self.context.persona_manager.get_persona = AsyncMock(return_value=mock_persona)
+
+        cleaner_p = HistoryCleaner(self.context, {
+            "history_cleanup": {
+                "compress_use_persona": True,
+                "compress_persona_id": "custom_p",
+                "compress_prompt": "Test Prompt",
+            }
+        })
+        prompt_p = await cleaner_p._resolve_system_prompt()
+        self.context.persona_manager.get_persona.assert_awaited_with("custom_p")
+        self.assertIn("Persona System Prompt", prompt_p)
+        self.assertIn("Test Prompt", prompt_p)
+
+        # 3. With default persona fallback
+        self.context.persona_manager.default_persona = "default_p"
+        cleaner_def = HistoryCleaner(self.context, {
+            "history_cleanup": {
+                "compress_use_persona": True,
+                "compress_persona_id": "",
+                "compress_prompt": "Test Prompt",
+            }
+        })
+        prompt_def = await cleaner_def._resolve_system_prompt()
+        self.context.persona_manager.get_persona.assert_awaited_with("default_p")
+        self.assertIn("Persona System Prompt", prompt_def)
+
+    async def test_process_contexts_compress_mode_success(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        mock_provider = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.completion_text = "这是副AI总结的网页摘要"
+        mock_provider.text_chat = AsyncMock(return_value=mock_resp)
+        self.context.get_provider_by_id.return_value = mock_provider
+
+        cfg = {
+            "history_cleanup": {
+                "enable_cleanup": True,
+                "high_watermark": 5000,
+                "low_watermark": 2000,
+                "cleanup_strategy": "compress",
+                "compress_provider_id": "mock_p",
+            }
+        }
+        cleaner = HistoryCleaner(self.context, cfg)
+
+        contexts = [
+            {"role": "user", "content": "q1"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": "pw_page", "arguments": "{}"}},
+                    {"id": "c2", "type": "function", "function": {"name": "pw_read", "arguments": "{}"}},
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "Opened page"},
+            {"role": "tool", "tool_call_id": "c2", "content": "A" * 6000},
+            {"role": "assistant", "content": "ans 1"},
+        ]
+        req = MagicMock()
+        req.contexts = contexts
+        event = MagicMock()
+
+        changed = await cleaner.process_contexts(event, req)
+        self.assertTrue(changed)
+        mock_provider.text_chat.assert_awaited_once()
+        self.assertEqual(contexts[2]["content"], "[已并入本轮浏览摘要]")
+        self.assertTrue(contexts[3]["content"].startswith("[历史浏览摘要]:\n这是副AI总结的网页摘要"))
+        self.assertEqual(cleaner.calculate_uncompressed_chars(contexts), 0)
+
+    async def test_process_contexts_compress_fallback_on_error(self):
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+        mock_provider = MagicMock()
+        mock_provider.text_chat = AsyncMock(side_effect=RuntimeError("API Connection Timeout"))
+        self.context.get_provider_by_id.return_value = mock_provider
+
+        cfg = {
+            "history_cleanup": {
+                "enable_cleanup": True,
+                "high_watermark": 5000,
+                "low_watermark": 2000,
+                "cleanup_strategy": "compress",
+                "compress_provider_id": "mock_p",
+            }
+        }
+        cleaner = HistoryCleaner(self.context, cfg)
+
+        contexts = [
+            {"role": "user", "content": "q1"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": "pw_page", "arguments": "{}"}},
+                    {"id": "c2", "type": "function", "function": {"name": "pw_read", "arguments": "{}"}},
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "Opened page"},
+            {"role": "tool", "tool_call_id": "c2", "content": "A" * 6000},
+            {"role": "assistant", "content": "ans 1"},
+        ]
+        req = MagicMock()
+        req.contexts = contexts
+        event = MagicMock()
+
+        changed = await cleaner.process_contexts(event, req)
+        self.assertTrue(changed)
+        # Fallback to delete placeholder
+        self.assertEqual(contexts[2]["content"], "[该历史工具调用结果已按策略清理]")
+        self.assertEqual(contexts[3]["content"], "[该历史工具调用结果已按策略清理]")
+        self.assertEqual(cleaner.calculate_uncompressed_chars(contexts), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
