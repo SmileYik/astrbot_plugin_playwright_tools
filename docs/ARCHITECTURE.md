@@ -104,6 +104,10 @@ flowchart TD
 ### 1.4 门面分发层 (`tools/tools.py`, `tools/schemas.py`)
 - **`PwPageTool` / `PwReadTool` / `PwInteractTool` / `PwMediaTool`**: 继承 `FunctionTool[AstrAgentContext]` 的类型化工具门面，面向大模型暴露四大独立复合工具。
 - 每个工具在初始化时维护 `_actions` 字典映射，统一采用字符串格式 Ref ID 参数；`call()` 统一设计为标准协程，并通过 `_execute_with_timeout` 施加全局单工具超时保护。
+- **`pw_page` 标签页管理**：提供 `open`、`switch_tab`、`list_tabs`、`dialog`、`close` 动作；`list_tabs` 返回当前活动页标识及所有存活标签页的序号、标题与链接。
+- **统一回复引导切面 (`BaseActionHandler`)**：
+  - 鉴权失败时汇总 `SecurityManager.get_allowed_actions` 与 `NavigationGuard` 单跳授权，将当前页实际可执行的动作映射为具体 `pw_*` 工具调用指引（无可用权限时提示调用 `pw_page(action='list_tabs')` 或 `open`）。
+  - 执行前后自动对比存活标签页与活动页，检测到新开标签页或活动页切换时在返回末尾附带 `[标签页通知: ...]`。
 - 在发送聊天截图时，使用异步方法交付，避免后续文本消息覆盖聊天界面图片。
 
 ### 1.5 可视化视图与 Web API 层 (`views/browser/`, `web-src/`, `main.py`, `api/`)

@@ -6,6 +6,13 @@
 
 ## [Unreleased]
 
+### 工具回复引导优化与标签页状态感知
+- **权限拒绝时列出可执行操作指引**：
+  - 在 `SecurityManager` 新增 `get_allowed_actions(user_id, url)`，结合 `NavigationGuard` 单跳授权，在 `BaseActionHandler.execute_action` 鉴权失败时将当前页面允许的动作直接映射为具体 `pw_*` 工具调用指引（无可用权限时引导调用 `pw_page(action='list_tabs')` 或 `open`）。
+- **新增 `pw_page(action='list_tabs')` 与标签页变更自动通知**：
+  - `pw_page` 新增 `list_tabs` 动作，返回当前活动标签页及所有已打开标签页的序号、标题与链接；`open_url` 明确展示当前标签页位置与总数。
+  - `BaseActionHandler.execute_action` 在执行前后自动对比存活标签页与活动页，检测到新标签页打开或活动页切换时自动附带 `[标签页通知: ...]`，减少 AI 重复 `open` 新标签页。
+
 ### 按页面隔离 `ref_map` 与跨标签页自动寻址
 - **按标签页独立维护状态 (`PageState`)**：
   - 在 `BrowserSessionContext` 中移除全局 `ref_map`、`current_snapshot` 与 `is_snapshot_dirty`，改为按 `id(page)` 为每个标签页独立维护 `PageState`；`switch_tab` 不再清空原标签页快照与引用映射，主帧导航及页面关闭仅精准清理对应标签页状态。
