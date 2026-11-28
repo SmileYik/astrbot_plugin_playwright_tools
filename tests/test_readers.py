@@ -443,6 +443,93 @@ console.log(JSON.stringify({
         ref_desc = meta["parameters"]["properties"]["ref"]["description"]
         self.assertIn("@r1", ref_desc)
 
+    def test_js_extractor_div_inline_buffer_and_nested_wrappers(self):
+        reader = InlineMarkdownReader()
+        script = reader.get_js_extractor_script(start_ref=1)
+        harness = """
+const mkText = (val) => ({ nodeType: 3, nodeValue: val });
+const mkEl = (tag, attrs = {}, children = []) => {
+    const attrMap = { ...attrs };
+    const el = {
+        nodeType: 1,
+        tagName: tag.toUpperCase(),
+        children: [],
+        childNodes: children,
+        get innerText() {
+            return this.childNodes.map(c => c.nodeType === 3 ? c.nodeValue : c.innerText).join('');
+        },
+        get textContent() { return this.innerText; },
+        hasAttribute: (k) => Object.prototype.hasOwnProperty.call(attrMap, k),
+        getAttribute: (k) => attrMap[k] ?? null,
+        setAttribute: (k, v) => { attrMap[k] = String(v); },
+        getBoundingClientRect: () => ({ width: 10, height: 10 }),
+        querySelector: () => null,
+        querySelectorAll: () => [],
+    };
+    el.children = children.filter(c => c.nodeType === 1);
+    return el;
+};
+
+const div1 = mkEl('div', {}, [
+    mkEl('span', {}, [mkText('Hello')]),
+    mkText(' '),
+    mkEl('span', {}, [mkText('World')]),
+    mkEl('p', {}, [mkText('Next')]),
+]);
+
+const a1 = mkEl('a', { href: 'https://a.test' }, [mkText('A')]);
+const a2 = mkEl('a', { href: 'https://b.test' }, [mkText('B')]);
+const div2 = mkEl('div', {}, [
+    mkEl('strong', {}, [mkEl('em', {}, [a1])]),
+    mkEl('strong', {}, [mkEl('em', {}, [a2])]),
+    mkEl('p', {}, [mkText('End')]),
+]);
+
+const pBracket = mkEl('p', {}, [
+    mkEl('span', {}, [mkText('点击')]),
+    mkEl('a', { href: 'https://c.test' }, [mkText('[1] 查看')]),
+]);
+
+const existingBtn = mkEl('button', { 'data-astr-ref': '@r9' }, [mkText('旧')]);
+const newBtn = mkEl('button', {}, [mkText('新')]);
+const pReuse = mkEl('p', {}, [existingBtn, newBtn]);
+
+const body = mkEl('body', {}, [div1, div2, pBracket, pReuse]);
+global.window = { location: { href: 'https://example.com' }, getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }) };
+global.document = { title: 'Test', body };
+
+const res = eval(process.env.EXTRACTOR_SCRIPT);
+console.log(JSON.stringify({ blocks: res.blocks, refs: res.elements.map(e => e.ref) }));
+"""
+        proc = subprocess.run(
+            ["node", "-e", harness],
+            env={**os.environ, "EXTRACTOR_SCRIPT": script},
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        out = json.loads(proc.stdout.strip())
+        self.assertEqual(out["blocks"][0], "Hello World")
+        self.assertEqual(out["blocks"][1], "Next")
+        self.assertEqual(out["blocks"][2], "***[A][@r1]*** ***[B][@r2]***")
+        self.assertEqual(out["blocks"][3], "End")
+        self.assertEqual(out["blocks"][4], "点击 [[1] 查看][@r3]")
+        self.assertEqual(out["blocks"][5], "[按钮: 旧][@r9] [按钮: 新][@r4]")
+        self.assertEqual(out["refs"], ["@r1", "@r2", "@r3", "@r9", "@r4"])
+
+    def test_tool_schemas_advertise_r_prefix(self):
+        from astrbot_plugin_playwright_tools.tools.schemas import (
+            PW_INTERACT_SCHEMA,
+            PW_MEDIA_SCHEMA,
+            PW_READ_SCHEMA,
+        )
+
+        self.assertIn("@r1", PW_READ_SCHEMA["properties"]["ref"]["description"])
+        self.assertIn("@r1", PW_INTERACT_SCHEMA["properties"]["ref"]["description"])
+        self.assertIn("@r1", PW_INTERACT_SCHEMA["properties"]["target_ref"]["description"])
+        self.assertIn("@r1", PW_MEDIA_SCHEMA["properties"]["ref"]["description"])
+
 
 class TestAriaSnapshotReader(unittest.IsolatedAsyncioTestCase):
     def test_aria_reader_tool_metadata(self):

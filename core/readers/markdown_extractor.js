@@ -144,8 +144,8 @@
         return `[控件: ${text || tag}][${ref}]`;
     };
 
-    const ENDS_WITH_REF_RE = /\]\[@r[^\]]+\](?:\*\*|\*)?$/;
-    const STARTS_WITH_REF_RE = /^(?:\*\*|\*)?!?\[[^\]]*\]\[@r[^\]]+\]/;
+    const ENDS_WITH_REF_RE = /\]\[@r[^\]]+\]\*{0,3}$/;
+    const STARTS_WITH_REF_RE = /^\*{0,3}!?\[[^\n]*\]\[@r[^\]]+\]/;
 
     const collapseSpaces = (str) => {
         if (!str) return '';
@@ -330,8 +330,8 @@
 
         for (const child of Array.from(node.childNodes)) {
             if (child.nodeType === 3) {
-                const val = child.nodeValue.replace(/\s+/g, ' ');
-                if (val.trim()) inlineBuffer.push(val);
+                const val = (child.nodeValue || '').replace(/\s+/g, ' ');
+                inlineBuffer.push(val);
             } else if (child.nodeType === 1) {
                 if (isBlockOrContainer(child)) {
                     flushInline();
