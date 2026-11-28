@@ -387,8 +387,8 @@
       },
       "allow_screenshot_to_ai": {
         "type": "bool",
-        "description": "截图发送给 AI",
-        "hint": "允许大模型直接接收页面截图进行多模态视觉理解",
+        "description": "允许 AI 直接查看图片",
+        "hint": "开启后视为多模态 AI，访问图片链接或执行 target='ai' 截图时将直接把图片发送给 AI 进行视觉分析；关闭时仅返回文本描述或元信息",
         "default": false
       },
       "element_multiline_separator": {

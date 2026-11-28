@@ -590,6 +590,48 @@ class TestBaseActionHandler(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Tab 1", res)
         self.assertIn("https://example.com", res)
 
+    def test_build_image_tool_result_contains_text_and_image(self):
+        import base64
+        from astrbot_plugin_playwright_tools.tools.handlers.base_handler import (
+            build_image_tool_result,
+        )
+
+        res = build_image_tool_result("ok", b"\x89PNG", "image/png")
+        self.assertEqual(len(res.content), 2)
+        self.assertEqual(res.content[0].type, "text")
+        self.assertEqual(res.content[0].text, "ok")
+        self.assertEqual(res.content[1].type, "image")
+        self.assertEqual(res.content[1].mimeType, "image/png")
+        self.assertEqual(base64.b64decode(res.content[1].data), b"\x89PNG")
+
+    async def test_execute_action_preserves_call_tool_result_and_logs_text(self):
+        from astrbot_plugin_playwright_tools.tools.handlers.base_handler import (
+            build_image_tool_result,
+        )
+
+        self.mock_sec.is_url_allowed_navigation.return_value = (True, "")
+
+        async def _action(ctx, page):
+            return build_image_tool_result("loaded", b"img", "image/png"), {"screenshot_path": "a.png"}
+
+        res = await self.handler.execute_action(
+            session_id="s1",
+            sender_id="u1",
+            action_name="open_url",
+            target_resource="https://example.com/a.png",
+            action_coro_fn=_action,
+            input_args={"url": "https://example.com/a.png"},
+            required_permission="navigate",
+        )
+        self.assertTrue(hasattr(res, "content"))
+        self.assertEqual(res.content[0].text, "loaded")
+        self.assertEqual(res.content[1].type, "image")
+        self.assertEqual(res.content[1].mimeType, "image/png")
+        self.mock_audit.log_action.assert_awaited()
+        call_kwargs = self.mock_audit.log_action.await_args.kwargs
+        self.assertEqual(call_kwargs["output_result"], "loaded")
+        self.assertEqual(call_kwargs["screenshot_path"], "a.png")
+
 
 if __name__ == "__main__":
     unittest.main()

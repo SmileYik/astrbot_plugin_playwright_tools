@@ -1,7 +1,28 @@
+import base64
+from dataclasses import dataclass, field
 import inspect
 import re
 import traceback
 from typing import TYPE_CHECKING, Any, Callable, Awaitable
+
+try:
+    from mcp.types import CallToolResult, ImageContent, TextContent
+except ImportError:  # 本地单测环境未安装 mcp 时使用轻量兼容结构
+    @dataclass
+    class TextContent:
+        type: str = "text"
+        text: str = ""
+
+    @dataclass
+    class ImageContent:
+        type: str = "image"
+        data: str = ""
+        mimeType: str = "image/png"
+
+    @dataclass
+    class CallToolResult:
+        content: list[Any] = field(default_factory=list)
+        isError: bool = False
 
 from ...core.context_manager import ContextManager, BrowserSessionContext
 from ...core.security_manager import SecurityManager
@@ -85,6 +106,80 @@ def clean_playwright_error(e: Exception) -> str:
 
     first_line = raw.splitlines()[0] if raw.splitlines() else str(raw)
     return f"操作异常: {first_line}\n[推荐操作: 检查参数与页面状态后重试]"
+
+
+def is_call_tool_result(result: Any) -> bool:
+    """判断结果是否为 MCP CallToolResult（或兼容结构）。"""
+    return isinstance(result, CallToolResult) or (
+        result is not None
+        and not isinstance(result, (str, bytes, dict, list, tuple))
+        and isinstance(getattr(result, "content", None), list)
+    )
+
+
+def build_image_tool_result(text: str, image_bytes: bytes, mime_type: str = "image/png") -> CallToolResult:
+    """构造包含文本说明与多模态图片内容的 CallToolResult。"""
+    b64_str = base64.b64encode(image_bytes).decode("utf-8")
+    return CallToolResult(
+        content=[
+            TextContent(type="text", text=text),
+            ImageContent(type="image", data=b64_str, mimeType=mime_type or "image/png"),
+        ]
+    )
+
+
+def extract_tool_result_text(result: Any) -> str:
+    """从普通字符串或 CallToolResult 中提取文本内容（用于审计日志与提示判断）。"""
+    if not is_call_tool_result(result):
+        return str(result)
+    parts: list[str] = []
+    for item in getattr(result, "content", []):
+        if getattr(item, "type", "") == "text" or hasattr(item, "text"):
+            txt = getattr(item, "text", "")
+            if txt:
+                parts.append(str(txt))
+    return "\n".join(parts)
+
+
+def append_tool_result_text(
+    result: Any,
+    prefix: str = "",
+    suffix: str = "",
+    secret_text: str | None = None,
+) -> Any:
+    """对字符串或 CallToolResult 中的文本部分安全追加前后缀与密码脱敏。"""
+    if not is_call_tool_result(result):
+        text = str(result)
+        if prefix and prefix not in text:
+            text = f"{prefix}\n{text}".strip()
+        if secret_text:
+            text = text.replace(secret_text, "******")
+        if suffix:
+            text = f"{text}\n{suffix}"
+        return text
+
+    content = list(getattr(result, "content", []))
+    combined_text = extract_tool_result_text(result)
+    first_text_idx = next(
+        (i for i, item in enumerate(content) if getattr(item, "type", "") == "text" or hasattr(item, "text")),
+        None,
+    )
+    if first_text_idx is not None:
+        item = content[first_text_idx]
+        text = str(getattr(item, "text", ""))
+        if prefix and prefix not in combined_text:
+            text = f"{prefix}\n{text}".strip()
+        if secret_text:
+            text = text.replace(secret_text, "******")
+        if suffix:
+            text = f"{text}\n{suffix}"
+        content[first_text_idx] = TextContent(type="text", text=text)
+    else:
+        extra_parts = [p for p in (prefix, suffix) if p]
+        if extra_parts:
+            content.insert(0, TextContent(type="text", text="\n".join(extra_parts)))
+    result.content = content
+    return result
 
 
 class BaseActionHandler:
@@ -457,19 +552,18 @@ class BaseActionHandler:
             extra_audit = {}
             if isinstance(res, tuple) and len(res) == 2 and isinstance(res[1], dict):
                 res, extra_audit = res
-            res = str(res)
 
-            if hint and hint not in res:
-                res = f"{hint}\n{res}".strip()
-
-            if is_password and self.mask_password_inputs and secret_text:
-                res = res.replace(secret_text, "******")
-
+            mask_val = secret_text if (is_password and self.mask_password_inputs and secret_text) else None
             tab_notice = await self._format_tab_change_notice(
                 ctx, before_page_ids, before_active_page, action_name
             )
-            if tab_notice:
-                res = f"{res}\n{tab_notice}"
+            res = append_tool_result_text(
+                res,
+                prefix=hint or "",
+                suffix=tab_notice or "",
+                secret_text=mask_val,
+            )
+            audit_output = extract_tool_result_text(res)
 
             await self._log_audit(
                 session_id=session_id,
@@ -478,7 +572,7 @@ class BaseActionHandler:
                 tool_name=action_name,
                 url=current_url,
                 input_args=audit_input_args,
-                output_result=res,
+                output_result=audit_output,
                 is_permitted=True,
                 session_name=session_name,
                 sender_name=sender_name,
