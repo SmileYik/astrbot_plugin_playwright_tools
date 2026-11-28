@@ -75,6 +75,61 @@
                   "全页长截图 (screenshot_full)",
                   "下载文件 (download)"
                 ]
+              },
+              "allow_single_hop": {
+                "type": "bool",
+                "description": "允许单跳放行",
+                "hint": "开启后，允许该规则内的页面通过点击或弹窗等操作跳转到非白名单页面一次",
+                "default": false
+              },
+              "single_hop_allowed_actions": {
+                "type": "list",
+                "description": "单跳页面允许的行为",
+                "hint": "勾选单跳落地后在目标非白名单页面上允许执行的操作权限",
+                "default": [
+                  "read",
+                  "screenshot"
+                ],
+                "options": [
+                  "read",
+                  "click",
+                  "fill",
+                  "select",
+                  "hover",
+                  "focus",
+                  "drag",
+                  "press_key",
+                  "scroll",
+                  "screenshot",
+                  "screenshot_full",
+                  "download"
+                ],
+                "labels": [
+                  "读取文本 (read)",
+                  "点击交互 (click)",
+                  "输入表单 (fill)",
+                  "下拉选择 (select)",
+                  "鼠标悬停 (hover)",
+                  "焦点控制 (focus)",
+                  "元素拖拽 (drag)",
+                  "键盘按键 (press_key)",
+                  "页面滚动 (scroll)",
+                  "视口截图 (screenshot)",
+                  "全页长截图 (screenshot_full)",
+                  "下载文件 (download)"
+                ],
+                "condition": {
+                  "allow_single_hop": true
+                }
+              },
+              "single_hop_follow_redirects": {
+                "type": "bool",
+                "description": "单跳遵循重定向",
+                "hint": "开启后，单次页面内跳转过程中发生的 HTTP 301/302 重定向链视为同一次跳转并放行；关闭则拦截重定向",
+                "default": true,
+                "condition": {
+                  "allow_single_hop": true
+                }
               }
             }
           }
@@ -136,8 +191,8 @@
       "tool_execution_timeout_seconds": {
         "type": "int",
         "description": "执行超时时长",
-        "hint": "单个工具执行的最长等待时间 (秒)",
-        "default": 30,
+        "hint": "单个工具执行的最长等待时间 (秒)，建议 30 ~ 90（略高于页面加载超时，避免慢站点临界报错）",
+        "default": 45,
         "slider": {
           "min": 5,
           "max": 180,
@@ -166,7 +221,7 @@
           "aria_snapshot"
         ],
         "labels": [
-          "内联交互 Markdown (Inline Markdown) [推荐]",
+          "内联交互 Markdown (Inline Markdown)",
           "无障碍语义树快照 (ARIA Snapshot)"
         ],
         "subtitles": [
@@ -177,13 +232,8 @@
       "page_chunk_char_limit": {
         "type": "int",
         "description": "分页字符预算",
-        "hint": "单页正文提炼的最大字符预算（建议 1000 ~ 4000），超过此预算将在保持语义块完整性的前提下自动切分至下一页",
-        "default": 2000,
-        "slider": {
-          "min": 500,
-          "max": 8000,
-          "step": 100
-        }
+        "hint": "单页正文提炼的最大字符预算（建议 3000 ~ 6000，最小 500），增大预算可减少翻页次数",
+        "default": 4000
       }
     }
   },
@@ -222,7 +272,7 @@
           "custom"
         ],
         "labels": [
-          "Chromium (推荐)",
+          "Chromium",
           "Firefox",
           "WebKit",
           "其他 (自定义路径)"
@@ -264,24 +314,14 @@
       "browser_window_width": {
         "type": "int",
         "description": "窗口宽度",
-        "hint": "浏览器初始视口宽度 (像素)",
-        "default": 1280,
-        "slider": {
-          "min": 800,
-          "max": 3840,
-          "step": 10
-        }
+        "hint": "浏览器初始视口宽度 (像素)，常用桌面宽度建议 1280 或 1920",
+        "default": 1280
       },
       "browser_window_height": {
         "type": "int",
         "description": "窗口高度",
-        "hint": "浏览器初始视口高度 (像素)",
-        "default": 720,
-        "slider": {
-          "min": 600,
-          "max": 2160,
-          "step": 10
-        }
+        "hint": "浏览器初始视口高度 (像素)，建议 720 ~ 1080，适当增高可减少首屏内容截断",
+        "default": 800
       },
       "browser_user_agent": {
         "type": "string",
@@ -332,18 +372,13 @@
         "type": "int",
         "description": "长截图高度上限",
         "hint": "全屏截取的最大像素高度，超出自动截断 (像素)",
-        "default": 8000,
-        "slider": {
-          "min": 1000,
-          "max": 30000,
-          "step": 500
-        }
+        "default": 8000
       },
       "screenshot_timeout_seconds": {
         "type": "int",
         "description": "长截图超时时长",
-        "hint": "长截图拼接渲染的超时秒数，超时自动降级为视口截图",
-        "default": 15,
+        "hint": "长截图拼接渲染的超时秒数（建议 15 ~ 30），超时自动降级为视口截图",
+        "default": 20,
         "slider": {
           "min": 5,
           "max": 120,
@@ -386,23 +421,13 @@
         "type": "int",
         "description": "文件保留天数",
         "hint": "下载与截图文件保留天数，超时自动被动清理",
-        "default": 7,
-        "slider": {
-          "min": 1,
-          "max": 90,
-          "step": 1
-        }
+        "default": 7
       },
       "audit_retention_days": {
         "type": "int",
         "description": "审计保留天数",
-        "hint": "审计记录保存天数，超过将自动清理",
-        "default": 30,
-        "slider": {
-          "min": 1,
-          "max": 365,
-          "step": 1
-        }
+        "hint": "审计记录保存天数（建议 7 ~ 30），超过将自动清理",
+        "default": 14
       },
       "audit_max_output_chars": {
         "type": "int",
@@ -432,13 +457,8 @@
       "high_watermark": {
         "type": "int",
         "description": "高水位阈值 (字符)",
-        "hint": "历史工具调用总字符超过此时触发清理（建议 5000 ~ 12000）",
-        "default": 8000,
-        "slider": {
-          "min": 2000,
-          "max": 30000,
-          "step": 500
-        },
+        "hint": "历史工具调用总字符超过此时触发清理（建议 16000 ~ 40000）",
+        "default": 24000,
         "condition": {
           "enable_cleanup": true
         }
@@ -447,12 +467,7 @@
         "type": "int",
         "description": "低水位目标 (字符)",
         "hint": "触发清理后消减到的目标字符数（建议设为高水位的 30% ~ 50%）",
-        "default": 3000,
-        "slider": {
-          "min": 1000,
-          "max": 15000,
-          "step": 500
-        },
+        "default": 10000,
         "condition": {
           "enable_cleanup": true
         }
@@ -468,7 +483,7 @@
         ],
         "labels": [
           "直接删除 (占位清空)",
-          "副 AI 压缩 (总结提炼)"
+          "AI 压缩 (总结提炼)"
         ],
         "subtitles": [
           "直接将历史正文清空替换为简短占位符，零额外开销",
@@ -492,13 +507,8 @@
       "compress_max_input_chars": {
         "type": "int",
         "description": "副 AI 输入上限 (字符)",
-        "hint": "送给副 AI 压缩的最大字符预算，设置为 0 代表不限制长度；大于 0 时若超出则直接截断",
+        "hint": "送给副 AI 压缩的最大字符预算，0 代表不限制长度；如需截断建议设为 30000 ~ 60000",
         "default": 0,
-        "slider": {
-          "min": 0,
-          "max": 50000,
-          "step": 1000
-        },
         "condition": {
           "enable_cleanup": true,
           "cleanup_strategy": "compress"
@@ -507,8 +517,8 @@
       "compress_prompt": {
         "type": "text",
         "description": "压缩提示词",
-        "hint": "副 AI 执行总结提炼时遵循的核心指导原则；支持使用 {{user_input}} 动态占位符自动引入当前用户问题（如：根据用户问题“{{user_input}}”提炼核心事实）",
-        "default": "你是一个精炼的内容总结器。请对以下浏览器历史操作及网页正文进行结构化提炼：保留核心事实、关键结论、数据指标及必要链接，剔除冗余修饰与排版，输出不超过 300 字的紧凑摘要。",
+        "hint": "副 AI 执行总结提炼时遵循的指导原则；支持使用 {{user_input}} 动态占位符自动引入当前用户问题（如：根据用户问题“{{user_input}}”提炼核心事实）",
+        "default": "你是一个精炼的内容总结器。请对以下浏览器历史操作及网页正文进行结构化提炼：按要点保留核心事实、关键结论、数据指标、已访问页面 URL 及重要交互结果，剔除冗余修饰与排版，输出不超过 1000 字的结构化摘要。",
         "condition": {
           "enable_cleanup": true,
           "cleanup_strategy": "compress"

@@ -5,8 +5,8 @@ PW_PAGE_SCHEMA = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["open", "switch_tab", "dialog", "close"],
-            "description": "要执行的页面动作：open(打开网址), switch_tab(切换标签页), dialog(响应弹窗), close(关闭当前浏览器上下文)",
+            "enum": ["open", "switch_tab", "list_tabs", "dialog", "close"],
+            "description": "要执行的页面动作：open(打开网址), switch_tab(切换标签页), list_tabs(列出当前活动及所有已打开标签页), dialog(响应弹窗), close(关闭当前浏览器上下文)",
         },
         "url": {
             "type": "string",
@@ -42,7 +42,7 @@ PW_READ_SCHEMA = {
         },
         "ref": {
             "type": "string",
-            "description": "要查询详细信息或目标 URL 的元素 Ref 编号（如 '1', '2'）。传入时将直接返回该 Ref 对应的类型、标题及完整链接/图片地址 (可选)",
+            "description": "要查询详细信息或目标 URL 的元素 Ref 编号（如 '@r1', '@r2'）。传入时将直接返回该 Ref 对应的类型、标题及完整链接/图片地址 (可选)",
         },
         "refresh": {
             "type": "boolean",
@@ -61,7 +61,7 @@ PW_INTERACT_SCHEMA = {
         },
         "ref": {
             "type": "string",
-            "description": "目标操作元素的 Ref 编号或标识符（如 '1', 'e2'）",
+            "description": "目标操作元素的 Ref 编号或标识符（如 '@r1', 'e2'）",
         },
         "text": {
             "type": "string",
@@ -73,7 +73,7 @@ PW_INTERACT_SCHEMA = {
         },
         "target_ref": {
             "type": "string",
-            "description": "拖拽放置的目标元素 Ref 编号或标识符（如 '1', 'e2'） (action='drag' 时必填)",
+            "description": "拖拽放置的目标元素 Ref 编号或标识符（如 '@r1', 'e2'） (action='drag' 时必填)",
         },
         "key": {
             "type": "string",
@@ -107,7 +107,7 @@ PW_MEDIA_SCHEMA = {
         },
         "ref": {
             "type": "string",
-            "description": "触发下载操作的目标元素 Ref 编号（如 '1', 'e2'）",
+            "description": "触发下载操作的目标元素 Ref 编号（如 '@r1', 'e2'）",
         },
     },
     "required": ["action"],

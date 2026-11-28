@@ -4,6 +4,48 @@
 
 ---
 
+## [v1.5.0] - 2026-11-28
+
+### 配置体验与文档体系完善
+- **现代大上下文默认值调优与控件精简**：
+  - 将 `page_chunk_char_limit`、`browser_window_width/height`、`screenshot_max_height_px`、`file_retention_days`、`audit_retention_days`、`high_watermark`、`low_watermark`、`compress_max_input_chars` 从滑块改为直接数值输入；
+  - 将默认值调优为均衡大上下文配置（`tool_execution_timeout_seconds=45`、`page_chunk_char_limit=4000`、`browser_window_height=800`、`screenshot_timeout_seconds=20`、`audit_retention_days=14`、`high_watermark=24000`、`low_watermark=10000`），并将副 AI 默认 `compress_prompt` 长度上限放宽至 `1000` 字，同步对齐 `main.py` 与 `core/history_cleaner.py` 兜底值。
+- **文档分层与新版 README**：
+  - 新增面向项目整体工具能力与技术约定的 [docs/AI_TOOLS.md](docs/AI_TOOLS.md)，并结合控制台截图重新排版 [README.md](README.md)。
+
+### 工具回复引导优化与标签页状态感知
+- **权限拒绝时列出可执行操作指引**：
+  - 在 `SecurityManager` 新增 `get_allowed_actions(user_id, url)`，结合 `NavigationGuard` 单跳授权，在 `BaseActionHandler.execute_action` 鉴权失败时将当前页面允许的动作直接映射为具体 `pw_*` 工具调用指引（无可用权限时引导调用 `pw_page(action='list_tabs')` 或 `open`）。
+- **新增 `pw_page(action='list_tabs')` 与标签页变更自动通知**：
+  - `pw_page` 新增 `list_tabs` 动作，返回当前活动标签页及所有已打开标签页的序号、标题与链接；`open_url` 明确展示当前标签页位置与总数。
+  - `BaseActionHandler.execute_action` 在执行前后自动对比存活标签页与活动页，检测到新标签页打开或活动页切换时自动附带 `[标签页通知: ...]`，减少 AI 重复 `open` 新标签页。
+
+### 按页面隔离 `ref_map` 与跨标签页自动寻址
+- **按标签页独立维护状态 (`PageState`)**：
+  - 在 `BrowserSessionContext` 中移除全局 `ref_map`、`current_snapshot` 与 `is_snapshot_dirty`，改为按 `id(page)` 为每个标签页独立维护 `PageState`；`switch_tab` 不再清空原标签页快照与引用映射，主帧导航及页面关闭仅精准清理对应标签页状态。
+- **`AriaSnapshotReader` 全局单调递增 `ref_id` 映射**：
+  - `AriaSnapshotReader` 按上下文 `start_ref` 将原生 `aria-ref` 重映射为全局单调递增数字 `ref_id`，并在 `ref_map` 中保留 `aria_ref` 字段供底层 Locator 定位，消除多标签页重号冲突。
+- **跨标签页 `ref_id` 自动寻址与激活**：
+  - 在 `BaseActionHandler.execute_action` 中统一按 `ref` 优先检索当前活动页并支持跨标签页反查；命中其他标签页时自动将其切换为当前活动页并执行鉴权与操作。
+
+### Markdown 阅读器 `@r` Ref 前缀与行内排版优化
+- **Ref ID `@r` 前缀规范**：
+  - `InlineMarkdownReader` 提取的 Ref ID 统一采用 `@r` 前缀（如 `@r1`、`@r2`），同步写入 `data-astr-ref` 与 `ref_map`，下游工具调用保持精确匹配（需传入完整 `@rN`）。
+- **行内空白压缩与元素分隔**：
+  - 在 `core/readers/markdown_extractor.js` 中压缩文本节点的连续空白字符（保留 `<br>` 换行），并在相邻交互控件边界自动补充空格分隔，避免 `[xxx][@r1][yyy][@r2]` 粘连。
+- **文档与技能说明同步**：
+  - 更新 `skills/playwright-tool/SKILL.md`、`README.md`、`docs/ARCHITECTURE.md` 及工具元数据中的 Ref 示例与说明。
+
+### 白名单单跳放行、域名精确度优先匹配与导航守卫解耦
+- **白名单单跳放行配置 (`whitelist_rules`)**：
+  - 在 `_conf_schema.json` 的 `whitelist_rules` 规则模板中新增 `allow_single_hop`、`single_hop_allowed_actions` 与 `single_hop_follow_redirects` 配置项，支持为特定白名单站点开启单次页面内跳转/弹窗放行，并限制落地页可执行的操作权限与重定向链处理策略。
+- **域名精确度优先匹配 (`SecurityManager`)**：
+  - 将规则匹配升级为按域名精确度评分优先（精确域名 > 深层通配 > 浅层通配 > 全局通配），解决通配规则遮蔽子域名独立规则的问题；移除旧版单数 `domain` 字段兼容逻辑。
+- **独立导航守卫解耦 (`NavigationGuard`)**：
+  - 将路由守卫、主帧/弹窗监听与 `Page` 粒度单跳授权状态从 `ContextManager` 拆出至 `core/navigation_guard.py`，并与 `BaseActionHandler` 动作鉴权集成。
+
+---
+
 ## [v1.4.5] - 2026-11-27
 
 ### 副 AI 压缩提示词用户意图动态占位符 (Dynamic {{user_input}} Placeholder in Compress Prompt)
@@ -13,7 +55,7 @@
   - 支持从当前上下文列表（`contexts`）中逆序检索最近一条 `role == "user"` 消息，自动解构多部件内容（兼容纯字符串 `str` 与 `TextPart` 列表）；
   - 若上下文中无用户消息，自动平滑回退至从当前事件（`event.message_str` / `event.get_message_str()`）提取；若均无则安全回退为 `""`，避免异常或残留占位符。
 - **100% 向后兼容与配置模式引导**：
-  - 未使用 `{{user_input}}` 的静态系统提示词保持原有行为完全不变；
+  - 未使用 `{{user_input}}` 的静态系统提示词保持原有行为不变；
   - 更新 `_conf_schema.json` 中 `compress_prompt` 的配置说明与提示，引导用户配置针对性提炼模板。
 
 ---
@@ -71,11 +113,11 @@
 
 ### 纯双水位线工具历史消减与副 AI 压缩 (Double Watermark Tool History Cleanup & Compression)
 - **纯高低双水位线上下文消减**：新增 `history_cleanup` 配置组（`high_watermark` 与 `low_watermark`），在 `@filter.on_llm_request` 请求前拦截，当本插件历史工具调用累计字符超过高水位时，从最旧记录按 FIFO 逐组消减直至回落至低水位以内，最新完成的工具调用自然位于队尾完整保留 100% 原始明文。
-- **严格 API 协议兼容（防 400 报错）**：绝不破坏 OpenAI/Gemini/Claude 等厂商要求的 `assistant(tool_calls)` 与 `tool(tool_call_id)` 结构配对，保留消息骨架并替换 `content` 内容，彻底消除孤立消息与丢失 ID 引发的 400 异常。
+- **严格 API 协议兼容（防 400 报错）**：保留 OpenAI/Gemini/Claude 等厂商要求的 `assistant(tool_calls)` 与 `tool(tool_call_id)` 结构配对，保留消息骨架并替换 `content` 内容，消除孤立消息与丢失 ID 引发的 400 异常。
 - **两种消减策略与智能折叠**：
   - **直接删除模式 (`delete`)**：将历史工具消息正文原位替换为精炼占位符 `"[该历史工具调用结果已按策略清理]"`，零额外 Token 开销。
   - **副 AI 压缩模式 (`compress`)**：通过 `_special: "select_provider"` 选取模型生成紧凑摘要，组内非末尾工具填入 `"[已并入本轮浏览摘要]"`，末尾工具写入结构化摘要，因果链清晰。
-- **副 AI 输入上限控制与直接截断**：新增 WebUI 配置项 `compress_max_input_chars`（默认为 0 代表不限制长度）；大于 0 时若超长直接截断并附加提示，杜绝副 AI 上下文爆炸。
+- **副 AI 输入上限控制与直接截断**：新增 WebUI 配置项 `compress_max_input_chars`（默认为 0 代表不限制长度）；大于 0 时若超长直接截断并附加提示，防止副 AI 上下文膨胀。
 - **人设面具融合与安全降级**：副 AI 支持配置人设面具注入（`compress_use_persona` 与 `_special: "select_persona"`，未指定时自动回退继承系统默认人设）；当副 AI 超时或抛出异常时，平滑降级为直接删除占位策略，保障主会话稳定。
 - **事件流自动回写持久化**：深度契合 AstrBot 内部 `context_observer("plugin")` 触发机制，在钩子完成时自动调用 `stage_history()` 将变更持久化回写至会话数据库，避免未来轮次重复计算。
 
@@ -85,7 +127,7 @@
 
 ### 阅读器 Ref 规范化与按需 URL 查询 (Reader Ref Standardization & On-Demand URL Query)
 - **普通图片 Ref ID 分配与 URL 隐藏**：`InlineMarkdownReader` 将页面上的普通图片（`<img>`）纳入统一的 Ref 编号管理，隐藏长图片 URL 并内联渲染为 `![图片: alt][Ref]`，防止 Token 膨胀并实现图片精准定位。
-- **内联控件 Markdown 引用风排版与 JS 独立脚本解耦**：将内联交互控件与超链接全面升级为原生 Markdown 引用脚注风格（`[文本][Ref]`、`![图片: 描述][Ref]`、`[按钮: 文本][Ref]`），显著精简元素语法骨架，密集链接区域字符冗余减少约 30%；将 300+ 行 JS DOM 提取逻辑完全解耦抽离为独立的 `core/readers/markdown_extractor.js` 脚本。
+- **内联控件 Markdown 引用风排版与 JS 独立脚本解耦**：将内联交互控件与超链接升级为原生 Markdown 引用脚注风格（`[文本][Ref]`、`![图片: 描述][Ref]`、`[按钮: 文本][Ref]`），精简元素语法骨架，密集链接区域字符冗余减少约 30%；将 300+ 行 JS DOM 提取逻辑解耦抽离为独立的 `core/readers/markdown_extractor.js` 脚本。
 - **表格感知智能跨页切分与表头自动回填**：`_chunk_blocks` 引入 Markdown 表格结构识别与逐行装箱机制，多行表格跨页时在后续切片首部自动注入表头行与分隔行，确保每个分页都是列语义清晰、语法自闭合的合法表格。
 - **单页字符预算防膨胀与行级兜底微切分**：对超大列表、代码块与极端长文本实施行级与字符级装箱微切分兜底，防范单页快照数万字符膨胀，确保单页总字符严格受控于 `page_chunk_char_limit`（默认 2000）。
 - **ARIA 语义树 URL 剥离与脱敏**：`AriaSnapshotReader` 过滤 YAML 语义树中的 `- /url: <url>` 子行与末尾多余冒号，对超链接无障碍名称本身为 URL 的情况自动化简为 `link [ref=...]`，正文大幅降低 Token 开销。
@@ -202,7 +244,7 @@
 
 ### 架构原生重构 (Playwright-Native Architecture Refactor)
 - **原生 Playwright 交互体系**：将 `InteractHandler` 中所有点击、表单输入、下拉选择、悬停、聚焦/失焦、拖拽动作重构为 Playwright 原生 Locator API 调用（`locator.click()`、`locator.fill()`、`locator.select_option()`、`locator.drag_to()` 等），全面享受框架自带的可操作性检查与受控组件事件分发，移除裸 JS 字符串注入。
-- **解耦浏览器后端适配器**：将 `CamoufoxAdapter` 与通用 `BrowserAdapterBase` 严格解耦，将其职责定位为单一的底层浏览器启动器，向上层完全输出标准的 Playwright `Browser` 与 `BrowserContext`，消除对 Camoufox 的专有强绑定。
+- **解耦浏览器后端适配器**：将 `CamoufoxAdapter` 与通用 `BrowserAdapterBase` 解耦，将其职责定位为单一的底层浏览器启动器，向上层输出标准的 Playwright `Browser` 与 `BrowserContext`，消除对 Camoufox 的专有强绑定。
 - **强类型与官方日志规范**：核心会话上下文与 Handlers 引入 `playwright.async_api` 强类型约束；日志全面采用 AstrBot 官方标准的 `from astrbot.api import logger`。
 - **精简测试架构**：移除冗余笨重的端到端集成测试，保留纯净快速的完整单元测试套件（89 项用例秒级通过）。
 

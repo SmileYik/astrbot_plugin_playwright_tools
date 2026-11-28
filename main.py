@@ -8,7 +8,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
 
 PLUGIN_NAME = "astrbot_plugin_playwright_tools"
-__version__ = "v1.4.5"
+__version__ = "v1.5.0"
 
 from .api.audit_api import AuditApiHandler
 from .api.lifecycle_api import LifecycleApiHandler
@@ -68,17 +68,17 @@ class PlaywrightToolPlugin(Star):
         context_mode = str(rt_cfg.get("context_mode", self.config.get("context_mode", "personal")))
         idle_timeout = int(rt_cfg.get("idle_timeout_minutes", self.config.get("idle_timeout_minutes", 10)))
         browser_idle_timeout = int(rt_cfg.get("browser_idle_timeout_minutes", self.config.get("browser_idle_timeout_minutes", 5)))
-        tool_timeout = int(rt_cfg.get("tool_execution_timeout_seconds", self.config.get("tool_execution_timeout_seconds", 30)))
+        tool_timeout = int(rt_cfg.get("tool_execution_timeout_seconds", self.config.get("tool_execution_timeout_seconds", 45)))
         enable_close_tool = bool(rt_cfg.get("enable_close_tool", self.config.get("enable_close_tool", True)))
         self.system_prompt_injection = str(rt_cfg.get("system_prompt_injection", self.config.get("system_prompt_injection", ""))).strip()
         self.content_extraction_mode = str(rt_cfg.get("content_extraction_mode", self.config.get("content_extraction_mode", "inline_markdown"))).strip().lower()
-        self.page_chunk_char_limit = int(rt_cfg.get("page_chunk_char_limit", self.config.get("page_chunk_char_limit", 2000)))
+        self.page_chunk_char_limit = int(rt_cfg.get("page_chunk_char_limit", self.config.get("page_chunk_char_limit", 4000)))
 
         # 截图与多媒体
         screenshot_format = str(med_cfg.get("screenshot_format", self.config.get("screenshot_format", "png"))).lower()
         screenshot_quality = int(med_cfg.get("screenshot_quality", self.config.get("screenshot_quality", 80)))
         screenshot_max_height = int(med_cfg.get("screenshot_max_height_px", self.config.get("screenshot_max_height_px", 8000)))
-        screenshot_timeout = int(med_cfg.get("screenshot_timeout_seconds", self.config.get("screenshot_timeout_seconds", 15)))
+        screenshot_timeout = int(med_cfg.get("screenshot_timeout_seconds", self.config.get("screenshot_timeout_seconds", 20)))
         allow_screenshot_to_ai = bool(med_cfg.get("allow_screenshot_to_ai", self.config.get("allow_screenshot_to_ai", False)))
         element_multiline_separator = str(med_cfg.get("element_multiline_separator", self.config.get("element_multiline_separator", " | ")))
 
@@ -86,7 +86,7 @@ class PlaywrightToolPlugin(Star):
         self.download_save_path = str(store_cfg.get("download_save_path", self.config.get("download_save_path", "data/plugin_data/astrbot_plugin_playwright_tools/downloads")))
         self.screenshot_save_path = str(store_cfg.get("screenshot_save_path", self.config.get("screenshot_save_path", "data/plugin_data/astrbot_plugin_playwright_tools/screenshots")))
         file_retention_days = int(store_cfg.get("file_retention_days", self.config.get("file_retention_days", 7)))
-        retention_days = int(store_cfg.get("audit_retention_days", self.config.get("audit_retention_days", 30)))
+        retention_days = int(store_cfg.get("audit_retention_days", self.config.get("audit_retention_days", 14)))
         audit_max_output_chars = int(store_cfg.get("audit_max_output_chars", self.config.get("audit_max_output_chars", 0)))
         audit_save_screenshots = bool(store_cfg.get("audit_save_screenshots", self.config.get("audit_save_screenshots", True)))
 

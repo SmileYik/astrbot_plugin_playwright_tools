@@ -178,6 +178,7 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
         self._actions = {
             "open": self._action_open,
             "switch_tab": self._action_switch_tab,
+            "list_tabs": self._action_list_tabs,
             "dialog": self._action_dialog,
             "close": self._action_close,
         }
@@ -204,6 +205,13 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
             session_name=session_name, sender_name=sender_name
         )
 
+    async def _action_list_tabs(self, session_id: str, sender_id: str, session_name: str = "", sender_name: str = "", **kwargs) -> str:
+        return await _invoke_handler(
+            self.page_handler.list_tabs,
+            session_id, sender_id,
+            session_name=session_name, sender_name=sender_name
+        )
+
     async def _action_dialog(self, session_id: str, sender_id: str, session_name: str = "", sender_name: str = "", **kwargs) -> str:
         dialog_action = kwargs.get("dialog_action", "accept")
         prompt_text = kwargs.get("prompt_text")
@@ -226,7 +234,7 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
         action = kwargs.get("action")
         handler = self._actions.get(action)
         if not handler:
-            return f"未知的动作: {action}。支持的动作包括: open, switch_tab, dialog, close"
+            return f"未知的动作: {action}。支持的动作包括: open, switch_tab, list_tabs, dialog, close"
 
         res = await _execute_with_timeout(
             handler(session_id, sender_id, session_name=session_name, sender_name=sender_name, **kwargs),

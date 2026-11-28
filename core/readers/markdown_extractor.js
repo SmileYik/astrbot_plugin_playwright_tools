@@ -144,10 +144,40 @@
         return `[控件: ${text || tag}][${ref}]`;
     };
 
+    const ENDS_WITH_REF_RE = /\]\[@r[^\]]+\]\*{0,3}$/;
+    const STARTS_WITH_REF_RE = /^\*{0,3}!?\[[^\n]*\]\[@r[^\]]+\]/;
+
+    const collapseSpaces = (str) => {
+        if (!str) return '';
+        return str
+            .split('\n')
+            .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+            .join('\n');
+    };
+
+    const joinInlineParts = (parts) => {
+        let acc = '';
+        for (const part of parts) {
+            if (!part) continue;
+            if (!acc) {
+                acc = part;
+                continue;
+            }
+            const prevEndsSpace = /\s$/.test(acc);
+            const nextStartsSpace = /^\s/.test(part);
+            if (!prevEndsSpace && !nextStartsSpace && (ENDS_WITH_REF_RE.test(acc) || STARTS_WITH_REF_RE.test(part))) {
+                acc += ' ' + part;
+            } else {
+                acc += part;
+            }
+        }
+        return acc;
+    };
+
     const renderInline = (node) => {
         if (!node) return '';
         if (node.nodeType === 3) {
-            return node.nodeValue.replace(/[\r\n\t]+/g, ' ');
+            return node.nodeValue.replace(/\s+/g, ' ');
         }
         if (node.nodeType !== 1) return '';
         if (!isVisible(node) || noiseTags.has(node.tagName)) return '';
@@ -157,12 +187,15 @@
 
         if (isInteractive(node)) {
             let ref;
-            if (node.hasAttribute && node.hasAttribute('data-astr-ref')) {
-                ref = parseInt(node.getAttribute('data-astr-ref'));
+            const existingRef = node.hasAttribute && node.hasAttribute('data-astr-ref')
+                ? (node.getAttribute('data-astr-ref') || '').trim()
+                : '';
+            if (existingRef) {
+                ref = existingRef;
             } else {
-                ref = nextRef++;
+                ref = '@r' + (nextRef++);
                 allocatedCount++;
-                if (node.setAttribute) node.setAttribute('data-astr-ref', ref.toString());
+                if (node.setAttribute) node.setAttribute('data-astr-ref', ref);
             }
             return formatInteractive(node, ref);
         }
@@ -171,15 +204,15 @@
             return '`' + (node.textContent || '').trim() + '`';
         }
         if (tag === 'strong' || tag === 'b') {
-            const inner = Array.from(node.childNodes).map(renderInline).join('');
-            return inner.trim() ? `**${inner.trim()}**` : '';
+            const inner = joinInlineParts(Array.from(node.childNodes).map(renderInline)).trim();
+            return inner ? `**${inner}**` : '';
         }
         if (tag === 'em' || tag === 'i') {
-            const inner = Array.from(node.childNodes).map(renderInline).join('');
-            return inner.trim() ? `*${inner.trim()}*` : '';
+            const inner = joinInlineParts(Array.from(node.childNodes).map(renderInline)).trim();
+            return inner ? `*${inner}*` : '';
         }
 
-        return Array.from(node.childNodes).map(renderInline).join('');
+        return joinInlineParts(Array.from(node.childNodes).map(renderInline));
     };
 
     const isBlockTag = (tag) => {
@@ -206,7 +239,7 @@
 
         if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) {
             const level = parseInt(tag.charAt(1));
-            const text = renderInline(node).trim();
+            const text = collapseSpaces(renderInline(node));
             if (text) {
                 blocks.push('#'.repeat(level) + ' ' + text);
             }
@@ -214,13 +247,13 @@
         }
 
         if (tag === 'p') {
-            const text = renderInline(node).trim();
+            const text = collapseSpaces(renderInline(node));
             if (text) blocks.push(text);
             return;
         }
 
         if (tag === 'blockquote') {
-            const text = renderInline(node).trim();
+            const text = collapseSpaces(renderInline(node));
             if (text) blocks.push('> ' + text.replace(/\n/g, '\n> '));
             return;
         }
@@ -239,7 +272,7 @@
             const targetLis = lis.length > 0 ? lis : Array.from(node.querySelectorAll('li'));
             for (const li of targetLis) {
                 if (!isVisible(li)) continue;
-                const liText = renderInline(li).trim();
+                const liText = collapseSpaces(renderInline(li));
                 if (liText) {
                     items.push((isOl ? `${itemIdx++}. ` : '- ') + liText);
                 }
@@ -254,7 +287,7 @@
             const rows = Array.from(node.querySelectorAll('tr')).slice(0, 50);
             const tableLines = [];
             for (let r = 0; r < rows.length; r++) {
-                const cells = Array.from(rows[r].querySelectorAll('th, td')).map(c => renderInline(c).trim());
+                const cells = Array.from(rows[r].querySelectorAll('th, td')).map(c => collapseSpaces(renderInline(c)));
                 if (cells.length > 0) {
                     tableLines.push('| ' + cells.join(' | ') + ' |');
                     if (r === 0) {
@@ -274,7 +307,7 @@
         }
 
         if (isInteractive(node)) {
-            const text = renderInline(node).trim();
+            const text = collapseSpaces(renderInline(node));
             if (text) blocks.push(text);
             return;
         }
@@ -283,22 +316,22 @@
         const hasBlockChildren = children.some(c => isBlockOrContainer(c));
 
         if (!hasBlockChildren) {
-            const text = renderInline(node).trim();
+            const text = collapseSpaces(renderInline(node));
             if (text) blocks.push(text);
             return;
         }
 
         let inlineBuffer = [];
         const flushInline = () => {
-            const text = inlineBuffer.join('').trim();
+            const text = collapseSpaces(joinInlineParts(inlineBuffer));
             if (text) blocks.push(text);
             inlineBuffer = [];
         };
 
         for (const child of Array.from(node.childNodes)) {
             if (child.nodeType === 3) {
-                const val = child.nodeValue.replace(/[\r\n\t]+/g, ' ');
-                if (val.trim()) inlineBuffer.push(val);
+                const val = (child.nodeValue || '').replace(/\s+/g, ' ');
+                inlineBuffer.push(val);
             } else if (child.nodeType === 1) {
                 if (isBlockOrContainer(child)) {
                     flushInline();

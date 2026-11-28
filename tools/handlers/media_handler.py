@@ -352,10 +352,15 @@ class MediaHandler(BaseActionHandler):
 
         async def _download(ctx: BrowserSessionContext, page: Page) -> str:
             ref_str = str(ref).strip()
-            if ref not in ctx.ref_map and ref_str not in ctx.ref_map:
+            ref_map = ctx.get_page_state(page).ref_map
+            if ref not in ref_map and ref_str not in ref_map:
                 return f"下载失败: 无效的元素引用 [{ref}]"
 
-            if ref_str.startswith("e") or re.match(r"^(f\d+)?e\d+$", ref_str):
+            el_info = ref_map.get(ref_str) or ref_map.get(ref) or {}
+            aria_ref = el_info.get("aria_ref", "") if isinstance(el_info, dict) else ""
+            if aria_ref:
+                locator = page.locator(f"aria-ref={aria_ref}")
+            elif ref_str.startswith("e") or re.match(r"^(f\d+)?e\d+$", ref_str):
                 locator = page.locator(f"aria-ref={ref_str}")
             else:
                 locator = page.locator(f'[data-astr-ref="{ref_str}"]')

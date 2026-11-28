@@ -35,8 +35,28 @@ class InteractHandler(BaseActionHandler):
         )
 
     @staticmethod
-    def _get_locator(page: Page, ref: str | int) -> Locator:
-        """根据 Ref ID 自动选择定位策略：以 'e' 开头或 '(f\\d+)?e\\d+' 采用 'aria-ref=' 原生定位，其余采用 '[data-astr-ref=]'。"""
+    def _get_ref_info(ctx: BrowserSessionContext, page: Page, ref: str | int) -> tuple[bool, dict]:
+        """从指定页面的 PageState.ref_map 查询元素引用信息。"""
+        ref_str = str(ref).strip()
+        ref_map = ctx.get_page_state(page).ref_map
+        if ref_str in ref_map:
+            info = ref_map[ref_str]
+            return True, info if isinstance(info, dict) else {}
+        if ref in ref_map:
+            info = ref_map[ref]
+            return True, info if isinstance(info, dict) else {}
+        return False, {}
+
+    @staticmethod
+    def _mark_page_dirty(ctx: BrowserSessionContext, page: Page) -> None:
+        """仅将当前操作页面的快照标记为脏。"""
+        ctx.get_page_state(page).is_snapshot_dirty = True
+
+    @staticmethod
+    def _get_locator(page: Page, ref: str | int, el_info: dict | None = None) -> Locator:
+        """根据 Ref ID 及元素信息自动选择定位策略：优先使用 aria_ref，其余按格式采用 'aria-ref=' 或 '[data-astr-ref=]'。"""
+        if isinstance(el_info, dict) and el_info.get("aria_ref"):
+            return page.locator(f"aria-ref={el_info['aria_ref']}")
         ref_str = str(ref).strip()
         if ref_str.startswith("e") or re.match(r"^(f\d+)?e\d+$", ref_str):
             return page.locator(f"aria-ref={ref_str}")
@@ -53,17 +73,16 @@ class InteractHandler(BaseActionHandler):
         """点击目标元素。"""
 
         async def _click(ctx: BrowserSessionContext, page: Page) -> str:
-            ref_str = str(ref).strip()
-            if ref not in ctx.ref_map and ref_str not in ctx.ref_map:
+            found, el_info = self._get_ref_info(ctx, page, ref)
+            if not found:
                 return f"点击失败: 无效的元素引用 [{ref}]。页面可能已刷新，请先调用 pw_read() 查看最新元素。"
 
-            el_info = ctx.ref_map.get(ref) or ctx.ref_map.get(ref_str) or {}
-            tag = el_info.get("tag", "") if isinstance(el_info, dict) else ""
-            text = el_info.get("text", "") if isinstance(el_info, dict) else ""
+            tag = el_info.get("tag", "")
+            text = el_info.get("text", "")
 
-            locator = self._get_locator(page, ref)
+            locator = self._get_locator(page, ref, el_info)
             await locator.click(timeout=10000)
-            ctx.is_snapshot_dirty = True
+            self._mark_page_dirty(ctx, page)
 
             dialog_info = ""
             if ctx.last_dialog_message:
@@ -102,16 +121,13 @@ class InteractHandler(BaseActionHandler):
         """在表单输入框中填入指定内容。"""
 
         async def _fill(ctx: BrowserSessionContext, page: Page) -> str:
-            ref_str = str(ref).strip()
-            if ref not in ctx.ref_map and ref_str not in ctx.ref_map:
+            found, el_info = self._get_ref_info(ctx, page, ref)
+            if not found:
                 return f"填写失败: 无效的元素引用 [{ref}]"
 
-            el_info = ctx.ref_map.get(ref) or ctx.ref_map.get(ref_str) or {}
-            is_pwd = False
-            if isinstance(el_info, dict) and el_info.get("type") == "password":
-                is_pwd = True
+            is_pwd = el_info.get("type") == "password"
 
-            locator = self._get_locator(page, ref)
+            locator = self._get_locator(page, ref, el_info)
             if not is_pwd and hasattr(locator, "get_attribute"):
                 try:
                     attr_val = locator.get_attribute("type")
@@ -123,7 +139,7 @@ class InteractHandler(BaseActionHandler):
                     logger.debug(f"[InteractHandler] 探测输入框 password 属性异常: {e}")
 
             await locator.fill(str(text), timeout=10000)
-            ctx.is_snapshot_dirty = True
+            self._mark_page_dirty(ctx, page)
 
             box_type = "密码输入框" if is_pwd else "输入框"
             return (
@@ -156,17 +172,17 @@ class InteractHandler(BaseActionHandler):
         """在下拉选择框中选取指定的值。"""
 
         async def _select(ctx: BrowserSessionContext, page: Page) -> str:
-            ref_str = str(ref).strip()
-            if ref not in ctx.ref_map and ref_str not in ctx.ref_map:
+            found, el_info = self._get_ref_info(ctx, page, ref)
+            if not found:
                 return f"选择失败: 无效的元素引用 [{ref}]"
 
-            locator = self._get_locator(page, ref)
+            locator = self._get_locator(page, ref, el_info)
             try:
                 await locator.select_option(value=value, timeout=5000)
             except Exception as e:
                 logger.debug(f"[InteractHandler] 下拉框按 value 选取失败，尝试按 label 选取: {e}")
                 await locator.select_option(label=value, timeout=5000)
-            ctx.is_snapshot_dirty = True
+            self._mark_page_dirty(ctx, page)
 
             return f"已在下拉框 [{ref}] 成功选取 '{value}'。"
 
@@ -194,11 +210,11 @@ class InteractHandler(BaseActionHandler):
         """将鼠标悬停在目标元素上。"""
 
         async def _hover(ctx: BrowserSessionContext, page: Page) -> str:
-            ref_str = str(ref).strip()
-            if ref not in ctx.ref_map and ref_str not in ctx.ref_map:
+            found, el_info = self._get_ref_info(ctx, page, ref)
+            if not found:
                 return f"悬停失败: 无效的元素引用 [{ref}]"
 
-            locator = self._get_locator(page, ref)
+            locator = self._get_locator(page, ref, el_info)
             await locator.hover(timeout=10000)
             return f"已成功悬停在元素 [{ref}] 上。"
 
@@ -226,11 +242,11 @@ class InteractHandler(BaseActionHandler):
         """将焦点聚集到目标元素。"""
 
         async def _focus(ctx: BrowserSessionContext, page: Page) -> str:
-            ref_str = str(ref).strip()
-            if ref not in ctx.ref_map and ref_str not in ctx.ref_map:
+            found, el_info = self._get_ref_info(ctx, page, ref)
+            if not found:
                 return f"聚焦失败: 无效的元素引用 [{ref}]"
 
-            locator = self._get_locator(page, ref)
+            locator = self._get_locator(page, ref, el_info)
             await locator.focus(timeout=10000)
             return f"已聚焦到元素 [{ref}]。"
 
@@ -258,11 +274,11 @@ class InteractHandler(BaseActionHandler):
         """使目标元素失去焦点。"""
 
         async def _blur(ctx: BrowserSessionContext, page: Page) -> str:
-            ref_str = str(ref).strip()
-            if ref not in ctx.ref_map and ref_str not in ctx.ref_map:
+            found, el_info = self._get_ref_info(ctx, page, ref)
+            if not found:
                 return f"失焦失败: 无效的元素引用 [{ref}]"
 
-            locator = self._get_locator(page, ref)
+            locator = self._get_locator(page, ref, el_info)
             await locator.evaluate("el => el.blur()")
             return f"元素 [{ref}] 已失焦。"
 
@@ -291,17 +307,17 @@ class InteractHandler(BaseActionHandler):
         """将源元素拖拽至目标元素位置。"""
 
         async def _drag(ctx: BrowserSessionContext, page: Page) -> str:
-            ref_str = str(ref).strip()
-            target_ref_str = str(target_ref).strip()
-            if ref not in ctx.ref_map and ref_str not in ctx.ref_map:
+            found_src, src_info = self._get_ref_info(ctx, page, ref)
+            if not found_src:
                 return f"拖拽失败: 无效的源元素引用 [{ref}]"
-            if target_ref not in ctx.ref_map and target_ref_str not in ctx.ref_map:
+            found_tgt, tgt_info = self._get_ref_info(ctx, page, target_ref)
+            if not found_tgt:
                 return f"拖拽失败: 无效的拖拽目标元素引用 [{target_ref}]"
 
-            source = self._get_locator(page, ref)
-            target = self._get_locator(page, target_ref)
+            source = self._get_locator(page, ref, src_info)
+            target = self._get_locator(page, target_ref, tgt_info)
             await source.drag_to(target, timeout=10000)
-            ctx.is_snapshot_dirty = True
+            self._mark_page_dirty(ctx, page)
 
             return f"已成功将元素 [{ref}] 拖拽至 [{target_ref}] 位置。"
 
@@ -333,7 +349,7 @@ class InteractHandler(BaseActionHandler):
 
         async def _press(ctx: BrowserSessionContext, page: Page) -> str:
             await page.keyboard.press(key_name)
-            ctx.is_snapshot_dirty = True
+            self._mark_page_dirty(ctx, page)
             return f"已成功向页面发送按键 '{key_name}'。"
 
         return await self.execute_action(

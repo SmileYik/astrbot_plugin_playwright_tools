@@ -93,11 +93,15 @@ class PageHandler(BaseActionHandler):
                 logger.debug(f"[PageHandler] 打开页面后提取标题异常: {e}")
                 title = ""
 
-            ctx.current_snapshot = None
-            ctx.is_snapshot_dirty = True
-            ctx.ref_map = {}
+            ctx.clear_page_state(page, reset_snapshot=True)
 
-            return f"已成功打开网页: {url} (标题: {title})。\n[推荐操作: 请调用 pw_read() 查看页面内容与可操作元素]"
+            alive_pages = self._get_alive_pages(ctx)
+            total_tabs = len(alive_pages)
+            tab_pos = (alive_pages.index(page) + 1) if page in alive_pages else 1
+            return (
+                f"已成功打开网页: {url} (标题: {title})。当前位于第 {tab_pos}/{total_tabs} 个标签页。\n"
+                f"[推荐操作: 请调用 pw_read() 查看页面内容与可操作元素]"
+            )
 
         return await self.execute_action(
             session_id=session_id,
@@ -132,14 +136,15 @@ class PageHandler(BaseActionHandler):
             current_url = getattr(cur_page, "url", "")
             await self.wait_page_stable(cur_page)
 
-            snapshot_ts = getattr(ctx.current_snapshot, "timestamp", 0) or 0
-            snapshot_url = getattr(ctx.current_snapshot, "url", "") or ""
+            page_state = ctx.get_page_state(cur_page)
+            snapshot_ts = getattr(page_state.current_snapshot, "timestamp", 0) or 0
+            snapshot_url = getattr(page_state.current_snapshot, "url", "") or ""
             is_expired = (time.time() - snapshot_ts) > 60
             url_changed = current_url != snapshot_url
 
             if (
-                ctx.current_snapshot is None
-                or ctx.is_snapshot_dirty
+                page_state.current_snapshot is None
+                or page_state.is_snapshot_dirty
                 or url_changed
                 or is_expired
                 or refresh
@@ -159,9 +164,9 @@ class PageHandler(BaseActionHandler):
                         except TypeError:
                             snapshot = await self.reader.extract_snapshot(cur_page)
 
-                    ctx.current_snapshot = snapshot
-                    ctx.ref_map = getattr(snapshot, "ref_map", {})
-                    ctx.is_snapshot_dirty = False
+                    page_state.current_snapshot = snapshot
+                    page_state.ref_map = getattr(snapshot, "ref_map", {})
+                    page_state.is_snapshot_dirty = False
                     allocated = getattr(snapshot, "allocated_count", 0) or 0
                     next_ref = (start_ref + allocated) % 1_000_000
                     if next_ref == 0:
@@ -170,7 +175,7 @@ class PageHandler(BaseActionHandler):
 
             clean_ref = str(ref or kwargs.get("ref") or "").strip()
             if clean_ref:
-                ref_map = getattr(ctx, "ref_map", {}) or getattr(ctx.current_snapshot, "ref_map", {}) or {}
+                ref_map = page_state.ref_map or getattr(page_state.current_snapshot, "ref_map", {}) or {}
                 el = ref_map.get(clean_ref)
                 if not el:
                     return f"未在当前快照中找到 Ref ID 为 '{clean_ref}' 的元素。请确认编号是否正确，或调用 pw_read(refresh=True) 刷新快照。"
@@ -227,9 +232,9 @@ class PageHandler(BaseActionHandler):
                 return "\n".join(lines)
 
             if keyword and str(keyword).strip():
-                return self.reader.search(ctx.current_snapshot, str(keyword).strip())
+                return self.reader.search(page_state.current_snapshot, str(keyword).strip())
             else:
-                return self.reader.format_chunk(ctx.current_snapshot, page)
+                return self.reader.format_chunk(page_state.current_snapshot, page)
 
         read_input_args = {
             "page": page,
@@ -263,16 +268,13 @@ class PageHandler(BaseActionHandler):
         """切换当前控制的浏览器标签页。"""
 
         async def _switch(ctx: BrowserSessionContext, page: Page) -> str:
-            pages = getattr(ctx.browser_context, "pages", None) or getattr(ctx, "pages", [])
+            pages = self._get_alive_pages(ctx)
             if tab_index < 1 or tab_index > len(pages):
-                return f"切换失败: 标签页索引 {tab_index} 超出范围 (当前共有 {len(pages)} 个标签页)"
+                return f"切换失败: 标签页索引 {tab_index} 超出范围 (当前共有 {len(pages)} 个标签页，可调用 pw_page(action='list_tabs') 查看全部标签页)"
 
-            ctx.current_page = pages[tab_index - 1]
-            ctx.pages = pages
-            ctx.ref_map = {}
-            ctx.current_snapshot = None
-            ctx.is_snapshot_dirty = True
-            return f"已成功切换至标签页 {tab_index} (URL: {ctx.current_page.url})。\n[推荐操作: 请调用 pw_read() 查看页面内容与可操作元素]"
+            target_page = pages[tab_index - 1]
+            await ctx.activate_page(target_page)
+            return f"已成功切换至标签页 {tab_index}/{len(pages)} (URL: {ctx.current_page.url})。\n[推荐操作: 请调用 pw_read() 查看页面内容与可操作元素]"
 
         return await self.execute_action(
             session_id=session_id,
@@ -284,6 +286,43 @@ class PageHandler(BaseActionHandler):
             session_name=session_name,
             sender_name=sender_name,
             action_desc="切换",
+        )
+
+    async def list_tabs(
+        self,
+        session_id: str,
+        sender_id: str,
+        session_name: str = "",
+        sender_name: str = "",
+    ) -> str:
+        """列出当前上下文所有已打开的标签页及当前活动标签页。"""
+
+        async def _list(ctx: BrowserSessionContext, page: Page) -> str:
+            pages = self._get_alive_pages(ctx)
+            if not pages:
+                return "当前浏览器上下文没有已打开的标签页。"
+
+            active_page = getattr(ctx, "current_page", None)
+            active_idx = (pages.index(active_page) + 1) if active_page in pages else 0
+            lines = [f"当前共 {len(pages)} 个标签页（当前活动: 第 {active_idx} 个）："]
+            for i, p in enumerate(pages, start=1):
+                marker = "[当前活动]" if p is active_page else "[ ]"
+                title = await self._safe_page_title(p) or "(无标题)"
+                url = str(getattr(p, "url", "") or "").strip() or "(空白页)"
+                lines.append(f"{i}. {marker} {title} - {url}")
+            lines.append("[推荐操作: 如需切换请调用 pw_page(action='switch_tab', tab_index=序号)，或直接操作已有标签页的 Ref ID]")
+            return "\n".join(lines)
+
+        return await self.execute_action(
+            session_id=session_id,
+            sender_id=sender_id,
+            action_name="list_tabs",
+            target_resource="",
+            action_coro_fn=_list,
+            input_args={},
+            session_name=session_name,
+            sender_name=sender_name,
+            action_desc="查看",
         )
 
     async def handle_dialog(

@@ -80,13 +80,14 @@ flowchart TD
 - **`PlaywrightAdapter`**: 封装 Playwright 原生驱动（Chromium / Firefox / WebKit / Custom），支持自定义二进制路径，负责底层进程生命周期。
 
 ### 1.2 核心服务与提炼层 (`core/`, `core/readers/`)
-- **`ContextManager`**: 管理多租户 `BrowserSessionContext` 实例。负责个人模式与会话模式的上下文隔离路由、协作者授权、Cookie 注入、空闲定时回收、维护单调递增的 Ref 编号计数器，并在创建上下文异常时自动执行回滚清理。同时负责底层浏览器进程生命周期的智能空闲回收（无活跃上下文超过 `browser_idle_timeout_minutes` 自动关闭底层驱动）、崩溃失联事件（`disconnected`）感知自愈，以及在插件终止时通过并发 5.0 秒总超时熔断机制批量注销存量上下文。
-- **`SecurityManager`**: 权限与白名单守卫。执行域名通配符匹配（如 `*.bing.com`）、12 项原子动作权限细粒度校验，在页面创建和路由阶段拦截未授权顶层跳转、弹出新窗口与 iframe 导航，同时对放行网页自动保留内部第三方静态资源的正常加载。
+- **`ContextManager`**: 管理多租户 `BrowserSessionContext` 实例。负责个人模式与会话模式的上下文隔离路由、协作者授权、Cookie 注入、空闲定时回收、按标签页隔离维护 `PageState`（`ref_map`、`current_snapshot`、`is_snapshot_dirty`）及跨标签页 `ref_id` 自动寻址与激活，并维护上下文级单调递增的 Ref 编号计数器；在创建上下文异常时自动执行回滚清理。同时负责底层浏览器进程生命周期的智能空闲回收（无活跃上下文超过 `browser_idle_timeout_minutes` 自动关闭底层驱动）、崩溃失联事件（`disconnected`）感知自愈，以及在插件终止时通过并发 5.0 秒总超时熔断机制批量注销存量上下文。
+- **`SecurityManager`**: 权限与白名单守卫。执行基于域名精确度优先的白名单规则匹配（精确域名优先于深层通配及浅层通配）、12 项原子动作权限细粒度校验，以及单跳放行策略解析。
+- **`NavigationGuard`** (`core/navigation_guard.py`): 独立的顶层导航路由守卫与单跳授权状态管理器。从 `ContextManager` 解耦而出，负责挂载 `BrowserContext` 路由拦截与页面/弹窗监听，维护标签页（`Page`）粒度的 `SingleHopGrant` 状态，区分页面内点击/弹窗单跳、HTTP 重定向链以及 AI 主动 `open_url` 导航。
 - **`AuditLogger`**: SQLite 审计记录器。异步记录全量调用（起止时间、会话、上下文、目标域名、入参与结果），并在初始化与周期轮询中自动清理超期数据。
 - **`HistoryCleaner`**: 上下文历史清理器。基于高低双水位线在请求发送前自动消减已产生的工具调用记录，支持直接清理与副 AI 紧凑事实摘要压缩，配合 `AuditLogger` 实现工具调用与生命周期双重审计落盘。
 - **`readers/`（双阅读提炼器）**:
-  - **`InlineMarkdownReader`**: 将网页标题、段落、列表、表格、图片及带 Ref ID 的控件融合成语义清晰的 Markdown 文档；底层 DOM 提炼逻辑与 Python 完全解耦（独立为 `core/readers/markdown_extractor.js`），内联控件排版全面采用原生 Markdown 引用脚注风格（`[文本][Ref]`、`![图片: 描述][Ref]`），显著精简元素语法骨架并在密集链接区减少约 30% 字符冗余；引入表格感知智能分页，表格跨页时在后续切片首部自动补齐表头行与分隔行，并配合行级/切片级微切分兜底，确保单页总字符严格受控于 `page_chunk_char_limit` 预算。
-  - **`AriaSnapshotReader`**: 原生调用 Playwright 官方 `page.locator(':root').aria_snapshot(mode='ai')` 生成标准化无障碍树快照，过滤并剥离 `- /url: <url>` 子行与末尾多余冒号，对超链接无障碍名称本身为 URL 的情况自动化简为 `link [ref=...]`；并发拉取图片元素的真实 `src` 并关联父级嵌套超链接，产出与 Markdown 模式完全对齐的标准 `ref_map` 契约，原生支持 `pw_read(ref=...)` 结构化查询。
+  - **`InlineMarkdownReader`**: 将网页标题、段落、列表、表格、图片及带 Ref ID 的控件融合成语义清晰的 Markdown 文档；底层 DOM 提炼逻辑与 Python 独立解耦（位于 `core/readers/markdown_extractor.js`），内联控件排版采用原生 Markdown 引用脚注风格（`[文本][Ref]`、`![图片: 描述][Ref]`），精简元素语法骨架并在密集链接区减少约 30% 字符冗余；引入表格感知智能分页，表格跨页时在后续切片首部自动补齐表头行与分隔行，并配合行级/切片级微切分兜底，确保单页总字符受控于 `page_chunk_char_limit` 预算。
+  - **`AriaSnapshotReader`**: 原生调用 Playwright 官方 `page.locator(':root').aria_snapshot(mode='ai')` 生成标准化无障碍树快照，过滤并剥离 `- /url: <url>` 子行与末尾多余冒号，对超链接无障碍名称本身为 URL 的情况自动化简为 `link [ref=...]`；并发拉取图片元素的真实 `src` 并关联父级嵌套超链接，并按 `start_ref` 将原生 `aria-ref` 重映射为全局单调递增数字 `ref_id`（在 `ref_map` 中保留原始 `aria_ref` 字段），原生支持 `pw_read(ref=...)` 结构化查询。
 
 ### 1.3 处理器层 (`tools/handlers/`)
 - **`BaseActionHandler`**: 动作执行切面基类。通过模板方法 `execute_action()` 统一收敛核心横切逻辑：
@@ -103,6 +104,10 @@ flowchart TD
 ### 1.4 门面分发层 (`tools/tools.py`, `tools/schemas.py`)
 - **`PwPageTool` / `PwReadTool` / `PwInteractTool` / `PwMediaTool`**: 继承 `FunctionTool[AstrAgentContext]` 的类型化工具门面，面向大模型暴露四大独立复合工具。
 - 每个工具在初始化时维护 `_actions` 字典映射，统一采用字符串格式 Ref ID 参数；`call()` 统一设计为标准协程，并通过 `_execute_with_timeout` 施加全局单工具超时保护。
+- **`pw_page` 标签页管理**：提供 `open`、`switch_tab`、`list_tabs`、`dialog`、`close` 动作；`list_tabs` 返回当前活动页标识及所有存活标签页的序号、标题与链接。
+- **统一回复引导切面 (`BaseActionHandler`)**：
+  - 鉴权失败时汇总 `SecurityManager.get_allowed_actions` 与 `NavigationGuard` 单跳授权，将当前页实际可执行的动作映射为具体 `pw_*` 工具调用指引（无可用权限时提示调用 `pw_page(action='list_tabs')` 或 `open`）。
+  - 执行前后自动对比存活标签页与活动页，检测到新开标签页或活动页切换时在返回末尾附带 `[标签页通知: ...]`。
 - 在发送聊天截图时，使用异步方法交付，避免后续文本消息覆盖聊天界面图片。
 
 ### 1.5 可视化视图与 Web API 层 (`views/browser/`, `web-src/`, `main.py`, `api/`)
@@ -132,10 +137,10 @@ Session S1 ──> All Users share Context (Owner: S1)
 
 ## 3. 元素定位与交互可靠性
 
-- **Ref ID 字符串化与单调递增**：所有工具入参（`ref`、`target_ref`）、上下文 `ref_map` 均统一采用字符串类型。Markdown 模式采用单调递增计数器（递增上限 1,000,000 后安全回滚至 0），避免历史 Ref ID 冲突。
+- **按页隔离与单调递增 Ref ID**：所有工具入参（`ref`、`target_ref`）及每页 `PageState.ref_map` 均统一采用字符串类型。上下文维护单调递增计数器（达到 `1,000,000` 后回滚为 `1`），确保多标签页之间 `ref_id` 互不冲突；调用带 `ref` 的工具时由 `BaseActionHandler` 通过 `resolve_ref` 自动定位所属标签页并激活为当前活动页。
 - **双定位器策略**：
-  - **ARIA 快照模式**：当 Ref ID 为官方格式标识（如 `e1`）或由 ARIA 模式生成时，使用 Playwright 原生选择器 `page.locator(f"aria-ref={ref}")` 执行定位。
-  - **内联 Markdown 模式**：当 Ref ID 为数字编号（如 `'1'`）时，使用 `page.locator(f'[data-astr-ref="{ref}"]')` 执行定位。
+  - **ARIA 快照模式**：对外输出全局单调递增数字 `ref_id`，并在 `ref_map` 条目中保存原始 `aria_ref`（如 `e1`），底层使用 Playwright 原生选择器 `page.locator(f"aria-ref={aria_ref}")` 执行定位。
+  - **内联 Markdown 模式**：当 Ref ID 为 `@r` 前缀编号（如 `'@r1'`）时，使用 `page.locator(f'[data-astr-ref="{ref}"]')` 执行定位；提取阶段会对文本节点连续空白进行压缩，并在交互控件边界插入空格分隔，减少元素粘连。
   - 两种方式均基于 Playwright 原生 Locator 体系，享有框架自带的可操作性检查与受控组件事件分发。
 - **全链路密码安全脱敏**：表单填入敏感信息时，根据元素属性探测 `type == 'password'`，开启配置后在审计记录、调用日志与大模型返回结果中均将敏感密码值替换为 `******`，防止凭据泄露。
 
@@ -147,7 +152,7 @@ Session S1 ──> All Users share Context (Owner: S1)
   1. 等待 `domcontentloaded`（超时 10s）；
   2. 执行 `networkidle` 限时守卫（1.5s 超时熔断）。针对长轮询、WebSocket 或媒体流持续产生网络请求的现代网页，超时后平滑降级放行，避免流程卡死。
 - **四重快照失效机制**：
-  1. **路由导航监听**：监听主 Frame 的 `framenavigated` 事件，一旦主页面发生跳转，立即将上下文标记为 `is_snapshot_dirty = True` 并清空旧快照与 `ref_map`；
+  1. **路由导航与页面关闭监听**：监听主 Frame 的 `framenavigated` 事件，仅重置发生跳转的那个 `Page` 对应的 `PageState`（清空其 `ref_map`、`current_snapshot` 并标记 `is_snapshot_dirty = True`）；页面 `close` 时移除对应 `PageState` 并在必要时回退 `current_page`；
   2. **URL 状态比对**：在 `read_page` 提炼前，比对当前 `page.url` 与快照 URL，若不一致则标记脏并重置；
   3. **交互状态脏标记**：在 `InteractHandler` 中执行任何具有副作用的交互操作后，将 `ctx.is_snapshot_dirty = True`；
   4. **TTL 时效衰减**：快照记录生成时间戳 `timestamp`，超过 60 秒有效期后自动失效重新提取。

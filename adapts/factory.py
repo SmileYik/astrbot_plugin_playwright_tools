@@ -18,7 +18,7 @@ class AdapterFactory:
         headless = bool(browser_cfg.get("browser_headless", True))
         user_agent = str(browser_cfg.get("browser_user_agent", "") or "")
         window_width = int(browser_cfg.get("browser_window_width", 1280))
-        window_height = int(browser_cfg.get("browser_window_height", 720))
+        window_height = int(browser_cfg.get("browser_window_height", 800))
         browser_executable_path = str(
             browser_cfg.get("browser_executable_path", "") or ""
         ).strip()
