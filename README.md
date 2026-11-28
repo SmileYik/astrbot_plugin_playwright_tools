@@ -48,15 +48,10 @@
 
 本插件提供两个发布分支，功能差异仅在于是否包含“长对话 Token 自动消减 (`HistoryCleaner`)”模块：
 
-| 安装来源 | 对应分支 | 功能说明 |
-|---|---|---|
-| **AstrBot 官方插件市场** | `release-market` | 不包含 `core/history_cleaner.py`，启动时自动降级关闭历史压缩功能，保留其余全部浏览器自动化能力与网页工具 |
-| **GitHub 仓库安装** | `release` | 完整功能版本，包含 `HistoryCleaner` 长对话 Token 自动消减与副 AI 摘要压缩 |
-
-```bash
-# 从 GitHub 安装完整版（release 分支）
-git clone -b release https://github.com/SmileYik/astrbot_plugin_playwright_tools.git
-```
+| 安装来源 | 对应分支 | 安装方式 | 功能说明 |
+|---|---|---|---|
+| **AstrBot 官方插件市场** | `release-market` | 在 AstrBot 管理后台的商店市场中直接搜索 `PlaywrightTool` 安装 | 不包含 `core/history_cleaner.py`，启动时自动降级关闭历史压缩功能，保留其余全部浏览器自动化能力与网页工具 |
+| **GitHub 仓库安装** | `release` | 在 AstrBot 管理后台点击插件页面右下角的 **+** 按钮，选择“从链接安装”，填入 `https://github.com/SmileYik/astrbot_plugin_playwright_tools/tree/release` | 完整功能版本，包含 `HistoryCleaner` 长对话 Token 自动消减与副 AI 摘要压缩 |
 
 > **⚠️ 关于“长对话 Token 自动消减”功能的影响声明**  
 > 本插件的 `HistoryCleaner`（位于 `core/history_cleaner.py`）会在工具执行前直接原地改写大模型上下文（`run_context.messages`）中的历史 `tool` 消息内容（将其替换为占位符或副 AI 生成的摘要）。  
@@ -69,19 +64,19 @@ git clone -b release https://github.com/SmileYik/astrbot_plugin_playwright_tools
 - playwright v1.62.0
 
 ### 3. 依赖安装
-推荐安装具备反反爬指纹伪装的 Camoufox 驱动：
+AstrBot 在安装插件时会自动安装 `requirements.txt` 中的 Python 依赖，但浏览器内核实例仍需手动拉取。
+
+推荐在 AstrBot 对应的 Python 环境中拉取具备反反爬指纹伪装的 Camoufox 浏览器实例：
 
 ```bash
-pip install "camoufox[geoip]"
 camoufox fetch
 ```
 
-可以前往文档查看 [Camoufox](https://camoufox.com/python/installation/) 的更多安装信息。
+可以前往文档查看 [Camoufox](https://camoufox.com/python/installation/) 的更多安装信息（若手动部署环境未自动安装依赖，可执行 `pip install "camoufox[geoip]"`）。
 
-若使用原生 Playwright 引擎（Chromium / Firefox / WebKit）：
+若使用原生 Playwright 引擎（Chromium / Firefox / WebKit），则拉取对应浏览器内核：
 
 ```bash
-pip install playwright
 playwright install chromium
 ```
 
