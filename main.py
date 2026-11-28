@@ -8,7 +8,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
 
 PLUGIN_NAME = "astrbot_plugin_playwright_tools"
-__version__ = "v1.5.0"
+__version__ = "v1.6.0"
 
 from .api.audit_api import AuditApiHandler
 from .api.lifecycle_api import LifecycleApiHandler
@@ -79,7 +79,7 @@ class PlaywrightToolPlugin(Star):
         screenshot_quality = int(med_cfg.get("screenshot_quality", self.config.get("screenshot_quality", 80)))
         screenshot_max_height = int(med_cfg.get("screenshot_max_height_px", self.config.get("screenshot_max_height_px", 8000)))
         screenshot_timeout = int(med_cfg.get("screenshot_timeout_seconds", self.config.get("screenshot_timeout_seconds", 20)))
-        allow_screenshot_to_ai = bool(med_cfg.get("allow_screenshot_to_ai", self.config.get("allow_screenshot_to_ai", False)))
+        allow_image_to_ai = bool(med_cfg.get("allow_image_to_ai", self.config.get("allow_image_to_ai", False)))
         element_multiline_separator = str(med_cfg.get("element_multiline_separator", self.config.get("element_multiline_separator", " | ")))
 
         # 存储与审计
@@ -133,7 +133,7 @@ class PlaywrightToolPlugin(Star):
             reader=self.reader,
             enable_close_tool=enable_close_tool,
             mask_password_inputs=self.mask_password_inputs,
-            allow_image_to_ai=allow_screenshot_to_ai,
+            allow_image_to_ai=allow_image_to_ai,
             audit_save_screenshots=audit_save_screenshots,
             commit_timeout_ms=max(5000, (tool_timeout - 5) * 1000),
         )
@@ -147,7 +147,7 @@ class PlaywrightToolPlugin(Star):
             self.context_manager,
             self.security_manager,
             self.audit_logger,
-            allow_screenshot_to_ai=allow_screenshot_to_ai,
+            allow_image_to_ai=allow_image_to_ai,
             download_dir=self.download_save_path,
             audit_save_screenshots=audit_save_screenshots,
             screenshot_format=screenshot_format,

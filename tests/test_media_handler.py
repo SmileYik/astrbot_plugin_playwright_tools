@@ -65,7 +65,7 @@ class TestMediaHandler(unittest.TestCase):
             self.mock_mgr,
             self.mock_sec,
             self.mock_audit,
-            allow_screenshot_to_ai=True,
+            allow_image_to_ai=True,
             download_dir=str(TEMP_DIR / "downloads"),
             screenshot_dir=str(TEMP_DIR / "screenshots"),
             audit_screenshots_dir=str(TEMP_DIR / "audit_screenshots"),
@@ -98,7 +98,7 @@ class TestMediaHandler(unittest.TestCase):
             self.mock_mgr,
             self.mock_sec,
             self.mock_audit,
-            allow_screenshot_to_ai=False,
+            allow_image_to_ai=False,
             download_dir=str(TEMP_DIR / "downloads")
         )
         res = run_coro(handler_no_ai.screenshot_viewport("s1", "u1", target="ai"))
@@ -315,7 +315,7 @@ class TestMediaHandler(unittest.TestCase):
             self.mock_mgr,
             self.mock_sec,
             self.mock_audit,
-            allow_screenshot_to_ai=True,
+            allow_image_to_ai=True,
             audit_screenshots_dir=str(TEMP_DIR / "audit_screenshots"),
             screenshot_format="jpg",
             screenshot_quality=75,

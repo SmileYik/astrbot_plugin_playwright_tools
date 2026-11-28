@@ -88,7 +88,7 @@ class TestPluginMain(unittest.TestCase):
             meta = yaml.safe_load(f)
         self.assertEqual(meta["name"], "astrbot_plugin_playwright_tools")
         self.assertEqual(meta["display_name"], "PlaywrightTool")
-        self.assertEqual(meta["version"], "v1.5.0")
+        self.assertEqual(meta["version"], "v1.6.0")
 
     def test_conf_schema_v2_fields(self):
         with open("_conf_schema.json", "r", encoding="utf-8") as f:
@@ -690,7 +690,7 @@ class TestPluginMain(unittest.TestCase):
             mock_ctx,
             config={
                 "audit_db_path": db_file,
-                "media": {"allow_screenshot_to_ai": True},
+                "media": {"allow_image_to_ai": True},
                 "runtime": {"tool_execution_timeout_seconds": 30},
             },
         )

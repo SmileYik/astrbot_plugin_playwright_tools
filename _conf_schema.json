@@ -385,7 +385,7 @@
           "step": 1
         }
       },
-      "allow_screenshot_to_ai": {
+      "allow_image_to_ai": {
         "type": "bool",
         "description": "允许 AI 直接查看图片",
         "hint": "开启后视为多模态 AI，访问图片链接或执行 target='ai' 截图时将直接把图片发送给 AI 进行视觉分析；关闭时仅返回文本描述或元信息",
