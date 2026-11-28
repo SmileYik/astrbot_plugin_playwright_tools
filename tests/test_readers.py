@@ -1,4 +1,6 @@
+import json
 import os
+import subprocess
 import sys
 import unittest
 from unittest.mock import AsyncMock, MagicMock
@@ -40,7 +42,7 @@ class TestInlineMarkdownReader(unittest.IsolatedAsyncioTestCase):
         script = reader.get_js_extractor_script()
         self.assertNotIn("replace(/[\r", script)
         self.assertNotIn("replace(/[\n", script)
-        self.assertIn(r"replace(/[\r\n\t]+/g, ' ')", script)
+        self.assertIn(r"replace(/\s+/g, ' ')", script)
 
     def test_semantic_block_chunking_preserves_elements(self):
         reader = InlineMarkdownReader(chunk_char_limit=150, mask_passwords=True)
@@ -214,10 +216,10 @@ class TestInlineMarkdownReader(unittest.IsolatedAsyncioTestCase):
                 "blocks": [
                     "# 控制台",
                     "欢迎来到管理后台。",
-                    "- [按钮: 退出登录][1]",
+                    "- [按钮: 退出登录][@r1]",
                 ],
                 "elements": [
-                    {"ref": 1, "tag": "button", "text": "退出登录"},
+                    {"ref": "@r1", "tag": "button", "text": "退出登录"},
                 ],
             }
 
@@ -229,9 +231,9 @@ class TestInlineMarkdownReader(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot.url, "https://example.com/dashboard")
         self.assertEqual(len(snapshot.chunks), 1)
         self.assertEqual(snapshot.total_pages, 1)
-        self.assertIn("1", snapshot.ref_map)
-        self.assertEqual(snapshot.ref_map["1"]["text"], "退出登录")
-        self.assertIn("[按钮: 退出登录][1]", snapshot.chunks[0])
+        self.assertIn("@r1", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["@r1"]["text"], "退出登录")
+        self.assertIn("[按钮: 退出登录][@r1]", snapshot.chunks[0])
         self.assertIsInstance(snapshot.timestamp, float)
         self.assertGreater(snapshot.timestamp, 0)
 
@@ -245,33 +247,110 @@ class TestInlineMarkdownReader(unittest.IsolatedAsyncioTestCase):
                 "url": "https://example.com/article",
                 "blocks": [
                     "# 文章标题",
-                    "![图片: 架构图][1]",
-                    "- [官方文档][2]",
-                    "- [链接 (含图): 查看原图][3]",
+                    "![图片: 架构图][@r1]",
+                    "- [官方文档][@r2]",
+                    "- [链接 (含图): 查看原图][@r3]",
                 ],
                 "elements": [
-                    {"ref": 1, "tag": "img", "text": "架构图", "alt": "架构图", "src": "https://example.com/arch.png", "href": ""},
-                    {"ref": 2, "tag": "a", "text": "官方文档", "alt": "", "src": "", "href": "https://example.com/docs"},
-                    {"ref": 3, "tag": "a", "text": "查看原图", "alt": "缩略图", "src": "https://example.com/thumb.png", "href": "https://example.com/view"},
+                    {"ref": "@r1", "tag": "img", "text": "架构图", "alt": "架构图", "src": "https://example.com/arch.png", "href": ""},
+                    {"ref": "@r2", "tag": "a", "text": "官方文档", "alt": "", "src": "", "href": "https://example.com/docs"},
+                    {"ref": "@r3", "tag": "a", "text": "查看原图", "alt": "缩略图", "src": "https://example.com/thumb.png", "href": "https://example.com/view"},
                 ],
                 "allocated_count": 3,
             }
 
         mock_page.evaluate = fake_eval
         snapshot = await reader.extract_snapshot(mock_page, "https://example.com/article")
-        self.assertIn("1", snapshot.ref_map)
-        self.assertEqual(snapshot.ref_map["1"]["tag"], "img")
-        self.assertEqual(snapshot.ref_map["1"]["src"], "https://example.com/arch.png")
-        self.assertEqual(snapshot.ref_map["1"]["url"], "https://example.com/arch.png")
-        self.assertIn("2", snapshot.ref_map)
-        self.assertEqual(snapshot.ref_map["2"]["href"], "https://example.com/docs")
-        self.assertEqual(snapshot.ref_map["2"]["url"], "https://example.com/docs")
-        self.assertIn("3", snapshot.ref_map)
-        self.assertEqual(snapshot.ref_map["3"]["href"], "https://example.com/view")
-        self.assertEqual(snapshot.ref_map["3"]["src"], "https://example.com/thumb.png")
-        self.assertIn("![图片: 架构图][1]", snapshot.raw_content)
-        self.assertIn("[官方文档][2]", snapshot.raw_content[2])
-        self.assertIn("[链接 (含图): 查看原图][3]", snapshot.raw_content[3])
+        self.assertIn("@r1", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["@r1"]["tag"], "img")
+        self.assertEqual(snapshot.ref_map["@r1"]["src"], "https://example.com/arch.png")
+        self.assertEqual(snapshot.ref_map["@r1"]["url"], "https://example.com/arch.png")
+        self.assertIn("@r2", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["@r2"]["href"], "https://example.com/docs")
+        self.assertEqual(snapshot.ref_map["@r2"]["url"], "https://example.com/docs")
+        self.assertIn("@r3", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["@r3"]["href"], "https://example.com/view")
+        self.assertEqual(snapshot.ref_map["@r3"]["src"], "https://example.com/thumb.png")
+        self.assertIn("![图片: 架构图][@r1]", snapshot.raw_content)
+        self.assertIn("[官方文档][@r2]", snapshot.raw_content[2])
+        self.assertIn("[链接 (含图): 查看原图][@r3]", snapshot.raw_content[3])
+
+    def test_js_extractor_ref_prefix_and_spacing(self):
+        reader = InlineMarkdownReader()
+        script = reader.get_js_extractor_script(start_ref=1)
+        harness = """
+const mkText = (val) => ({ nodeType: 3, nodeValue: val });
+const mkEl = (tag, attrs = {}, children = []) => {
+    const attrMap = { ...attrs };
+    const el = {
+        nodeType: 1,
+        tagName: tag.toUpperCase(),
+        children: [],
+        childNodes: children,
+        get innerText() {
+            return this.childNodes.map(c => c.nodeType === 3 ? c.nodeValue : c.innerText).join('');
+        },
+        get textContent() { return this.innerText; },
+        hasAttribute: (k) => Object.prototype.hasOwnProperty.call(attrMap, k),
+        getAttribute: (k) => attrMap[k] ?? null,
+        setAttribute: (k, v) => { attrMap[k] = String(v); },
+        getBoundingClientRect: () => ({ width: 10, height: 10 }),
+        querySelector: () => null,
+        querySelectorAll: () => [],
+    };
+    el.children = children.filter(c => c.nodeType === 1);
+    return el;
+};
+
+const a1 = mkEl('a', { href: 'https://a.test' }, [mkText('A')]);
+const a2 = mkEl('a', { href: 'https://b.test' }, [mkText('B')]);
+const p1 = mkEl('p', {}, [a1, a2]);
+
+const a3 = mkEl('a', { href: 'https://c.test' }, [mkText('C')]);
+const btn1 = mkEl('button', {}, [mkText('D')]);
+const p2 = mkEl('p', {}, [mkEl('strong', {}, [a3]), btn1]);
+
+const a4 = mkEl('a', { href: 'https://d.test' }, [mkText('这里')]);
+const p3 = mkEl('p', {}, [mkText('  点击 \\n\\t  '), a4, mkText('  继续  ')]);
+
+const p4 = mkEl('p', {}, [mkEl('strong', {}, [mkText('100')]), mkText('元')]);
+
+const existingBtn = mkEl('button', { 'data-astr-ref': '@r9' }, [mkText('旧按钮')]);
+const p5 = mkEl('p', {}, [existingBtn]);
+
+const p6 = mkEl('p', {}, [mkText('第一行   文本'), mkEl('br'), mkText('第二行   文本')]);
+
+const body = mkEl('body', {}, [p1, p2, p3, p4, p5, p6]);
+global.window = { location: { href: 'https://example.com' }, getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }) };
+global.document = { title: 'Test', body };
+
+const res = eval(process.env.EXTRACTOR_SCRIPT);
+console.log(JSON.stringify({
+    blocks: res.blocks,
+    refs: res.elements.map(e => e.ref),
+    a1Attr: a1.getAttribute('data-astr-ref'),
+    existingAttr: existingBtn.getAttribute('data-astr-ref'),
+    allocated_count: res.allocated_count,
+}));
+"""
+        proc = subprocess.run(
+            ["node", "-e", harness],
+            env={**os.environ, "EXTRACTOR_SCRIPT": script},
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        out = json.loads(proc.stdout.strip())
+        self.assertEqual(out["blocks"][0], "[A][@r1] [B][@r2]")
+        self.assertEqual(out["blocks"][1], "**[C][@r3]** [按钮: D][@r4]")
+        self.assertEqual(out["blocks"][2], "点击 [这里][@r5] 继续")
+        self.assertEqual(out["blocks"][3], "**100**元")
+        self.assertEqual(out["blocks"][4], "[按钮: 旧按钮][@r9]")
+        self.assertEqual(out["blocks"][5], "第一行 文本\n第二行 文本")
+        self.assertEqual(out["refs"], ["@r1", "@r2", "@r3", "@r4", "@r5", "@r9"])
+        self.assertEqual(out["a1Attr"], "@r1")
+        self.assertEqual(out["existingAttr"], "@r9")
+        self.assertEqual(out["allocated_count"], 5)
 
     def test_inline_markdown_reader_script_contains_img_ref(self):
         reader = InlineMarkdownReader()
