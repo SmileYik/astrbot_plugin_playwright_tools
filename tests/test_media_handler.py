@@ -80,12 +80,18 @@ class TestMediaHandler(unittest.TestCase):
         self.assertTrue(res.startswith("[IMAGE_PATH:"))
 
     def test_screenshot_viewport_ai_allowed(self):
+        import base64
+
         async def mock_screenshot(**kwargs):
             return b"fake_viewport_png"
         self.mock_page.screenshot = mock_screenshot
 
         res = run_coro(self.handler.screenshot_viewport("s1", "u1", target="ai"))
-        self.assertTrue(res.startswith("data:image/png;base64,"))
+        self.assertTrue(hasattr(res, "content"))
+        self.assertEqual(res.content[0].type, "text")
+        self.assertEqual(res.content[1].type, "image")
+        self.assertEqual(res.content[1].mimeType, "image/png")
+        self.assertEqual(base64.b64decode(res.content[1].data), b"fake_viewport_png")
 
     def test_screenshot_viewport_ai_disallowed(self):
         handler_no_ai = MediaHandler(
@@ -316,7 +322,9 @@ class TestMediaHandler(unittest.TestCase):
         )
 
         res = run_coro(handler.screenshot_viewport("s1", "u1", target="ai"))
-        self.assertTrue(res.startswith("data:image/jpeg;base64,"))
+        self.assertTrue(hasattr(res, "content"))
+        self.assertEqual(res.content[1].type, "image")
+        self.assertEqual(res.content[1].mimeType, "image/jpeg")
 
     def test_screenshot_full_jpeg_parameters(self):
         shot_dir = TEMP_DIR / "screenshots_full_jpeg"

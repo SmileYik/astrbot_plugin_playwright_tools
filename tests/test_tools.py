@@ -346,14 +346,21 @@ class TestTools(unittest.TestCase):
             res = run_coro(self.media_tool.call(self.mock_context_wrapper, action="screenshot_full", target="chat"))
         self.assertIn("[IMAGE_PATH:/tmp/full.png]", res)
 
-    def test_media_tool_ai_target_returns_text(self):
+    def test_media_tool_ai_target_returns_call_tool_result(self):
+        from astrbot_plugin_playwright_tools.tools.handlers.base_handler import (
+            build_image_tool_result,
+        )
+
+        expected = build_image_tool_result("screenshot ready", b"abc123", "image/png")
+
         async def mock_vp(s_id, u_id, target, **kwargs):
-            return "data:image/png;base64,abc123xyz"
+            return expected
         self.mock_media_handler.screenshot_viewport = mock_vp
 
         with patch("asyncio.wait_for", fake_wait_for):
             res = run_coro(self.media_tool.call(self.mock_context_wrapper, action="screenshot_viewport", target="ai"))
-        self.assertEqual(res, "data:image/png;base64,abc123xyz")
+        self.assertIs(res, expected)
+        self.assertFalse(self.mock_context_wrapper.event.send.called)
 
     def test_media_tool_chat_failure_returns_error_text(self):
         async def mock_vp(s_id, u_id, target, **kwargs):
