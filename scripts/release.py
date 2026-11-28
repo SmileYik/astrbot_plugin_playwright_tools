@@ -4,7 +4,7 @@
 """Release branch synchronization script for astrbot_plugin_playwright_tools.
 
 Synchronizes filtered runtime code and public documentation from 'master'
-branch to 'release' branch using an isolated Git worktree.
+branch to 'release' and 'release-market' branches using isolated Git worktrees.
 """
 
 import argparse
@@ -42,6 +42,12 @@ BANNED_DOCS_DIRS = {
     "old"
 }
 
+# Target release branches and their extra excluded relative POSIX paths
+RELEASE_TARGETS: dict[str, set[str]] = {
+    "release": set(),
+    "release-market": {"core/history_cleaner.py"},
+}
+
 
 def extract_version(content: str) -> str:
     """Extract version string from metadata.yaml content."""
@@ -51,14 +57,23 @@ def extract_version(content: str) -> str:
     return match.group(1).strip()
 
 
-def is_path_allowed(rel_path: Path | str) -> bool:
-    """Check whether a path from master is allowed in the release branch."""
+def _normalize_posix(rel_path: Path | str) -> str:
     posix = str(rel_path).replace("\\", "/")
     if posix.startswith("./"):
         posix = posix[2:]
-    posix = posix.strip("/")
+    return posix.strip("/")
+
+
+def is_path_allowed(rel_path: Path | str, extra_excluded: set[str] | None = None) -> bool:
+    """Check whether a path from master is allowed in the target release branch."""
+    posix = _normalize_posix(rel_path)
     if not posix:
         return False
+
+    if extra_excluded:
+        normalized_excluded = {_normalize_posix(p) for p in extra_excluded}
+        if posix in normalized_excluded:
+            return False
 
     parts = [p for p in posix.split("/") if p and p != "."]
     if not parts:
@@ -157,25 +172,85 @@ def get_candidate_files(repo_dir: Path, allow_dirty: bool = False) -> list[Path]
     return sorted(existing_files)
 
 
+def ensure_branch_exists(repo_dir: Path, branch_name: str) -> None:
+    """Ensure target branch exists locally, creating it from origin or HEAD if needed."""
+    code, _, _ = run_git(["show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"], cwd=repo_dir)
+    if code == 0:
+        return
+
+    code, _, _ = run_git(
+        ["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{branch_name}"],
+        cwd=repo_dir,
+    )
+    if code == 0:
+        code_track, _, err = run_git(
+            ["branch", "--track", branch_name, f"origin/{branch_name}"],
+            cwd=repo_dir,
+        )
+        if code_track != 0:
+            raise RuntimeError(f"Failed to track origin/{branch_name}: {err}")
+        return
+
+    code_create, _, err = run_git(["branch", branch_name, "HEAD"], cwd=repo_dir)
+    if code_create != 0:
+        raise RuntimeError(f"Failed to create local {branch_name} branch: {err}")
+
+
 def ensure_release_branch_exists(repo_dir: Path) -> None:
     """Ensure release branch exists locally, creating it if needed."""
-    # Check if local release branch exists
-    code, _, _ = run_git(["show-ref", "--verify", "--quiet", "refs/heads/release"], cwd=repo_dir)
-    if code == 0:
-        return
+    ensure_branch_exists(repo_dir, "release")
 
-    # Check if remote tracking origin/release exists
-    code, _, _ = run_git(["show-ref", "--verify", "--quiet", "refs/remotes/origin/release"], cwd=repo_dir)
-    if code == 0:
-        code_track, _, err = run_git(["branch", "--track", "release", "origin/release"], cwd=repo_dir)
-        if code_track != 0:
-            raise RuntimeError(f"Failed to track origin/release: {err}")
-        return
 
-    # Create local release branch based on current master HEAD
-    code_create, _, err = run_git(["branch", "release", "HEAD"], cwd=repo_dir)
-    if code_create != 0:
-        raise RuntimeError(f"Failed to create local release branch: {err}")
+def _sync_branch_worktree(
+    repo_dir: Path,
+    branch_name: str,
+    allowed_files: list[Path],
+    commit_msg: str,
+) -> None:
+    """Sync filtered files into a target branch using a temporary Git worktree."""
+    ensure_branch_exists(repo_dir, branch_name)
+    temp_dir = Path(tempfile.mkdtemp(prefix=f"playwright_tools_{branch_name}_wt_"))
+    try:
+        print(f"[*] Adding temporary git worktree for '{branch_name}' at: {temp_dir}")
+        code_wt, _, err_wt = run_git(["worktree", "add", str(temp_dir), branch_name], cwd=repo_dir)
+        if code_wt != 0:
+            raise RuntimeError(f"Failed to add git worktree for {branch_name}: {err_wt}")
+
+        for item in temp_dir.iterdir():
+            if item.name == ".git":
+                continue
+            if item.is_dir():
+                shutil.rmtree(item)
+            else:
+                item.unlink()
+
+        for rel_path in allowed_files:
+            src = repo_dir / rel_path
+            dst = temp_dir / rel_path
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+
+        code_add, _, err_add = run_git(["add", "-A"], cwd=temp_dir)
+        if code_add != 0:
+            raise RuntimeError(f"git add -A failed in worktree ({branch_name}): {err_add}")
+
+        code_status, status_out, err_status = run_git(["status", "--porcelain"], cwd=temp_dir)
+        if code_status != 0:
+            raise RuntimeError(f"git status failed in worktree ({branch_name}): {err_status}")
+
+        if not status_out.strip():
+            print(f"[+] Branch '{branch_name}' is already up-to-date with master. Nothing to commit.")
+        else:
+            print(f"[*] Committing to '{branch_name}' branch with message: '{commit_msg}'...")
+            code_commit, commit_out, err_commit = run_git(["commit", "-m", commit_msg], cwd=temp_dir)
+            if code_commit != 0:
+                raise RuntimeError(f"Git commit failed in worktree ({branch_name}): {err_commit}")
+            print(f"[+] Successfully committed '{branch_name}':\n{commit_out}")
+    finally:
+        print(f"[*] Cleaning up temporary worktree: {temp_dir}")
+        run_git(["worktree", "remove", "--force", str(temp_dir)], cwd=repo_dir)
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        run_git(["worktree", "prune"], cwd=repo_dir)
 
 
 def run_release(
@@ -217,82 +292,45 @@ def run_release(
     dirty_marker = " (dirty)" if not is_clean else ""
     print(f"[*] Target release version: {version} (sync from master commit {commit_hash}{dirty_marker})")
 
-    # 4. Resolve tracked files and filter
+    # 4. Resolve tracked files and filter per target branch
     candidate_files = get_candidate_files(repo_dir, allow_dirty=allow_dirty)
-    allowed_files = [p for p in candidate_files if is_path_allowed(p)]
-    excluded_files = [p for p in candidate_files if not is_path_allowed(p)]
-
-    print(f"[*] Filtered {len(allowed_files)} files to keep in release branch ({len(excluded_files)} excluded).")
+    target_plans: dict[str, tuple[list[Path], list[Path]]] = {}
+    for branch_name, extra_excluded in RELEASE_TARGETS.items():
+        allowed_files = [
+            p for p in candidate_files if is_path_allowed(p, extra_excluded=extra_excluded)
+        ]
+        excluded_files = [
+            p for p in candidate_files if not is_path_allowed(p, extra_excluded=extra_excluded)
+        ]
+        target_plans[branch_name] = (allowed_files, excluded_files)
+        print(
+            f"[*] [{branch_name}] Filtered {len(allowed_files)} files to keep ({len(excluded_files)} excluded)."
+        )
 
     if dry_run:
-        print("\n--- [DRY-RUN] Files to be retained in release branch ---")
-        for p in sorted(allowed_files):
-            print(f"  + {p.as_posix()}")
-        print("\n--- [DRY-RUN] Files to be excluded from release branch ---")
-        for p in sorted(excluded_files):
-            print(f"  - {p.as_posix()}")
+        for branch_name, (allowed_files, excluded_files) in target_plans.items():
+            print(f"\n--- [DRY-RUN:{branch_name}] Files to be retained ({len(allowed_files)}) ---")
+            for p in sorted(allowed_files):
+                print(f"  + {p.as_posix()}")
+            print(f"\n--- [DRY-RUN:{branch_name}] Files to be excluded ({len(excluded_files)}) ---")
+            for p in sorted(excluded_files):
+                print(f"  - {p.as_posix()}")
         print("\n[+] Dry-run completed. No changes made.")
         return 0
 
-    # 5. Ensure release branch exists
-    ensure_release_branch_exists(repo_dir)
+    # 5. Sync all target branches locally first
+    commit_msg = message or f"release: {version} (sync from master {commit_hash}{dirty_marker})"
+    for branch_name, (allowed_files, _) in target_plans.items():
+        _sync_branch_worktree(repo_dir, branch_name, allowed_files, commit_msg)
 
-    # 6. Mount temporary worktree
-    temp_dir = Path(tempfile.mkdtemp(prefix="playwright_tools_release_wt_"))
-    try:
-        print(f"[*] Adding temporary git worktree at: {temp_dir}")
-        code_wt, _, err_wt = run_git(["worktree", "add", str(temp_dir), "release"], cwd=repo_dir)
-        if code_wt != 0:
-            raise RuntimeError(f"Failed to add git worktree for release: {err_wt}")
-
-        # 7. Clean existing tracked files in worktree (except .git)
-        for item in temp_dir.iterdir():
-            if item.name == ".git":
-                continue
-            if item.is_dir():
-                shutil.rmtree(item)
-            else:
-                item.unlink()
-
-        # 8. Copy allowed files into worktree
-        for rel_path in allowed_files:
-            src = repo_dir / rel_path
-            dst = temp_dir / rel_path
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dst)
-
-        # 9. Stage and check git status in worktree
-        code_add, _, err_add = run_git(["add", "-A"], cwd=temp_dir)
-        if code_add != 0:
-            raise RuntimeError(f"git add -A failed in worktree: {err_add}")
-
-        code_status, status_out, err_status = run_git(["status", "--porcelain"], cwd=temp_dir)
-        if code_status != 0:
-            raise RuntimeError(f"git status failed in worktree: {err_status}")
-
-        if not status_out.strip():
-            print("[+] Release branch is already up-to-date with master. Nothing to commit.")
-        else:
-            commit_msg = message or f"release: {version} (sync from master {commit_hash}{dirty_marker})"
-            print(f"[*] Committing to release branch with message: '{commit_msg}'...")
-            code_commit, commit_out, err_commit = run_git(["commit", "-m", commit_msg], cwd=temp_dir)
-            if code_commit != 0:
-                raise RuntimeError(f"Git commit failed in worktree: {err_commit}")
-            print(f"[+] Successfully committed release:\n{commit_out}")
-
-        # 10. Optional Push
-        if push:
-            print("[*] Pushing release branch to origin...")
-            code_push, push_out, err_push = run_git(["push", "origin", "release"], cwd=temp_dir)
+    # 6. Optional Push (only after all local branch commits succeed)
+    if push:
+        for branch_name in RELEASE_TARGETS:
+            print(f"[*] Pushing '{branch_name}' branch to origin...")
+            code_push, push_out, err_push = run_git(["push", "origin", branch_name], cwd=repo_dir)
             if code_push != 0:
-                raise RuntimeError(f"Git push failed: {err_push}")
-            print(f"[+] Push succeeded:\n{push_out}")
-
-    finally:
-        print(f"[*] Cleaning up temporary worktree: {temp_dir}")
-        run_git(["worktree", "remove", "--force", str(temp_dir)], cwd=repo_dir)
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        run_git(["worktree", "prune"], cwd=repo_dir)
+                raise RuntimeError(f"Git push failed for {branch_name}: {err_push}")
+            print(f"[+] Push succeeded for '{branch_name}':\n{push_out}")
 
     print("[+] Release sync workflow finished successfully.")
     return 0

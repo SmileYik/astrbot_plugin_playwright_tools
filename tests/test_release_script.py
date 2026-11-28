@@ -176,6 +176,49 @@ class TestReleaseScriptGitOrchestration(unittest.TestCase):
         self.assertEqual(code_wt, 0)
         self.assertEqual(len(wt_out.splitlines()), 1)  # Only master worktree
 
+    def test_is_path_allowed_extra_excluded_blocks_history_cleaner(self):
+        self.assertTrue(is_path_allowed(Path("core/history_cleaner.py")))
+        self.assertFalse(
+            is_path_allowed(
+                Path("core/history_cleaner.py"),
+                extra_excluded={"core/history_cleaner.py"},
+            )
+        )
+
+    def test_run_release_syncs_both_release_and_release_market(self):
+        (self.repo / "core").mkdir(exist_ok=True)
+        (self.repo / "core" / "__init__.py").write_text("", encoding="utf-8")
+        (self.repo / "core" / "history_cleaner.py").write_text("class HistoryCleaner: pass\n", encoding="utf-8")
+        run_git(["add", "-A"], cwd=self.repo)
+        run_git(["commit", "-m", "add core history_cleaner"], cwd=self.repo)
+
+        code = run_release(self.repo)
+        self.assertEqual(code, 0)
+
+        for branch in ("release", "release-market"):
+            chk, _, _ = run_git(["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=self.repo)
+            self.assertEqual(chk, 0, f"{branch} branch should exist")
+
+        _, rel_out, _ = run_git(["ls-tree", "-r", "--name-only", "release"], cwd=self.repo)
+        rel_files = rel_out.splitlines()
+        self.assertIn("core/history_cleaner.py", rel_files)
+        self.assertIn("core/__init__.py", rel_files)
+        self.assertNotIn("tests/test_dummy.py", rel_files)
+
+        _, mkt_out, _ = run_git(["ls-tree", "-r", "--name-only", "release-market"], cwd=self.repo)
+        mkt_files = mkt_out.splitlines()
+        self.assertNotIn("core/history_cleaner.py", mkt_files)
+        self.assertIn("core/__init__.py", mkt_files)
+        self.assertIn("main.py", mkt_files)
+        self.assertNotIn("tests/test_dummy.py", mkt_files)
+
+    def test_dry_run_does_not_create_release_or_release_market_branch(self):
+        code = run_release(self.repo, dry_run=True)
+        self.assertEqual(code, 0)
+        for branch in ("release", "release-market"):
+            chk, _, _ = run_git(["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=self.repo)
+            self.assertNotEqual(chk, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
