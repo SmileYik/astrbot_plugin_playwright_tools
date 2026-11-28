@@ -79,6 +79,34 @@ class TestConfSchema(unittest.TestCase):
         )
         self.assertEqual(len(rule_items["allowed_actions"]["labels"]), 12)
 
+        self.assertEqual(rule_items["allow_single_hop"]["type"], "bool")
+        self.assertFalse(rule_items["allow_single_hop"]["default"])
+
+        self.assertEqual(rule_items["single_hop_allowed_actions"]["type"], "list")
+        self.assertEqual(
+            rule_items["single_hop_allowed_actions"]["default"],
+            ["read", "screenshot"],
+        )
+        self.assertEqual(
+            rule_items["single_hop_allowed_actions"]["options"],
+            rule_items["allowed_actions"]["options"],
+        )
+        self.assertEqual(
+            rule_items["single_hop_allowed_actions"]["labels"],
+            rule_items["allowed_actions"]["labels"],
+        )
+        self.assertEqual(
+            rule_items["single_hop_allowed_actions"]["condition"],
+            {"allow_single_hop": True},
+        )
+
+        self.assertEqual(rule_items["single_hop_follow_redirects"]["type"], "bool")
+        self.assertTrue(rule_items["single_hop_follow_redirects"]["default"])
+        self.assertEqual(
+            rule_items["single_hop_follow_redirects"]["condition"],
+            {"allow_single_hop": True},
+        )
+
         # 6. 浏览器适配器为下拉框选择
         br = schema["browser"]["items"]
         self.assertEqual(br["browser_adapter"]["type"], "string")

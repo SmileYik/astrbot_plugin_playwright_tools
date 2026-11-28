@@ -3,6 +3,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from ..adapts.base import BrowserAdapterBase
+from .navigation_guard import NavigationGuard
 from .security_manager import SecurityManager
 
 from astrbot.api import logger
@@ -40,6 +41,7 @@ class BrowserSessionContext:
     is_snapshot_dirty: bool = False
     ref_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     next_ref_id: int = 1
+    navigation_guard: Any = None
 
     def touch(self) -> None:
         """更新最后活跃时间。"""
@@ -400,38 +402,6 @@ class ContextManager:
         browser_ctx = None
         try:
             browser_ctx = await self.adapter.create_context(storage_state_path=state_to_inject)
-
-            ctx: BrowserSessionContext | None = None
-
-            # 挂载顶层导航路由拦截守卫 (Navigation Guard，外部插件跳过)
-            if not is_external and hasattr(browser_ctx, "route"):
-                async def _route_guard(route, request):
-                    try:
-                        is_nav = request.is_navigation_request() if hasattr(request, "is_navigation_request") else False
-                        if is_nav:
-                            if self.mode == "session":
-                                op_id = getattr(ctx, "current_operator_id", "") if ctx else ""
-                                allowed, _ = self.security.is_url_allowed_navigation(op_id, request.url)
-                            else:
-                                allowed, _ = self.security.is_url_allowed_navigation(owner_id, request.url)
-                            if not allowed:
-                                await route.abort()
-                                return
-                        await route.continue_()
-                    except Exception as e:
-                        logger.warning(f"[ContextManager] 路由守卫拦截处理异常: {e}")
-                        try:
-                            await route.continue_()
-                        except Exception as ce:
-                            logger.debug(f"[ContextManager] 路由放行回退异常: {ce}")
-
-                try:
-                    res_route = browser_ctx.route("**/*", _route_guard)
-                    if hasattr(res_route, "__await__"):
-                        await res_route
-                except Exception as e:
-                    logger.warning(f"[ContextManager] 挂载全局路由拦截守卫失败: {e}")
-
             first_page = await browser_ctx.new_page()
 
             if idle_timeout_seconds is not None:
@@ -455,7 +425,7 @@ class ContextManager:
                 idle_timeout_seconds=ctx_timeout,
             )
 
-            # 外部插件原生事件静默感知保活
+            # 外部插件原生事件静默感知保活；内部上下文挂载独立导航守卫
             if is_external and hasattr(browser_ctx, "on"):
                 def _touch(*args, **kwargs):
                     ctx.touch()
@@ -465,48 +435,34 @@ class ContextManager:
                     browser_ctx.on("response", lambda resp: _touch())
                 except Exception as e:
                     logger.debug(f"[ContextManager] 外部上下文挂载事件保活监听异常: {e}")
+            elif not is_external:
+                def _resolve_op_id() -> str:
+                    if self.mode == "session":
+                        return getattr(ctx, "current_operator_id", "")
+                    return owner_id
 
-            def _setup_page_listeners(page):
-                def _on_frame_nav(frame):
-                    try:
-                        is_main = False
-                        if hasattr(frame, "parent_frame") and frame.parent_frame is None:
-                            is_main = True
-                        elif hasattr(page, "main_frame") and frame == page.main_frame:
-                            is_main = True
-                        elif not hasattr(frame, "parent_frame") and not hasattr(page, "main_frame"):
-                            is_main = True
-
-                        if is_main:
-                            ctx.is_snapshot_dirty = True
-                            ctx.current_snapshot = None
-                            ctx.ref_map = {}
-                    except Exception as e:
-                        logger.debug(f"[ContextManager] 页面帧导航监听异常: {e}")
-
-                if hasattr(page, "on"):
-                    try:
-                        page.on("framenavigated", _on_frame_nav)
-                    except Exception as e:
-                        logger.debug(f"[ContextManager] 注册 framenavigated 监听失败: {e}")
-
-            _setup_page_listeners(first_page)
-
-            # 挂载新标签页 (popup) 监听器
-            def _on_popup(new_page):
-                try:
+                def _on_new_page(new_page) -> None:
                     if new_page not in ctx.pages:
                         ctx.pages.append(new_page)
                         ctx.current_page = new_page
-                        _setup_page_listeners(new_page)
-                except Exception as e:
-                    logger.debug(f"[ContextManager] 弹窗新页面注册监听异常: {e}")
 
-            if hasattr(browser_ctx, "on"):
-                try:
-                    browser_ctx.on("page", _on_popup)
-                except Exception as e:
-                    logger.debug(f"[ContextManager] 注册新标签页 page 监听失败: {e}")
+                def _on_main_frame_nav(_page) -> None:
+                    ctx.is_snapshot_dirty = True
+                    ctx.current_snapshot = None
+                    ctx.ref_map = {}
+
+                nav_guard = NavigationGuard(
+                    security=self.security,
+                    get_user_id=_resolve_op_id,
+                    get_fallback_source_page=lambda: getattr(ctx, "current_page", None),
+                )
+                await nav_guard.attach(
+                    browser_ctx,
+                    first_page,
+                    on_new_page=_on_new_page,
+                    on_main_frame_navigated=_on_main_frame_nav,
+                )
+                ctx.navigation_guard = nav_guard
 
             if self.audit_logger:
                 try:

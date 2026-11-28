@@ -56,15 +56,56 @@ class SecurityManager:
             return True
         return False
 
-    def _is_rule_match(self, host: str, rule: dict) -> bool:
-        """检查主机域名是否命中规则中的任一域名配置（兼容 domains 列表与单个 domain）。"""
-        domains = rule.get("domains")
-        if domains is None:
-            dom = rule.get("domain")
-            domains = [dom] if dom else []
-        elif isinstance(domains, str):
-            domains = [domains]
-        return any(self._is_domain_match(host, str(d)) for d in domains if str(d).strip())
+    def _pattern_specificity(self, host: str, domain_pattern: str) -> tuple[int, int, int] | None:
+        """评估域名模式对目标 host 的匹配精确度，不匹配返回 None。"""
+        norm_pat = self._normalize_pattern(domain_pattern)
+        if not norm_pat:
+            return None
+        if not self._is_domain_match(host, norm_pat):
+            return None
+        if "*" not in norm_pat and "?" not in norm_pat:
+            return (3, len(norm_pat.split(".")), len(norm_pat))
+        if norm_pat == "*":
+            return (1, 0, 0)
+        literal_parts = [p for p in norm_pat.split(".") if "*" not in p and "?" not in p and p]
+        literal_chars = sum(len(p) for p in literal_parts)
+        return (2, len(literal_parts), literal_chars)
+
+    def get_matched_rule(self, url: str) -> dict | None:
+        """按域名精确度优先原则返回命中指定 URL 的最优白名单规则。"""
+        host = self._extract_hostname(url)
+        if not host:
+            return None
+
+        best_rule: dict | None = None
+        best_score: tuple[int, int, int] | None = None
+
+        for rule in self.whitelist_rules:
+            domains = rule.get("domains") or []
+            if not isinstance(domains, list):
+                continue
+            rule_best: tuple[int, int, int] | None = None
+            for d in domains:
+                pat = str(d).strip()
+                if not pat:
+                    continue
+                score = self._pattern_specificity(host, pat)
+                if score is not None and (rule_best is None or score > rule_best):
+                    rule_best = score
+            if rule_best is not None and (best_score is None or rule_best > best_score):
+                best_score = rule_best
+                best_rule = rule
+
+        return best_rule
+
+    def get_single_hop_policy(self, url: str) -> tuple[bool, set[str], bool]:
+        """获取指定 URL 命中规则的单跳放行策略：(是否允许单跳, 单跳允许动作集合, 是否遵循重定向)。"""
+        matched_rule = self.get_matched_rule(url)
+        if not matched_rule or not bool(matched_rule.get("allow_single_hop", False)):
+            return False, set(), False
+        allowed_actions = set(matched_rule.get("single_hop_allowed_actions", ["read", "screenshot"]))
+        follow_redirects = bool(matched_rule.get("single_hop_follow_redirects", True))
+        return True, allowed_actions, follow_redirects
 
     def is_url_allowed_navigation(self, user_id: str, target_url: str) -> tuple[bool, str]:
         """校验目标 URL 是否允许作为顶层页面进行导航访问。"""
@@ -84,10 +125,8 @@ class SecurityManager:
         if not host:
             return False, "拒绝导航：无法解析有效的主机域名"
 
-        # 匹配白名单规则
-        for rule in self.whitelist_rules:
-            if self._is_rule_match(host, rule):
-                return True, ""
+        if self.get_matched_rule(target_url) is not None:
+            return True, ""
 
         return False, f"拒绝导航：目标域名 '{host}' 未在白名单规则中"
 
@@ -109,12 +148,7 @@ class SecurityManager:
         if not host:
             return False, "拒绝操作：无法解析目标域名"
 
-        matched_rule = None
-        for rule in self.whitelist_rules:
-            if self._is_rule_match(host, rule):
-                matched_rule = rule
-                break
-
+        matched_rule = self.get_matched_rule(url)
         if not matched_rule:
             return False, f"拒绝操作：域名 '{host}' 未在白名单中"
 

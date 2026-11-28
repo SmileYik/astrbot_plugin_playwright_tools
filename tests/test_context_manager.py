@@ -501,6 +501,11 @@ class TestContextManager(unittest.IsolatedAsyncioTestCase):
         self.assertIn("duration_seconds", details)
         self.assertIn("tab_count", details)
 
+    async def test_create_new_context_attaches_navigation_guard(self):
+        from astrbot_plugin_playwright_tools.core.navigation_guard import NavigationGuard
+        ctx = await self.mgr._create_new_context("s_nav", "u_nav")
+        self.assertIsInstance(ctx.navigation_guard, NavigationGuard)
+
 
 if __name__ == "__main__":
     unittest.main()

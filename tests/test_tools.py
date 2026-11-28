@@ -508,6 +508,74 @@ class TestTools(unittest.TestCase):
         self.assertEqual(logged_kwargs.get("session_name"), "测试群")
         self.assertEqual(logged_kwargs.get("sender_name"), "测试者")
 
+    def test_base_handler_single_hop_fallback_allows_read_but_not_open_url(self):
+        from unittest.mock import AsyncMock
+        from astrbot_plugin_playwright_tools.core.navigation_guard import NavigationGuard, SingleHopGrant
+        from astrbot_plugin_playwright_tools.core.security_manager import SecurityManager
+        from astrbot_plugin_playwright_tools.tools.handlers.base_handler import BaseActionHandler
+
+        sec = SecurityManager(admin_only=False, whitelist_rules=[
+            {"domains": ["search.example.com"], "allowed_actions": ["read", "click"], "allow_single_hop": True}
+        ])
+        mock_ctx_mgr = MagicMock()
+        mock_ctx_mgr.mode = "personal"
+        mock_audit = MagicMock()
+        mock_audit.log_action = AsyncMock()
+
+        mock_page = MagicMock()
+        mock_page.url = "https://target.com/post"
+        nav_guard = NavigationGuard(security=sec, get_user_id=lambda: "u1")
+        nav_guard._page_grants[id(mock_page)] = SingleHopGrant(
+            allowed_actions={"read"},
+            follow_redirects=True,
+            granted_url="https://target.com/post",
+        )
+
+        mock_user_ctx = MagicMock()
+        mock_user_ctx.owner_id = "u1"
+        mock_user_ctx.allowed_users = {"u1"}
+        mock_user_ctx.current_page = mock_page
+        mock_user_ctx.navigation_guard = nav_guard
+        mock_ctx_mgr.resolve_context = AsyncMock(return_value=(mock_user_ctx, ""))
+
+        handler = BaseActionHandler(mock_ctx_mgr, sec, mock_audit, mask_password_inputs=True)
+        handler.wait_page_stable = AsyncMock()
+
+        # read on single-hopped page -> allowed
+        res_read = run_coro(handler.execute_action(
+            session_id="s1",
+            sender_id="u1",
+            action_name="read_page",
+            target_resource="",
+            action_coro_fn=lambda ctx, page: "read_ok",
+            required_permission="read",
+        ))
+        self.assertIn("read_ok", res_read)
+
+        # click on single-hopped page -> denied
+        res_click = run_coro(handler.execute_action(
+            session_id="s1",
+            sender_id="u1",
+            action_name="click",
+            target_resource="",
+            action_coro_fn=lambda ctx, page: "click_ok",
+            required_permission="click",
+            action_desc="点击",
+        ))
+        self.assertIn("点击失败", res_click)
+
+        # open_url to non-whitelisted URL -> still denied
+        res_open = run_coro(handler.execute_action(
+            session_id="s1",
+            sender_id="u1",
+            action_name="open_url",
+            target_resource="https://target.com/post",
+            action_coro_fn=lambda ctx, page: "open_ok",
+            required_permission="navigate",
+            action_desc="打开",
+        ))
+        self.assertIn("打开失败", res_open)
+
     def test_read_tool_omits_empty_ref_arg(self):
         called_kwargs = {}
         async def mock_read(s_id, u_id, **kwargs):

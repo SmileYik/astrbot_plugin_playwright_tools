@@ -81,7 +81,8 @@ flowchart TD
 
 ### 1.2 核心服务与提炼层 (`core/`, `core/readers/`)
 - **`ContextManager`**: 管理多租户 `BrowserSessionContext` 实例。负责个人模式与会话模式的上下文隔离路由、协作者授权、Cookie 注入、空闲定时回收、维护单调递增的 Ref 编号计数器，并在创建上下文异常时自动执行回滚清理。同时负责底层浏览器进程生命周期的智能空闲回收（无活跃上下文超过 `browser_idle_timeout_minutes` 自动关闭底层驱动）、崩溃失联事件（`disconnected`）感知自愈，以及在插件终止时通过并发 5.0 秒总超时熔断机制批量注销存量上下文。
-- **`SecurityManager`**: 权限与白名单守卫。执行域名通配符匹配（如 `*.bing.com`）、12 项原子动作权限细粒度校验，在页面创建和路由阶段拦截未授权顶层跳转、弹出新窗口与 iframe 导航，同时对放行网页自动保留内部第三方静态资源的正常加载。
+- **`SecurityManager`**: 权限与白名单守卫。执行基于域名精确度优先的白名单规则匹配（精确域名优先于深层通配及浅层通配）、12 项原子动作权限细粒度校验，以及单跳放行策略解析。
+- **`NavigationGuard`** (`core/navigation_guard.py`): 独立的顶层导航路由守卫与单跳授权状态管理器。从 `ContextManager` 解耦而出，负责挂载 `BrowserContext` 路由拦截与页面/弹窗监听，维护标签页（`Page`）粒度的 `SingleHopGrant` 状态，区分页面内点击/弹窗单跳、HTTP 重定向链以及 AI 主动 `open_url` 导航。
 - **`AuditLogger`**: SQLite 审计记录器。异步记录全量调用（起止时间、会话、上下文、目标域名、入参与结果），并在初始化与周期轮询中自动清理超期数据。
 - **`HistoryCleaner`**: 上下文历史清理器。基于高低双水位线在请求发送前自动消减已产生的工具调用记录，支持直接清理与副 AI 紧凑事实摘要压缩，配合 `AuditLogger` 实现工具调用与生命周期双重审计落盘。
 - **`readers/`（双阅读提炼器）**:

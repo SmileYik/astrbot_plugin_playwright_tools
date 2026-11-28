@@ -15,8 +15,8 @@ from astrbot_plugin_playwright_tools.core.security_manager import SecurityManage
 class TestSecurityManager(unittest.TestCase):
     def setUp(self):
         rules = [
-            {"domain": "*.github.com", "allowed_actions": ["read", "click", "scroll"]},
-            {"domain": "example.com", "allowed_actions": ["read", "click", "fill", "screenshot"]}
+            {"domains": ["*.github.com"], "allowed_actions": ["read", "click", "scroll"]},
+            {"domains": ["example.com"], "allowed_actions": ["read", "click", "fill", "screenshot"]}
         ]
         self.sec = SecurityManager(
             admin_only=False,
@@ -92,13 +92,51 @@ class TestSecurityManager(unittest.TestCase):
         ok5, _ = mgr.check_permission("user1", "https://github.com", "download")
         self.assertFalse(ok5)
 
-    def test_whitelist_rules_backward_compatibility_single_domain(self):
+    def test_most_specific_rule_wins_regardless_of_order(self):
+        rules = [
+            {
+                "domains": ["*.example.com"],
+                "allowed_actions": ["read"],
+                "allow_single_hop": False,
+            },
+            {
+                "domains": ["search.example.com"],
+                "allowed_actions": ["read", "click"],
+                "allow_single_hop": True,
+                "single_hop_allowed_actions": ["read", "screenshot"],
+                "single_hop_follow_redirects": True,
+            },
+        ]
+        mgr = SecurityManager(admin_only=False, whitelist_rules=rules)
+        ok_click, _ = mgr.check_permission("u1", "https://search.example.com/q", "click")
+        self.assertTrue(ok_click)
+        hop_ok, hop_actions, follow = mgr.get_single_hop_policy("https://search.example.com/q")
+        self.assertTrue(hop_ok)
+        self.assertEqual(hop_actions, {"read", "screenshot"})
+        self.assertTrue(follow)
+
+        # 其余子域名仍只有通配规则权限
+        no_click, _ = mgr.check_permission("u1", "https://docs.example.com/a", "click")
+        self.assertFalse(no_click)
+        hop_sub, _, _ = mgr.get_single_hop_policy("https://docs.example.com/a")
+        self.assertFalse(hop_sub)
+
+        # 深度通配 *.sub.example.com 优先于 *.example.com
+        rules_nested = [
+            {"domains": ["*.example.com"], "allowed_actions": ["read"]},
+            {"domains": ["*.sub.example.com"], "allowed_actions": ["read", "click"]},
+        ]
+        mgr_nested = SecurityManager(admin_only=False, whitelist_rules=rules_nested)
+        ok_nested, _ = mgr_nested.check_permission("u1", "https://a.sub.example.com", "click")
+        self.assertTrue(ok_nested)
+
+    def test_legacy_single_domain_field_ignored(self):
         rules = [{"domain": "example.com", "allowed_actions": ["read"]}]
         mgr = SecurityManager(admin_only=False, whitelist_rules=rules)
         ok, _ = mgr.check_permission("user1", "https://example.com", "read")
-        self.assertTrue(ok)
+        self.assertFalse(ok)
         nav_ok, _ = mgr.is_url_allowed_navigation("user1", "https://example.com")
-        self.assertTrue(nav_ok)
+        self.assertFalse(nav_ok)
 
 if __name__ == "__main__":
     unittest.main()

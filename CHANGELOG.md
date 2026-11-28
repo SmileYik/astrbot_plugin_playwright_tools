@@ -4,6 +4,18 @@
 
 ---
 
+## [Unreleased]
+
+### 白名单单跳放行、域名精确度优先匹配与导航守卫解耦
+- **白名单单跳放行配置 (`whitelist_rules`)**：
+  - 在 `_conf_schema.json` 的 `whitelist_rules` 规则模板中新增 `allow_single_hop`、`single_hop_allowed_actions` 与 `single_hop_follow_redirects` 配置项，支持为特定白名单站点开启单次页面内跳转/弹窗放行，并限制落地页可执行的操作权限与重定向链处理策略。
+- **域名精确度优先匹配 (`SecurityManager`)**：
+  - 将规则匹配升级为按域名精确度评分优先（精确域名 > 深层通配 > 浅层通配 > 全局通配），解决通配规则遮蔽子域名独立规则的问题；移除旧版单数 `domain` 字段兼容逻辑。
+- **独立导航守卫解耦 (`NavigationGuard`)**：
+  - 将路由守卫、主帧/弹窗监听与 `Page` 粒度单跳授权状态从 `ContextManager` 拆出至 `core/navigation_guard.py`，并与 `BaseActionHandler` 动作鉴权集成。
+
+---
+
 ## [v1.4.5] - 2026-11-27
 
 ### 副 AI 压缩提示词用户意图动态占位符 (Dynamic {{user_input}} Placeholder in Compress Prompt)

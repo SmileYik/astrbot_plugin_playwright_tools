@@ -251,6 +251,19 @@ class BaseActionHandler:
                 allowed, reason = self.security_mgr.check_permission(
                     auth_user_id, current_url, required_permission
                 )
+                if not allowed:
+                    nav_guard = getattr(ctx, "navigation_guard", None)
+                    if nav_guard is not None and hasattr(nav_guard, "check_single_hop_permission"):
+                        hop_res = nav_guard.check_single_hop_permission(
+                            page, current_url, required_permission
+                        )
+                        if isinstance(hop_res, tuple) and len(hop_res) == 2:
+                            hop_allowed, hop_reason = hop_res
+                            if hop_allowed:
+                                allowed = True
+                                reason = ""
+                            elif "未获得单跳授权" not in str(hop_reason):
+                                reason = hop_reason
             if not allowed:
                 await self._log_audit(
                     session_id=session_id,

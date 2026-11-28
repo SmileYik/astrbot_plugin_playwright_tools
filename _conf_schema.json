@@ -75,6 +75,61 @@
                   "全页长截图 (screenshot_full)",
                   "下载文件 (download)"
                 ]
+              },
+              "allow_single_hop": {
+                "type": "bool",
+                "description": "允许单跳放行",
+                "hint": "开启后，允许该规则内的页面通过点击或弹窗等操作跳转到非白名单页面一次",
+                "default": false
+              },
+              "single_hop_allowed_actions": {
+                "type": "list",
+                "description": "单跳页面允许的行为",
+                "hint": "勾选单跳落地后在目标非白名单页面上允许执行的操作权限",
+                "default": [
+                  "read",
+                  "screenshot"
+                ],
+                "options": [
+                  "read",
+                  "click",
+                  "fill",
+                  "select",
+                  "hover",
+                  "focus",
+                  "drag",
+                  "press_key",
+                  "scroll",
+                  "screenshot",
+                  "screenshot_full",
+                  "download"
+                ],
+                "labels": [
+                  "读取文本 (read)",
+                  "点击交互 (click)",
+                  "输入表单 (fill)",
+                  "下拉选择 (select)",
+                  "鼠标悬停 (hover)",
+                  "焦点控制 (focus)",
+                  "元素拖拽 (drag)",
+                  "键盘按键 (press_key)",
+                  "页面滚动 (scroll)",
+                  "视口截图 (screenshot)",
+                  "全页长截图 (screenshot_full)",
+                  "下载文件 (download)"
+                ],
+                "condition": {
+                  "allow_single_hop": true
+                }
+              },
+              "single_hop_follow_redirects": {
+                "type": "bool",
+                "description": "单跳遵循重定向",
+                "hint": "开启后，单次页面内跳转过程中发生的 HTTP 301/302 重定向链视为同一次跳转并放行；关闭则拦截重定向",
+                "default": true,
+                "condition": {
+                  "allow_single_hop": true
+                }
               }
             }
           }
@@ -181,7 +236,7 @@
         "default": 2000,
         "slider": {
           "min": 500,
-          "max": 8000,
+          "max": 1024000,
           "step": 100
         }
       }
