@@ -37,6 +37,11 @@ ALLOWED_ROOT_DIRS = {
     "skills",
 }
 
+BANNED_DOCS_DIRS = {
+    "superpowers", 
+    "old"
+}
+
 
 def extract_version(content: str) -> str:
     """Extract version string from metadata.yaml content."""
@@ -75,13 +80,9 @@ def is_path_allowed(rel_path: Path | str) -> bool:
 
     # docs/ directory specific whitelist
     if root_part == "docs":
-        if len(parts) > 1 and parts[1] in {"superpowers", "old"}:
+        if len(parts) > 1 and parts[1] in BANNED_DOCS_DIRS:
             return False
-        if posix in {"docs/ARCHITECTURE.md", "docs/EXTERNAL_API.md"}:
-            return True
-        if len(parts) > 1 and parts[1] == "images":
-            return True
-        return False
+        return True
 
     return False
 
