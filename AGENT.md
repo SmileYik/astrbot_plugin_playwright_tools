@@ -36,10 +36,13 @@
 
 在每一次变更时, 都需要及时变更对应文档内容. 包括但不限于: 
 
-- [README](README.md)
-- [metadata.yaml](metadata.yaml)
-- [ARCHITECTURE](docs/ARCHITECTURE.md)
-- [skills](skills)
+- [README](README.md): 面对普通插件用户
+- [CHANGELOG](CHANGELOG.md): 面对普通用户
+- [EXTERNAL_API](docs/EXTERNAL_API.md): 面对想依赖本插件的插件开发者
+- [ARCHITECTURE](docs/ARCHITECTURE.md): 记录当前项目的整体情况和技术约定
+- [AI_TOOLS](docs/AI_TOOLS.md): 记录当前项目的整体情况和技术约定
+- [skills](skills): 面对 AI 大模型
+- [metadata.yaml](metadata.yaml): 插件源数据, 包括插件短述和长述
 
 ## SKILLS 文档
 
