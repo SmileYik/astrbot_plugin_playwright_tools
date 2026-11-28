@@ -170,29 +170,52 @@ class BaseActionHandler:
             return "操作失败: 无法获取浏览器上下文"
 
         page = getattr(ctx, "current_page", None)
+
+        input_args = dict(input_args or {})
+        audit_input_args = dict(input_args)
+
+        # 跨标签页 Ref 自动寻址与活动页切换（在权限校验与密码探测前完成）
+        raw_ref = input_args.get("ref")
+        clean_ref_str = str(raw_ref).strip() if raw_ref is not None else ""
+        resolved_el_info: dict | None = None
+
+        if clean_ref_str and hasattr(ctx, "resolve_ref"):
+            target_page, el_info = ctx.resolve_ref(clean_ref_str)
+            if isinstance(el_info, dict):
+                resolved_el_info = el_info
+            if target_page is not None and target_page is not page:
+                if hasattr(ctx, "activate_page"):
+                    act_res = ctx.activate_page(target_page)
+                    if inspect.isawaitable(act_res):
+                        await act_res
+                else:
+                    ctx.current_page = target_page
+                page = target_page
+
         page_url = getattr(page, "url", "") if page else ""
         current_url = target_resource or page_url
 
         if not action_desc:
             action_desc = ACTION_DESC_MAP.get(action_name, action_name or "操作")
 
-        input_args = dict(input_args or {})
-        audit_input_args = dict(input_args)
-
         # 密码类型探测：仅在存在可能包含密码明文的待脱敏入参（如 text, value, password）且指定了有效非空 ref 时才探测
         is_password = False
         has_secret_input = any(key in audit_input_args for key in ("text", "value", "password"))
-        raw_ref = input_args.get("ref")
-        clean_ref_str = str(raw_ref).strip() if raw_ref is not None else ""
 
         if has_secret_input and clean_ref_str:
-            ref_map = getattr(ctx, "ref_map", {}) or {}
-            el_info = ref_map.get(clean_ref_str) or ref_map.get(raw_ref)
+            el_info = resolved_el_info
+            if el_info is None and hasattr(ctx, "get_page_state"):
+                page_state = ctx.get_page_state(page)
+                ref_map = getattr(page_state, "ref_map", {}) or {}
+                el_info = ref_map.get(clean_ref_str) or ref_map.get(raw_ref)
             if isinstance(el_info, dict) and el_info.get("type") == "password":
                 is_password = True
             elif page is not None and hasattr(page, "locator"):
                 try:
-                    if clean_ref_str.startswith("e") or (clean_ref_str.startswith("f") and "e" in clean_ref_str):
+                    aria_ref = el_info.get("aria_ref", "") if isinstance(el_info, dict) else ""
+                    if aria_ref:
+                        loc = page.locator(f"aria-ref={aria_ref}")
+                    elif clean_ref_str.startswith("e") or (clean_ref_str.startswith("f") and "e" in clean_ref_str):
                         loc = page.locator(f"aria-ref={clean_ref_str}")
                     else:
                         loc = page.locator(f'[data-astr-ref="{clean_ref_str}"]')
