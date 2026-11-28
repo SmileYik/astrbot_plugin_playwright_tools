@@ -1,11 +1,11 @@
 <div align="center">
 
-# PlaywrightTool 
+# Playwright Tool 
 
-<img src="https://raw.githubusercontent.com/SmileYik/astrbot_plugin_playwright_tools/refs/heads/master/logo.png" alt="logo" width="25%" />
+<img src="https://raw.githubusercontent.com/SmileYik/astrbot_plugin_playwright_tools/refs/heads/master/logo.png" alt="logo" width="30%" />
 
 
-[![Moe Counter](https://count.getloli.com/@Playwright-Tool?theme=booru-touhoulat&padding=7&offset=0&align=top&scale=0.3&pixelated=1&darkmode=auto)](https://github.com/SmileYik/astrbot_plugin_playwright_tools)
+[![Moe Counter](https://count.getloli.com/@Playwright-Tool?theme=booru-touhoulat&padding=7&offset=0&align=top&scale=0.35&pixelated=1&darkmode=auto)](https://github.com/SmileYik/astrbot_plugin_playwright_tools)
 
 基于 Playwright (首选 Camoufox 驱动) 的 AstrBot 网页浏览与自动化操作插件。  
 为大模型提供低 Token 消耗、高精准度的元素编号交互与长页面结构化阅读能力，具备完善的多租户隐私隔离、细粒度白名单防护与可视化运维审计。
