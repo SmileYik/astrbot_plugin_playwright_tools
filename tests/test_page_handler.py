@@ -299,6 +299,126 @@ class TestPageHandler(unittest.TestCase):
         self.assertIn("1. [当前活动]", res)
         self.assertIn("https://example.com", res)
 
+    def test_open_url_image_with_multimodal_enabled_returns_call_tool_result(self):
+        import base64
+
+        mock_resp = MagicMock()
+        mock_resp.headers = {"content-type": "image/png"}
+        mock_resp.body = AsyncMock(return_value=b"\x89PNG_IMAGE_BYTES")
+        self.mock_page.goto = AsyncMock(return_value=mock_resp)
+        self.mock_page.wait_for_load_state = AsyncMock()
+
+        handler = PageHandler(
+            self.mock_mgr,
+            self.mock_sec,
+            self.mock_audit,
+            reader=self.mock_reader,
+            allow_image_to_ai=True,
+            audit_save_screenshots=False,
+        )
+        res = run_coro(handler.open_url("s1", "u1", "https://example.com/logo.png"))
+
+        self.mock_page.goto.assert_awaited_once_with(
+            "https://example.com/logo.png", wait_until="commit", timeout=20000
+        )
+        self.assertTrue(hasattr(res, "content"))
+        self.assertEqual(res.content[0].type, "text")
+        self.assertIn("image/png", res.content[0].text)
+        self.assertEqual(res.content[1].type, "image")
+        self.assertEqual(res.content[1].mimeType, "image/png")
+        self.assertEqual(base64.b64decode(res.content[1].data), b"\x89PNG_IMAGE_BYTES")
+
+    def test_open_url_image_with_multimodal_disabled_returns_metadata(self):
+        mock_resp = MagicMock()
+        mock_resp.headers = {"content-type": "image/jpeg"}
+        mock_resp.body = AsyncMock(return_value=b"jpeg_bytes_12345")
+        self.mock_page.goto = AsyncMock(return_value=mock_resp)
+
+        handler = PageHandler(
+            self.mock_mgr,
+            self.mock_sec,
+            self.mock_audit,
+            reader=self.mock_reader,
+            allow_image_to_ai=False,
+        )
+        res = run_coro(handler.open_url("s1", "u1", "https://example.com/pic.jpg"))
+        self.assertIsInstance(res, str)
+        self.assertIn("image/jpeg", res)
+        self.assertIn("允许 AI 直接查看图片", res)
+
+    def test_open_url_text_json_returns_paginated_content_and_caches_snapshot(self):
+        from astrbot_plugin_playwright_tools.core.readers.plain_text_reader import PlainTextReader
+
+        mock_resp = MagicMock()
+        mock_resp.headers = {"content-type": "application/json; charset=utf-8"}
+        json_lines = "\n".join(f'{{"index": {i}, "val": "sample_payload_data"}}' for i in range(1, 20))
+        mock_resp.body = AsyncMock(return_value=json_lines.encode("utf-8"))
+        self.mock_page.goto = AsyncMock(return_value=mock_resp)
+        self.mock_page.url = "https://example.com/data.json"
+
+        handler = PageHandler(
+            self.mock_mgr,
+            self.mock_sec,
+            self.mock_audit,
+            reader=self.mock_reader,
+            plain_text_reader=PlainTextReader(chunk_char_limit=220),
+        )
+        res1 = run_coro(handler.open_url("s1", "u1", "https://example.com/data.json"))
+        self.assertIn("第 1/", res1)
+        self.assertIn('"index": 1', res1)
+        self.assertIn("pw_read(page=2)", res1)
+
+        res2 = run_coro(handler.read_page("s1", "u1", page=2))
+        self.assertIn("第 2/", res2)
+        self.assertNotEqual(res1, res2)
+
+    def test_open_url_gbk_text_decodes_without_error(self):
+        from astrbot_plugin_playwright_tools.core.readers.plain_text_reader import PlainTextReader
+
+        mock_resp = MagicMock()
+        mock_resp.headers = {"content-type": "text/plain; charset=gbk"}
+        mock_resp.body = AsyncMock(return_value="你好世界，GBK编码测试".encode("gbk"))
+        self.mock_page.goto = AsyncMock(return_value=mock_resp)
+        self.mock_page.url = "https://example.com/gbk.txt"
+
+        handler = PageHandler(
+            self.mock_mgr,
+            self.mock_sec,
+            self.mock_audit,
+            reader=self.mock_reader,
+            plain_text_reader=PlainTextReader(chunk_char_limit=500),
+        )
+        res = run_coro(handler.open_url("s1", "u1", "https://example.com/gbk.txt"))
+        self.assertIn("你好世界，GBK编码测试", res)
+
+    def test_open_url_binary_pdf_returns_metadata_without_domcontentloaded(self):
+        mock_resp = MagicMock()
+        mock_resp.headers = {"content-type": "application/pdf", "content-length": "10240"}
+        self.mock_page.goto = AsyncMock(return_value=mock_resp)
+        self.mock_page.wait_for_load_state = AsyncMock()
+
+        res = run_coro(self.handler.open_url("s1", "u1", "https://example.com/doc.pdf"))
+        self.assertIn("application/pdf", res)
+        self.assertIn("10240", res)
+        self.assertIn("非网页", res)
+
+    def test_open_url_download_starting_returns_guidance(self):
+        self.mock_page.goto = AsyncMock(side_effect=Exception("Page.goto: Download is starting"))
+        res = run_coro(self.handler.open_url("s1", "u1", "https://example.com/archive.zip"))
+        self.assertIn("下载", res)
+        self.assertNotIn("操作异常", res)
+
+    def test_open_url_html_waits_domcontentloaded_gracefully(self):
+        mock_resp = MagicMock()
+        mock_resp.headers = {"content-type": "text/html; charset=utf-8"}
+        self.mock_page.goto = AsyncMock(return_value=mock_resp)
+        self.mock_page.wait_for_load_state = AsyncMock()
+
+        res = run_coro(self.handler.open_url("s1", "u1", "https://example.com/index.html"))
+        self.mock_page.wait_for_load_state.assert_any_await("domcontentloaded", timeout=10000)
+        self.assertIn("已成功打开网页", res)
+        self.assertIn("pw_read()", res)
+
 
 if __name__ == "__main__":
     unittest.main()

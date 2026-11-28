@@ -682,6 +682,21 @@ class TestPluginMain(unittest.TestCase):
         plugin = main.PlaywrightToolPlugin(mock_ctx, config={"audit_db_path": db_file})
         self.assertIs(plugin.history_cleaner.audit_logger, plugin.audit_logger)
 
+    def test_page_handler_receives_multimodal_and_timeout_config(self):
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        db_file = str(TEMP_DIR / "test_page_handler_cfg.db")
+        mock_ctx = MagicMock()
+        plugin = main.PlaywrightToolPlugin(
+            mock_ctx,
+            config={
+                "audit_db_path": db_file,
+                "media": {"allow_screenshot_to_ai": True},
+                "runtime": {"tool_execution_timeout_seconds": 30},
+            },
+        )
+        self.assertTrue(plugin.page_handler.allow_image_to_ai)
+        self.assertEqual(plugin.page_handler.commit_timeout_ms, 25000)
+
 
 if __name__ == "__main__":
     unittest.main()

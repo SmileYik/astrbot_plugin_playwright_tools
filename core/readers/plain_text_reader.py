@@ -101,6 +101,7 @@ class PlainTextReader(BasePageReader):
             total_pages=total_pages,
             chunks=chunks,
             allocated_count=0,
+            reader_mode="plain_text",
         )
 
     async def extract_snapshot(self, page: Any, url: str = "", start_ref: int = 1) -> PageSnapshot:

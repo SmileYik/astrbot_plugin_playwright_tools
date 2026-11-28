@@ -133,6 +133,9 @@ class PlaywrightToolPlugin(Star):
             reader=self.reader,
             enable_close_tool=enable_close_tool,
             mask_password_inputs=self.mask_password_inputs,
+            allow_image_to_ai=allow_screenshot_to_ai,
+            audit_save_screenshots=audit_save_screenshots,
+            commit_timeout_ms=max(5000, (tool_timeout - 5) * 1000),
         )
         self.interact_handler = InteractHandler(
             self.context_manager,
