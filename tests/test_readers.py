@@ -735,6 +735,69 @@ class TestAriaSnapshotReader(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(snap_roll.ref_map.keys()), ["999999", "1000000", "1"])
 
 
+class TestPlainTextReader(unittest.IsolatedAsyncioTestCase):
+    def test_plain_text_reader_paginates_by_chunk_limit(self):
+        from astrbot_plugin_playwright_tools.core.readers.plain_text_reader import PlainTextReader
+
+        reader = PlainTextReader(chunk_char_limit=160)
+        lines = [f"line {i}: some sample plain text payload" for i in range(1, 15)]
+        text = "\n".join(lines)
+
+        snap = reader.build_snapshot(
+            text=text,
+            url="https://example.com/data.txt",
+            title="data.txt",
+            mime_type="text/plain",
+        )
+        self.assertGreater(snap.total_pages, 1)
+        self.assertEqual(len(snap.chunks), snap.total_pages)
+
+        page1 = reader.format_chunk(snap, 1)
+        page2 = reader.format_chunk(snap, 2)
+        self.assertIn(f"第 1/{snap.total_pages} 页", page1)
+        self.assertIn("pw_read(page=", page1)
+        self.assertIn(f"第 2/{snap.total_pages} 页", page2)
+        self.assertIn("line 1:", page1)
+        self.assertNotEqual(page1, page2)
+
+    def test_plain_text_reader_splits_long_single_line(self):
+        from astrbot_plugin_playwright_tools.core.readers.plain_text_reader import PlainTextReader
+
+        reader = PlainTextReader(chunk_char_limit=180)
+        long_json = '{"items": [' + ",".join(f'{{"id": {i}, "name": "item_{i}"}}' for i in range(30)) + "]}"
+
+        snap = reader.build_snapshot(
+            text=long_json,
+            url="https://example.com/api.json",
+            title="api.json",
+            mime_type="application/json",
+        )
+        self.assertGreater(snap.total_pages, 2)
+        reconstructed = "".join(
+            chunk.split("----------------------------------------\n", 1)[-1].split("\n----------------------------------------", 1)[0]
+            for chunk in snap.chunks
+        )
+        self.assertIn('"id": 0', reconstructed)
+        self.assertIn('"id": 29', reconstructed)
+
+    def test_plain_text_reader_search_returns_matching_lines(self):
+        from astrbot_plugin_playwright_tools.core.readers.plain_text_reader import PlainTextReader
+
+        reader = PlainTextReader(chunk_char_limit=500)
+        text = "alpha\nbeta target value\ngamma\ndelta"
+        snap = reader.build_snapshot(text=text, url="https://example.com/a.txt")
+
+        found = reader.search(snap, "target")
+        self.assertIn("找到 1 处匹配", found)
+        self.assertIn("beta target value", found)
+
+        not_found = reader.search(snap, "missing_kw")
+        self.assertIn("未在文本内容中找到匹配", not_found)
+
+        empty_kw = reader.search(snap, "")
+        self.assertIn("检索失败", empty_kw)
+
+
 if __name__ == "__main__":
     unittest.main()
 
