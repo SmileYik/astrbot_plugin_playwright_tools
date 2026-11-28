@@ -95,7 +95,13 @@ class PageHandler(BaseActionHandler):
 
             ctx.clear_page_state(page, reset_snapshot=True)
 
-            return f"已成功打开网页: {url} (标题: {title})。\n[推荐操作: 请调用 pw_read() 查看页面内容与可操作元素]"
+            alive_pages = self._get_alive_pages(ctx)
+            total_tabs = len(alive_pages)
+            tab_pos = (alive_pages.index(page) + 1) if page in alive_pages else 1
+            return (
+                f"已成功打开网页: {url} (标题: {title})。当前位于第 {tab_pos}/{total_tabs} 个标签页。\n"
+                f"[推荐操作: 请调用 pw_read() 查看页面内容与可操作元素]"
+            )
 
         return await self.execute_action(
             session_id=session_id,
@@ -262,13 +268,13 @@ class PageHandler(BaseActionHandler):
         """切换当前控制的浏览器标签页。"""
 
         async def _switch(ctx: BrowserSessionContext, page: Page) -> str:
-            pages = getattr(ctx.browser_context, "pages", None) or getattr(ctx, "pages", [])
+            pages = self._get_alive_pages(ctx)
             if tab_index < 1 or tab_index > len(pages):
-                return f"切换失败: 标签页索引 {tab_index} 超出范围 (当前共有 {len(pages)} 个标签页)"
+                return f"切换失败: 标签页索引 {tab_index} 超出范围 (当前共有 {len(pages)} 个标签页，可调用 pw_page(action='list_tabs') 查看全部标签页)"
 
             target_page = pages[tab_index - 1]
             await ctx.activate_page(target_page)
-            return f"已成功切换至标签页 {tab_index} (URL: {ctx.current_page.url})。\n[推荐操作: 请调用 pw_read() 查看页面内容与可操作元素]"
+            return f"已成功切换至标签页 {tab_index}/{len(pages)} (URL: {ctx.current_page.url})。\n[推荐操作: 请调用 pw_read() 查看页面内容与可操作元素]"
 
         return await self.execute_action(
             session_id=session_id,
@@ -280,6 +286,43 @@ class PageHandler(BaseActionHandler):
             session_name=session_name,
             sender_name=sender_name,
             action_desc="切换",
+        )
+
+    async def list_tabs(
+        self,
+        session_id: str,
+        sender_id: str,
+        session_name: str = "",
+        sender_name: str = "",
+    ) -> str:
+        """列出当前上下文所有已打开的标签页及当前活动标签页。"""
+
+        async def _list(ctx: BrowserSessionContext, page: Page) -> str:
+            pages = self._get_alive_pages(ctx)
+            if not pages:
+                return "当前浏览器上下文没有已打开的标签页。"
+
+            active_page = getattr(ctx, "current_page", None)
+            active_idx = (pages.index(active_page) + 1) if active_page in pages else 0
+            lines = [f"当前共 {len(pages)} 个标签页（当前活动: 第 {active_idx} 个）："]
+            for i, p in enumerate(pages, start=1):
+                marker = "[当前活动]" if p is active_page else "[ ]"
+                title = await self._safe_page_title(p) or "(无标题)"
+                url = str(getattr(p, "url", "") or "").strip() or "(空白页)"
+                lines.append(f"{i}. {marker} {title} - {url}")
+            lines.append("[推荐操作: 如需切换请调用 pw_page(action='switch_tab', tab_index=序号)，或直接操作已有标签页的 Ref ID]")
+            return "\n".join(lines)
+
+        return await self.execute_action(
+            session_id=session_id,
+            sender_id=sender_id,
+            action_name="list_tabs",
+            target_resource="",
+            action_coro_fn=_list,
+            input_args={},
+            session_name=session_name,
+            sender_name=sender_name,
+            action_desc="查看",
         )
 
     async def handle_dialog(

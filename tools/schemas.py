@@ -5,8 +5,8 @@ PW_PAGE_SCHEMA = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["open", "switch_tab", "dialog", "close"],
-            "description": "要执行的页面动作：open(打开网址), switch_tab(切换标签页), dialog(响应弹窗), close(关闭当前浏览器上下文)",
+            "enum": ["open", "switch_tab", "list_tabs", "dialog", "close"],
+            "description": "要执行的页面动作：open(打开网址), switch_tab(切换标签页), list_tabs(列出当前活动及所有已打开标签页), dialog(响应弹窗), close(关闭当前浏览器上下文)",
         },
         "url": {
             "type": "string",

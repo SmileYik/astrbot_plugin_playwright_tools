@@ -84,6 +84,7 @@ class TestPageHandler(unittest.TestCase):
         self.assertEqual(st.ref_map, {})
         self.assertTrue(st.is_snapshot_dirty)
         self.assertIn("已成功打开网页: https://example.com", res)
+        self.assertIn("当前位于第 1/1 个标签页", res)
         self.assertIn("[推荐操作: 请调用 pw_read() 查看页面内容与可操作元素]", res)
 
     def test_switch_tab_preserves_page_states(self):
@@ -274,6 +275,29 @@ class TestPageHandler(unittest.TestCase):
         self.assertIs(self.mock_context.current_page, self.mock_page)
         self.assertIn("旧标签页链接", res)
         self.assertIn("https://example.com/old", res)
+
+    def test_list_tabs_returns_active_and_all_tabs_with_titles_and_urls(self):
+        page2 = MagicMock()
+        page2.url = "https://tab2.example.com/docs"
+        page2.title = AsyncMock(return_value="Tab Two Docs")
+        page2.is_closed = MagicMock(return_value=False)
+
+        self.mock_context.browser_context.pages = [self.mock_page, page2]
+        self.mock_context.pages = [self.mock_page, page2]
+        self.mock_context.current_page = page2
+
+        res = run_coro(self.handler.list_tabs("s1", "u1"))
+        self.assertIn("共 2 个标签页", res)
+        self.assertIn("当前活动: 第 2 个", res)
+        self.assertIn("1. [ ] Test Page - https://example.com", res)
+        self.assertIn("2. [当前活动] Tab Two Docs - https://tab2.example.com/docs", res)
+
+    def test_list_tabs_handles_title_error_gracefully(self):
+        self.mock_page.title = AsyncMock(side_effect=RuntimeError("title failed"))
+        res = run_coro(self.handler.list_tabs("s1", "u1"))
+        self.assertIn("共 1 个标签页", res)
+        self.assertIn("1. [当前活动]", res)
+        self.assertIn("https://example.com", res)
 
 
 if __name__ == "__main__":

@@ -75,14 +75,14 @@ class TestTools(unittest.TestCase):
 
     def test_page_tool_actions_map_exists(self):
         self.assertTrue(hasattr(self.page_tool, "_actions"))
-        for act in ["open", "switch_tab", "dialog", "close"]:
+        for act in ["open", "switch_tab", "list_tabs", "dialog", "close"]:
             self.assertIn(act, self.page_tool._actions)
         self.assertNotIn("read", self.page_tool._actions)
         self.assertNotIn("search", self.page_tool._actions)
 
     def test_pw_page_schema_actions(self):
         actions = PW_PAGE_SCHEMA["properties"]["action"]["enum"]
-        self.assertEqual(actions, ["open", "switch_tab", "dialog", "close"])
+        self.assertEqual(actions, ["open", "switch_tab", "list_tabs", "dialog", "close"])
         self.assertNotIn("page", PW_PAGE_SCHEMA["properties"])
         self.assertNotIn("target", PW_PAGE_SCHEMA["properties"])
         self.assertNotIn("keyword", PW_PAGE_SCHEMA["properties"])
@@ -96,7 +96,7 @@ class TestTools(unittest.TestCase):
     def test_page_tool_invalid_action(self):
         with patch("asyncio.wait_for", fake_wait_for):
             res = run_coro(self.page_tool.call(self.mock_context_wrapper, action="unknown_action"))
-        self.assertIn("未知的动作: unknown_action。支持的动作包括: open, switch_tab, dialog, close", res)
+        self.assertIn("未知的动作: unknown_action。支持的动作包括: open, switch_tab, list_tabs, dialog, close", res)
 
     def test_page_tool_dispatch_open(self):
         async def mock_open(s_id, u_id, url, **kwargs):
@@ -106,6 +106,14 @@ class TestTools(unittest.TestCase):
         with patch("asyncio.wait_for", fake_wait_for):
             res = run_coro(self.page_tool.call(self.mock_context_wrapper, action="open", url="https://example.com"))
         self.assertEqual(res, "打开成功: https://example.com")
+
+    def test_page_tool_dispatch_list_tabs(self):
+        async def mock_list_tabs(s_id, u_id, **kwargs):
+            return "当前共 2 个标签页"
+        self.mock_page_handler.list_tabs = mock_list_tabs
+        with patch("asyncio.wait_for", fake_wait_for):
+            res = run_coro(self.page_tool.call(self.mock_context_wrapper, action="list_tabs"))
+        self.assertEqual(res, "当前共 2 个标签页")
 
     def test_read_tool_dispatch_read(self):
         called_args = {}
