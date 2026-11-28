@@ -562,9 +562,10 @@ class TestAriaSnapshotReader(unittest.IsolatedAsyncioTestCase):
         mock_page.title = AsyncMock(return_value="示例页面")
         reader = AriaSnapshotReader()
         snapshot = await reader.extract_snapshot(mock_page, "https://example.com")
-        self.assertIn("e1", snapshot.ref_map)
-        self.assertEqual(snapshot.ref_map["e1"]["ref"], "e1")
-        self.assertIn('button "Submit" [ref=e1]', snapshot.raw_content)
+        self.assertIn("1", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["1"]["ref"], "1")
+        self.assertEqual(snapshot.ref_map["1"]["aria_ref"], "e1")
+        self.assertIn('button "Submit" [ref=1]', snapshot.raw_content)
         self.assertEqual(snapshot.title, "示例页面")
         self.assertEqual(snapshot.url, "https://example.com")
         self.assertIsInstance(snapshot.timestamp, float)
@@ -578,8 +579,10 @@ class TestAriaSnapshotReader(unittest.IsolatedAsyncioTestCase):
         mock_page.title = "Fallback Title"
         reader = AriaSnapshotReader()
         snapshot = await reader.extract_snapshot(mock_page)
-        self.assertIn("e2", snapshot.ref_map)
-        self.assertIn("e3", snapshot.ref_map)
+        self.assertIn("1", snapshot.ref_map)
+        self.assertIn("2", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["1"]["aria_ref"], "e2")
+        self.assertEqual(snapshot.ref_map["2"]["aria_ref"], "e3")
         self.assertEqual(snapshot.title, "Fallback Title")
         self.assertEqual(snapshot.url, "https://example.com/fallback")
 
@@ -619,19 +622,21 @@ class TestAriaSnapshotReader(unittest.IsolatedAsyncioTestCase):
 
         # 1. 验证正文中彻底剥离了 - /url:
         self.assertNotIn("/url:", snapshot.raw_content)
-        # 2. 验证父行末尾冒号被剥离
-        self.assertIn('link "官方文档" [ref=e3] [cursor=pointer]\n', snapshot.raw_content + '\n')
-        self.assertNotIn('link "官方文档" [ref=e3] [cursor=pointer]:', snapshot.raw_content)
+        # 2. 验证父行末尾冒号被剥离，且 ref 映射为 1..4
+        self.assertIn('link "官方文档" [ref=3] [cursor=pointer]\n', snapshot.raw_content + '\n')
+        self.assertNotIn('link "官方文档" [ref=3] [cursor=pointer]:', snapshot.raw_content)
         # 3. 验证 URL 作为文本的链接被精简为不带引号的 link [ref=...]
-        self.assertIn('link [ref=e4] [cursor=pointer]', snapshot.raw_content)
+        self.assertIn('link [ref=4] [cursor=pointer]', snapshot.raw_content)
         self.assertNotIn('link "https://example.com/page2"', snapshot.raw_content)
-        # 4. 验证 ref_map 中正确记录 href 与 url
-        self.assertIn("e3", snapshot.ref_map)
-        self.assertEqual(snapshot.ref_map["e3"]["href"], "https://example.com/docs")
-        self.assertEqual(snapshot.ref_map["e3"]["url"], "https://example.com/docs")
-        self.assertEqual(snapshot.ref_map["e3"]["tag"], "a")
-        self.assertIn("e4", snapshot.ref_map)
-        self.assertEqual(snapshot.ref_map["e4"]["href"], "https://example.com/page2")
+        # 4. 验证 ref_map 中正确记录 href 与 url 及 aria_ref
+        self.assertIn("3", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["3"]["aria_ref"], "e3")
+        self.assertEqual(snapshot.ref_map["3"]["href"], "https://example.com/docs")
+        self.assertEqual(snapshot.ref_map["3"]["url"], "https://example.com/docs")
+        self.assertEqual(snapshot.ref_map["3"]["tag"], "a")
+        self.assertIn("4", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["4"]["aria_ref"], "e4")
+        self.assertEqual(snapshot.ref_map["4"]["href"], "https://example.com/page2")
 
     async def test_aria_reader_image_src_and_nested_link_extraction(self):
         mock_page = MagicMock()
@@ -665,23 +670,26 @@ class TestAriaSnapshotReader(unittest.IsolatedAsyncioTestCase):
         mock_page.locator.side_effect = mock_locator_router
 
         reader = AriaSnapshotReader()
-        snapshot = await reader.extract_snapshot(mock_page)
+        snapshot = await reader.extract_snapshot(mock_page, start_ref=10)
 
-        # 1. 验证 e3 (图片) 的 src 与 alt 提取
-        self.assertIn("e3", snapshot.ref_map)
-        self.assertEqual(snapshot.ref_map["e3"]["src"], "https://example.com/thumb.jpg")
-        self.assertEqual(snapshot.ref_map["e3"]["alt"], "商品缩略图")
-        self.assertEqual(snapshot.ref_map["e3"]["tag"], "img")
+        # 1. 验证 12 (原 e3 图片) 的 src 与 alt 提取
+        self.assertIn("12", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["12"]["aria_ref"], "e3")
+        self.assertEqual(snapshot.ref_map["12"]["src"], "https://example.com/thumb.jpg")
+        self.assertEqual(snapshot.ref_map["12"]["alt"], "商品缩略图")
+        self.assertEqual(snapshot.ref_map["12"]["tag"], "img")
 
-        # 2. 验证 e4 (独立图片) 的 src
-        self.assertIn("e4", snapshot.ref_map)
-        self.assertEqual(snapshot.ref_map["e4"]["src"], "https://example.com/photo.jpg")
+        # 2. 验证 13 (原 e4 独立图片) 的 src
+        self.assertIn("13", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["13"]["aria_ref"], "e4")
+        self.assertEqual(snapshot.ref_map["13"]["src"], "https://example.com/photo.jpg")
 
-        # 3. 验证 e2 (父级 link) 自动关联嵌套图片的 src
-        self.assertIn("e2", snapshot.ref_map)
-        self.assertEqual(snapshot.ref_map["e2"]["href"], "https://example.com/item")
-        self.assertEqual(snapshot.ref_map["e2"]["src"], "https://example.com/thumb.jpg")
-        self.assertEqual(snapshot.ref_map["e2"]["alt"], "商品缩略图")
+        # 3. 验证 11 (原 e2 父级 link) 自动关联嵌套图片的 src
+        self.assertIn("11", snapshot.ref_map)
+        self.assertEqual(snapshot.ref_map["11"]["aria_ref"], "e2")
+        self.assertEqual(snapshot.ref_map["11"]["href"], "https://example.com/item")
+        self.assertEqual(snapshot.ref_map["11"]["src"], "https://example.com/thumb.jpg")
+        self.assertEqual(snapshot.ref_map["11"]["alt"], "商品缩略图")
 
     def test_aria_search_snapshot(self):
         reader = AriaSnapshotReader()
@@ -702,6 +710,29 @@ class TestAriaSnapshotReader(unittest.IsolatedAsyncioTestCase):
 
         res_empty = reader.search(snapshot, "")
         self.assertIn("检索失败", res_empty)
+
+    async def test_aria_reader_monotonic_ref_mapping_and_rollover(self):
+        mock_page = MagicMock()
+        mock_root = AsyncMock()
+        mock_root.aria_snapshot = AsyncMock(
+            return_value='- button "A" [ref=e1]\n- button "B" [ref=e2]\n- button "C" [ref=e3]'
+        )
+        mock_page.locator.return_value = mock_root
+        mock_page.url = "https://example.com"
+        mock_page.title = "T"
+
+        reader = AriaSnapshotReader()
+        snap = await reader.extract_snapshot(mock_page, start_ref=50)
+        self.assertEqual(list(snap.ref_map.keys()), ["50", "51", "52"])
+        self.assertEqual(snap.allocated_count, 3)
+        self.assertIn("[ref=50]", snap.raw_content)
+        self.assertIn("[ref=51]", snap.raw_content)
+        self.assertIn("[ref=52]", snap.raw_content)
+        self.assertNotIn("[ref=e1]", snap.raw_content)
+
+        # Rollover at 1,000,000 -> 1
+        snap_roll = await reader.extract_snapshot(mock_page, start_ref=999_999)
+        self.assertEqual(list(snap_roll.ref_map.keys()), ["999999", "1000000", "1"])
 
 
 if __name__ == "__main__":

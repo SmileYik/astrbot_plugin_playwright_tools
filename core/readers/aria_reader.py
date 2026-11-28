@@ -325,12 +325,12 @@ class AriaSnapshotReader(BasePageReader):
         page_url = self._get_page_url(page, url)
         raw_yaml = await self._fetch_aria_snapshot(page)
 
-        cleaned_yaml, ref_map, parent_map = self._parse_aria_yaml(raw_yaml)
+        cleaned_yaml, raw_ref_map, parent_map = self._parse_aria_yaml(raw_yaml)
 
-        # 提取图片元素的真实 src 并关联父级 link
+        # 提取图片元素的真实 src 并关联父级 link（使用原始 aria-ref 定位）
         img_refs = [
             r_id
-            for r_id, info in ref_map.items()
+            for r_id, info in raw_ref_map.items()
             if info.get("role") in ("img", "image")
         ]
         if img_refs and hasattr(page, "locator"):
@@ -340,23 +340,46 @@ class AriaSnapshotReader(BasePageReader):
             )
             for r_id, src in zip(img_refs, src_results):
                 if isinstance(src, str) and src:
-                    ref_map[r_id]["src"] = src
-                    if not ref_map[r_id].get("url"):
-                        ref_map[r_id]["url"] = src
+                    raw_ref_map[r_id]["src"] = src
+                    if not raw_ref_map[r_id].get("url"):
+                        raw_ref_map[r_id]["url"] = src
                     # 向上寻找关联的父级 link
                     curr_ref = r_id
                     while curr_ref in parent_map:
                         p_ref = parent_map[curr_ref]
-                        if p_ref in ref_map:
-                            if ref_map[p_ref].get("role") == "link":
-                                if not ref_map[p_ref].get("src"):
-                                    ref_map[p_ref]["src"] = src
-                                if not ref_map[p_ref].get("alt"):
-                                    ref_map[p_ref]["alt"] = ref_map[r_id].get("alt", "")
+                        if p_ref in raw_ref_map:
+                            if raw_ref_map[p_ref].get("role") == "link":
+                                if not raw_ref_map[p_ref].get("src"):
+                                    raw_ref_map[p_ref]["src"] = src
+                                if not raw_ref_map[p_ref].get("alt"):
+                                    raw_ref_map[p_ref]["alt"] = raw_ref_map[r_id].get("alt", "")
                                 break
                             curr_ref = p_ref
                         else:
                             break
+
+        # 将原生 aria-ref (e1, e2...) 重映射为全局单调递增数字 ref_id
+        current_ref = start_ref if isinstance(start_ref, int) and start_ref >= 1 else 1
+        raw_to_global: dict[str, str] = {}
+        ref_map: dict[str, dict] = {}
+        for raw_ref, info in raw_ref_map.items():
+            global_ref = str(current_ref)
+            if current_ref >= 1_000_000:
+                current_ref = 1
+            else:
+                current_ref += 1
+            raw_to_global[raw_ref] = global_ref
+            mapped_info = dict(info)
+            mapped_info["ref"] = global_ref
+            mapped_info["aria_ref"] = raw_ref
+            ref_map[global_ref] = mapped_info
+
+        if raw_to_global:
+            cleaned_yaml = re.sub(
+                r"\[ref=([^\]]+)\]",
+                lambda m: f"[ref={raw_to_global.get(m.group(1).strip(), m.group(1).strip())}]",
+                cleaned_yaml,
+            )
 
         chunks = self._chunk_aria_tree(cleaned_yaml, page_url, title)
         total_pages = len(chunks)
@@ -438,7 +461,7 @@ class AriaSnapshotReader(BasePageReader):
                     },
                     "ref": {
                         "type": "string",
-                        "description": "要查询详细信息或目标 URL 的元素 Ref 编号（如 'e1', 'e2'） (可选)",
+                        "description": "要查询详细信息或目标 URL 的元素 Ref 编号（如 '1', '2'） (可选)",
                         "default": "",
                     },
                     "refresh": {
