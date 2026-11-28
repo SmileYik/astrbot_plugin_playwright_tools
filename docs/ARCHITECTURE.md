@@ -136,7 +136,7 @@ Session S1 ──> All Users share Context (Owner: S1)
 - **Ref ID 字符串化与单调递增**：所有工具入参（`ref`、`target_ref`）、上下文 `ref_map` 均统一采用字符串类型。Markdown 模式采用单调递增计数器（递增上限 1,000,000 后安全回滚至 0），避免历史 Ref ID 冲突。
 - **双定位器策略**：
   - **ARIA 快照模式**：当 Ref ID 为官方格式标识（如 `e1`）或由 ARIA 模式生成时，使用 Playwright 原生选择器 `page.locator(f"aria-ref={ref}")` 执行定位。
-  - **内联 Markdown 模式**：当 Ref ID 为数字编号（如 `'1'`）时，使用 `page.locator(f'[data-astr-ref="{ref}"]')` 执行定位。
+  - **内联 Markdown 模式**：当 Ref ID 为 `@r` 前缀编号（如 `'@r1'`）时，使用 `page.locator(f'[data-astr-ref="{ref}"]')` 执行定位；提取阶段会对文本节点连续空白进行压缩，并在交互控件边界插入空格分隔，减少元素粘连。
   - 两种方式均基于 Playwright 原生 Locator 体系，享有框架自带的可操作性检查与受控组件事件分发。
 - **全链路密码安全脱敏**：表单填入敏感信息时，根据元素属性探测 `type == 'password'`，开启配置后在审计记录、调用日志与大模型返回结果中均将敏感密码值替换为 `******`，防止凭据泄露。
 

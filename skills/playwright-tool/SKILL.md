@@ -30,29 +30,29 @@ description: 指导 AI 使用 pw_page、pw_read、pw_interact 与 pw_media 工�
 调用 `pw_read` 获取结构化正文与带编号（Ref ID）的可交互元素。
 
 1. **按页顺读**：`pw_read(page=1)`
-   - **排版格式**：正文以 Markdown 呈现，交互元素嵌入正文中，采用原生引用风格编号：
-     - 超链接：`[链接文本][Ref]`（如 `[新手指南][12]`）
-     - 按钮与交互控件：`[控件类型: 文本][Ref]`（如 `[按钮: 搜索][15]`、`[输入框 (text): 请输入账号][16]`）
+   - **排版格式**：正文以 Markdown 呈现，交互元素嵌入正文中，采用原生引用风格编号（相邻交互控件以空格分隔）：
+     - 超链接：`[链接文本][Ref]`（如 `[新手指南][@r12]`）
+     - 按钮与交互控件：`[控件类型: 文本][Ref]`（如 `[按钮: 搜索][@r15]`、`[输入框 (text): 请输入账号][@r16]`）
      - 图片：`![图片描述][Ref]`
    - **长表格阅读**：若表格跨页截断，后续分页顶部会自动保留原表头行与分隔线，以保持列上下文。
    - **翻页机制**：单次返回一个分页。若末尾提示存在剩余页数，可传入 `pw_read(page=2)` 顺次阅读。
 2. **关键词检索**：`pw_read(keyword='搜索词')`
    - 当页面篇幅较长且目标明确时，直接定位包含关键词的正文段落与临近控件 Ref，无需逐页翻阅。
-3. **查询元素详情与真实 URL**：`pw_read(ref='12')`
+3. **查询元素详情与真实 URL**：`pw_read(ref='@r12')`
    - 快照正文中默认剥离长 URL。如需获取特定超链接的跳转地址、图片下载地址（src）或控件完整属性，传入对应 Ref 字符串进行定向查询。
 4. **强制刷新**：`pw_read(refresh=True)`
    - 当完成交互操作（如点击提交、加载更多）或等待异步数据加载后，强制重新提取页面最新快照。
 
-> **Ref ID 说明**：所有 Ref 均为由阅读器分配的字符串标识符（如 `'1'`, `'12'`, `'e1'`）。后续工具交互传参时统一使用字符串。
+> **Ref ID 说明**：所有 Ref 均为由阅读器分配的字符串标识符（Markdown 模式为 `@r` 前缀如 `'@r1'`、`'@r12'`，ARIA 模式为 `'e1'`）。后续工具交互传参时必须传入完整字符串（如 `'@r12'`）以精确匹配。
 
 ### 步骤三：元素定位与交互 (`pw_interact`)
 依据快照中获取到的 Ref 编号执行键鼠交互：
-- **点击**：`pw_interact(action='click', ref='15')`
-- **输入文本**：`pw_interact(action='fill', ref='16', text='目标内容')`
-- **选择下拉选项**：`pw_interact(action='select', ref='18', value='option_value')`
-- **鼠标悬停**：`pw_interact(action='hover', ref='20')`（触发悬浮菜单或浮层）
-- **聚焦 / 失焦**：`pw_interact(action='focus', ref='16')` / `pw_interact(action='blur', ref='16')`
-- **拖拽**：`pw_interact(action='drag', ref='21', target_ref='22')`
+- **点击**：`pw_interact(action='click', ref='@r15')`
+- **输入文本**：`pw_interact(action='fill', ref='@r16', text='目标内容')`
+- **选择下拉选项**：`pw_interact(action='select', ref='@r18', value='option_value')`
+- **鼠标悬停**：`pw_interact(action='hover', ref='@r20')`（触发悬浮菜单或浮层）
+- **聚焦 / 失焦**：`pw_interact(action='focus', ref='@r16')` / `pw_interact(action='blur', ref='@r16')`
+- **拖拽**：`pw_interact(action='drag', ref='@r21', target_ref='@r22')`
 - **按键**：`pw_interact(action='press_key', key='Enter')`（常用键如 `'Enter'`, `'Tab'`, `'Escape'`）
 - **滚动页面**：`pw_interact(action='scroll', direction='down', amount=500)`（`direction` 可选 `'down'` 或 `'up'`）
 
@@ -60,7 +60,7 @@ description: 指导 AI 使用 pw_page、pw_read、pw_interact 与 pw_media 工�
 - **生成截图**：
   - 发送至当前聊天：`pw_media(action='screenshot_viewport', target='chat')`（当前视口）或 `pw_media(action='screenshot_full', target='chat')`（整页长图）
   - 自身多模态理解：设置 `target='ai'`，以 base64 图像供模型分析
-- **文件下载**：定位到下载链接或按钮的 Ref 编号后，调用 `pw_media(action='download', ref='25')`
+- **文件下载**：定位到下载链接或按钮的 Ref 编号后，调用 `pw_media(action='download', ref='@r25')`
 
 ### 步骤五：多标签页、弹窗与资源释放 (`pw_page`)
 - **切换标签页**：当点击链接导致外部新窗口打开时，调用 `pw_page(action='switch_tab', tab_index=2)`

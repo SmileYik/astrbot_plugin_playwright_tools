@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+### Markdown 阅读器 `@r` Ref 前缀与行内排版优化
+- **Ref ID `@r` 前缀规范**：
+  - `InlineMarkdownReader` 提取的 Ref ID 统一采用 `@r` 前缀（如 `@r1`、`@r2`），同步写入 `data-astr-ref` 与 `ref_map`，下游工具调用保持精确匹配（需传入完整 `@rN`）。
+- **行内空白压缩与元素分隔**：
+  - 在 `core/readers/markdown_extractor.js` 中压缩文本节点的连续空白字符（保留 `<br>` 换行），并在相邻交互控件边界自动补充空格分隔，避免 `[xxx][@r1][yyy][@r2]` 粘连。
+- **文档与技能说明同步**：
+  - 更新 `skills/playwright-tool/SKILL.md`、`README.md`、`docs/ARCHITECTURE.md` 及工具元数据中的 Ref 示例与说明。
+
 ### 白名单单跳放行、域名精确度优先匹配与导航守卫解耦
 - **白名单单跳放行配置 (`whitelist_rules`)**：
   - 在 `_conf_schema.json` 的 `whitelist_rules` 规则模板中新增 `allow_single_hop`、`single_hop_allowed_actions` 与 `single_hop_follow_redirects` 配置项，支持为特定白名单站点开启单次页面内跳转/弹窗放行，并限制落地页可执行的操作权限与重定向链处理策略。
