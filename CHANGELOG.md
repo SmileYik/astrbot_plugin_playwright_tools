@@ -6,6 +6,13 @@
 
 ## [v1.5.0] - 2026-11-28
 
+### 非 HTML 资源分流与统一多模态返回
+- **`open_url` 基于 `wait_until="commit"` 与 `Content-Type` 分流**：
+  - 避免图片、纯文本、PDF 等非 HTML 资源因等待 `domcontentloaded` 挂起至 30 秒超时。
+  - 图片直链在开启“允许 AI 直接查看图片”时直接通过 `CallToolResult`（`TextContent` + `ImageContent`）发往多模态大模型分析，未开启时返回元信息提示。
+  - 新增 `PlainTextReader`，对非 HTML 纯文本/JSON/XML 响应遵循 `page_chunk_char_limit` 分页并缓存快照，支持 `open_url` 直出第 1 页及后续 `pw_read(page=...)` 翻页与关键词检索。
+  - 统一 `MediaHandler`（`target='ai'` 截图）与 `PageHandler` 的多模态 `CallToolResult` 返回链路，并合并为单一“允许 AI 直接查看图片”配置开关。
+
 ### 配置体验与文档体系完善
 - **现代大上下文默认值调优与控件精简**：
   - 将 `page_chunk_char_limit`、`browser_window_width/height`、`screenshot_max_height_px`、`file_retention_days`、`audit_retention_days`、`high_watermark`、`low_watermark`、`compress_max_input_chars` 从滑块改为直接数值输入；

@@ -130,7 +130,7 @@ playwright install chromium
 | `screenshot_quality` | int (slider) | `80` | 截图质量：JPEG 格式时的压缩质量 (1~100) |
 | `screenshot_max_height_px` | int | `8000` | 长截图高度上限：全屏截取的最大像素高度，超出自动截断 |
 | `screenshot_timeout_seconds` | int (slider) | `20` | 长截图超时时长：长截图拼接渲染超时秒数 (5~120 秒，建议 15~30 秒)，超时自动降级为视口截图 |
-| `allow_screenshot_to_ai` | bool | `false` | 截图发送给 AI：是否允许将网页截图发送给大模型进行多模态视觉理解 |
+| `allow_screenshot_to_ai` | bool | `false` | 允许 AI 直接查看图片：开启后视为多模态 AI，访问图片链接或执行 `target='ai'` 截图时将直接把图片发送给 AI 进行视觉分析 |
 | `element_multiline_separator` | string | `" \| "` | 元素换行替换符：页面可操作元素提取时内部换行符的替换连接符 |
 
 #### ⑤ 存储与审计管理 (`storage_audit`, 默认折叠)
