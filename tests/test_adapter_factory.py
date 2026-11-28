@@ -152,7 +152,7 @@ class TestAdapterFactory(unittest.TestCase):
         self.assertTrue(adapter.headless)
         self.assertFalse(adapter.geoip)
         self.assertEqual(adapter.window_width, 1280)
-        self.assertEqual(adapter.window_height, 720)
+        self.assertEqual(adapter.window_height, 800)
         self.assertEqual(adapter.user_agent, "")
 
     def test_adapter_factory_unsupported_type(self):

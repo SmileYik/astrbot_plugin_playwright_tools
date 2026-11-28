@@ -18,8 +18,8 @@ class HistoryCleaner:
         hc_cfg = cfg.get("history_cleanup", {}) if isinstance(cfg.get("history_cleanup"), dict) else {}
 
         self.enable_cleanup = bool(hc_cfg.get("enable_cleanup", cfg.get("enable_cleanup", False)))
-        self.high_watermark = int(hc_cfg.get("high_watermark", cfg.get("high_watermark", 8000)))
-        self.low_watermark = int(hc_cfg.get("low_watermark", cfg.get("low_watermark", 3000)))
+        self.high_watermark = int(hc_cfg.get("high_watermark", cfg.get("high_watermark", 24000)))
+        self.low_watermark = int(hc_cfg.get("low_watermark", cfg.get("low_watermark", 10000)))
         if self.low_watermark >= self.high_watermark:
             corrected_low = max(1, int(self.high_watermark * 0.5))
             logger.warning(
@@ -35,7 +35,7 @@ class HistoryCleaner:
                 "compress_prompt",
                 cfg.get(
                     "compress_prompt",
-                    "你是一个精炼的内容总结器。请对以下浏览器历史操作及网页正文进行结构化提炼：保留核心事实、关键结论、数据指标及必要链接，剔除冗余修饰与排版，输出不超过 300 字的紧凑摘要。",
+                    "你是一个精炼的内容总结器。请对以下浏览器历史操作及网页正文进行结构化提炼：按要点保留核心事实、关键结论、数据指标、已访问页面 URL 及重要交互结果，剔除冗余修饰与排版，输出不超过 1000 字的结构化摘要。",
                 ),
             )
         ).strip()
