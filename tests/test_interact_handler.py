@@ -11,6 +11,7 @@ if "astrbot" not in sys.modules:
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
+from astrbot_plugin_playwright_tools.core.context_manager import BrowserSessionContext
 from astrbot_plugin_playwright_tools.tools.handlers.interact_handler import InteractHandler, clean_playwright_error
 
 def run_coro(coro):
@@ -31,16 +32,24 @@ class TestInteractHandler(unittest.TestCase):
         self.mock_locator.get_attribute = AsyncMock(return_value="text")
         self.mock_page = MagicMock()
         self.mock_page.url = "https://example.com"
+        self.mock_page.is_closed = MagicMock(return_value=False)
+        self.mock_page.bring_to_front = AsyncMock()
         self.mock_page.locator.return_value = self.mock_locator
         self.mock_page.keyboard = AsyncMock()
         self.mock_page.mouse = AsyncMock()
         self.mock_page.wait_for_load_state = AsyncMock()
 
-        self.mock_context = MagicMock()
-        self.mock_context.owner_id = "u1"
-        self.mock_context.current_page = self.mock_page
-        self.mock_context.last_dialog_message = None
-        self.mock_context.ref_map = {
+        mock_bc = MagicMock()
+        mock_bc.pages = [self.mock_page]
+        self.mock_context = BrowserSessionContext(
+            session_id="s1",
+            owner_id="u1",
+            browser_context=mock_bc,
+            current_page=self.mock_page,
+            pages=[self.mock_page],
+        )
+        st = self.mock_context.get_page_state(self.mock_page)
+        st.ref_map = {
             "1": {"tag": "button", "text": "btn1"},
             "2": {"tag": "div", "text": "target_bin"},
             "3": {"tag": "input", "text": ""},
@@ -49,12 +58,9 @@ class TestInteractHandler(unittest.TestCase):
             "e1": {"ref": "e1", "tag": "button", "text": "aria_btn"},
             "e2": {"ref": "e2", "tag": "div", "text": "aria_target"},
             "f0e1": {"ref": "f0e1", "tag": "button", "text": "frame_btn"},
-            1: {"tag": "button", "text": "btn1"},
-            2: {"tag": "div", "text": "target_bin"},
-            3: {"tag": "input", "text": ""},
-            4: {"tag": "select", "text": ""},
+            "12": {"ref": "12", "aria_ref": "e2", "tag": "button", "text": "mapped_aria"},
         }
-        self.mock_context.is_snapshot_dirty = False
+        st.is_snapshot_dirty = False
 
         async def mock_resolve(session_id, sender_id, **kwargs):
             return self.mock_context, ""
@@ -66,14 +72,14 @@ class TestInteractHandler(unittest.TestCase):
         res = run_coro(self.handler.click("s1", "u1", ref="1"))
         self.assertIn("已成功点击 [1]", res)
         self.assertIn("pw_read()", res)
-        self.assertTrue(self.mock_context.is_snapshot_dirty)
+        self.assertTrue(self.mock_context.get_page_state(self.mock_page).is_snapshot_dirty)
         self.mock_page.locator.assert_called_with('[data-astr-ref="1"]')
         self.mock_locator.click.assert_called_once()
 
     def test_click_element_aria_ref(self):
         res = run_coro(self.handler.click("s1", "u1", ref="e1"))
         self.assertIn("已成功点击 [e1]", res)
-        self.assertTrue(self.mock_context.is_snapshot_dirty)
+        self.assertTrue(self.mock_context.get_page_state(self.mock_page).is_snapshot_dirty)
         self.mock_page.locator.assert_called_with("aria-ref=e1")
         self.mock_locator.click.assert_called_once()
 
@@ -85,7 +91,7 @@ class TestInteractHandler(unittest.TestCase):
     def test_fill_form(self):
         res = run_coro(self.handler.fill_form("s1", "u1", ref="3", text="Hello Playwright"))
         self.assertIn("已成功在输入框 [3] 填入内容", res)
-        self.assertTrue(self.mock_context.is_snapshot_dirty)
+        self.assertTrue(self.mock_context.get_page_state(self.mock_page).is_snapshot_dirty)
         self.mock_page.locator.assert_called_with('[data-astr-ref="3"]')
         self.mock_locator.fill.assert_called_with("Hello Playwright", timeout=10000)
 
@@ -107,7 +113,7 @@ class TestInteractHandler(unittest.TestCase):
     def test_select_option(self):
         res = run_coro(self.handler.select_option("s1", "u1", ref="4", value="opt2"))
         self.assertIn("已在下拉框 [4] 成功选取 'opt2'", res)
-        self.assertTrue(self.mock_context.is_snapshot_dirty)
+        self.assertTrue(self.mock_context.get_page_state(self.mock_page).is_snapshot_dirty)
         self.mock_page.locator.assert_called_with('[data-astr-ref="4"]')
         self.mock_locator.select_option.assert_called()
 
@@ -177,7 +183,7 @@ class TestInteractHandler(unittest.TestCase):
     def test_press_key(self):
         res = run_coro(self.handler.press_key("s1", "u1", key="Enter"))
         self.assertIn("已成功向页面发送按键", res)
-        self.assertTrue(self.mock_context.is_snapshot_dirty)
+        self.assertTrue(self.mock_context.get_page_state(self.mock_page).is_snapshot_dirty)
         self.mock_page.keyboard.press.assert_called_with("Enter")
 
     def test_clean_playwright_error_recommends_pw_read(self):
@@ -243,6 +249,41 @@ class TestInteractHandler(unittest.TestCase):
         self.assertNotIn("Call log:", cleaned)
         self.assertIn("页面弹层遮挡", cleaned)
         self.assertIn("[推荐操作:", cleaned)
+
+    def test_click_page1_ref_while_on_page2_switches_active_page(self):
+        page2 = MagicMock()
+        page2.url = "https://tab2.example.com"
+        page2.is_closed = MagicMock(return_value=False)
+        page2.bring_to_front = AsyncMock()
+        self.mock_context.browser_context.pages = [self.mock_page, page2]
+        self.mock_context.pages = [self.mock_page, page2]
+        self.mock_context.current_page = page2
+        self.mock_context.get_page_state(page2).ref_map = {"99": {"tag": "a", "text": "p2"}}
+
+        res = run_coro(self.handler.click("s1", "u1", ref="1"))
+        self.assertIn("已成功点击 [1]", res)
+        self.assertIs(self.mock_context.current_page, self.mock_page)
+        self.mock_page.locator.assert_called_with('[data-astr-ref="1"]')
+        self.mock_locator.click.assert_called_once()
+        self.assertTrue(self.mock_context.get_page_state(self.mock_page).is_snapshot_dirty)
+        self.assertFalse(self.mock_context.get_page_state(page2).is_snapshot_dirty)
+
+    def test_drag_and_drop_cross_tab_target_ref_rejected(self):
+        page2 = MagicMock()
+        page2.url = "https://tab2.example.com"
+        page2.is_closed = MagicMock(return_value=False)
+        page2.bring_to_front = AsyncMock()
+        self.mock_context.browser_context.pages = [self.mock_page, page2]
+        self.mock_context.pages = [self.mock_page, page2]
+        self.mock_context.get_page_state(page2).ref_map = {"99": {"tag": "div", "text": "p2_target"}}
+
+        res = run_coro(self.handler.drag("s1", "u1", ref="1", target_ref="99"))
+        self.assertIn("拖拽失败", res)
+
+    def test_aria_ref_locator_used_for_remapped_ref(self):
+        res = run_coro(self.handler.click("s1", "u1", ref="12"))
+        self.assertIn("已成功点击 [12]", res)
+        self.mock_page.locator.assert_called_with("aria-ref=e2")
 
 if __name__ == "__main__":
     unittest.main()

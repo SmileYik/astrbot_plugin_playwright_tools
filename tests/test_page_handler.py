@@ -12,6 +12,7 @@ if "astrbot" not in sys.modules:
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
+from astrbot_plugin_playwright_tools.core.context_manager import BrowserSessionContext
 from astrbot_plugin_playwright_tools.tools.handlers.page_handler import PageHandler
 from astrbot_plugin_playwright_tools.core.readers.base import PageSnapshot
 
@@ -46,18 +47,21 @@ class TestPageHandler(unittest.TestCase):
 
         self.mock_page = MagicMock()
         self.mock_page.url = "https://example.com"
+        self.mock_page.is_closed = MagicMock(return_value=False)
+        self.mock_page.bring_to_front = AsyncMock()
         self.mock_page.goto = AsyncMock()
         self.mock_page.title = AsyncMock(return_value="Test Page")
         self.mock_page.wait_for_load_state = AsyncMock()
 
-        self.mock_context = MagicMock()
-        self.mock_context.owner_id = "u1"
-        self.mock_context.current_page = self.mock_page
-        self.mock_context.ref_map = {}
-        self.mock_context.pages = [self.mock_page]
-        self.mock_context.browser_context.pages = [self.mock_page]
-        self.mock_context.current_snapshot = None
-        self.mock_context.is_snapshot_dirty = False
+        mock_bc = MagicMock()
+        mock_bc.pages = [self.mock_page]
+        self.mock_context = BrowserSessionContext(
+            session_id="s1",
+            owner_id="u1",
+            browser_context=mock_bc,
+            current_page=self.mock_page,
+            pages=[self.mock_page],
+        )
 
         async def mock_resolve(session_id, sender_id, **kwargs):
             return self.mock_context, ""
@@ -71,18 +75,36 @@ class TestPageHandler(unittest.TestCase):
         )
 
     def test_open_url_resets_snapshot_and_returns_recommendation(self):
+        st = self.mock_context.get_page_state(self.mock_page)
+        st.current_snapshot = self.fake_snapshot
+        st.ref_map = {"1": {"ref": "1"}}
         res = run_coro(self.handler.open_url("s1", "u1", "https://example.com"))
         self.mock_page.goto.assert_called_once()
-        self.assertIsNone(self.mock_context.current_snapshot)
-        self.assertTrue(self.mock_context.is_snapshot_dirty)
+        self.assertIsNone(st.current_snapshot)
+        self.assertEqual(st.ref_map, {})
+        self.assertTrue(st.is_snapshot_dirty)
         self.assertIn("已成功打开网页: https://example.com", res)
         self.assertIn("[推荐操作: 请调用 pw_read() 查看页面内容与可操作元素]", res)
 
-    def test_switch_tab_resets_snapshot_and_recommends_pw_read(self):
-        res = run_coro(self.handler.switch_tab("s1", "u1", tab_index=1))
-        self.assertIsNone(self.mock_context.current_snapshot)
-        self.assertTrue(self.mock_context.is_snapshot_dirty)
-        self.assertIn("已成功切换至标签页 1", res)
+    def test_switch_tab_preserves_page_states(self):
+        page2 = MagicMock()
+        page2.url = "https://tab2.example.com"
+        page2.is_closed = MagicMock(return_value=False)
+        page2.bring_to_front = AsyncMock()
+        self.mock_context.browser_context.pages = [self.mock_page, page2]
+        self.mock_context.pages = [self.mock_page, page2]
+
+        st1 = self.mock_context.get_page_state(self.mock_page)
+        st1.current_snapshot = self.fake_snapshot
+        st1.ref_map = {"1": {"ref": "1"}}
+        st1.is_snapshot_dirty = False
+
+        res = run_coro(self.handler.switch_tab("s1", "u1", tab_index=2))
+        self.assertIs(self.mock_context.current_page, page2)
+        self.assertEqual(st1.current_snapshot, self.fake_snapshot)
+        self.assertEqual(st1.ref_map, {"1": {"ref": "1"}})
+        self.assertFalse(st1.is_snapshot_dirty)
+        self.assertIn("已成功切换至标签页 2", res)
         self.assertIn("pw_read()", res)
 
     def test_switch_tab_out_of_bounds(self):
@@ -90,12 +112,13 @@ class TestPageHandler(unittest.TestCase):
         self.assertIn("超出范围", res)
 
     def test_read_page_lazy_caching_and_dirty_invalidation(self):
+        st = self.mock_context.get_page_state(self.mock_page)
         # 1. 首次读取：快照为空，触发 extract_snapshot
         res1 = run_coro(self.handler.read_page("s1", "u1", page=1))
         self.assertEqual(self.mock_reader.extract_snapshot.call_count, 1)
-        self.assertEqual(self.mock_context.current_snapshot, self.fake_snapshot)
-        self.assertEqual(self.mock_context.ref_map, self.fake_snapshot.ref_map)
-        self.assertFalse(self.mock_context.is_snapshot_dirty)
+        self.assertEqual(st.current_snapshot, self.fake_snapshot)
+        self.assertEqual(st.ref_map, self.fake_snapshot.ref_map)
+        self.assertFalse(st.is_snapshot_dirty)
         self.assertIn("格式化切片内容", res1)
 
         # 2. 第二次读取：dirty 为 False，且未要求 refresh，直接复用快照
@@ -108,10 +131,10 @@ class TestPageHandler(unittest.TestCase):
         self.assertEqual(self.mock_reader.extract_snapshot.call_count, 2)
 
         # 4. 脏标记置位：is_snapshot_dirty=True，重新提取快照并复位 dirty
-        self.mock_context.is_snapshot_dirty = True
+        st.is_snapshot_dirty = True
         res4 = run_coro(self.handler.read_page("s1", "u1", page=1))
         self.assertEqual(self.mock_reader.extract_snapshot.call_count, 3)
-        self.assertFalse(self.mock_context.is_snapshot_dirty)
+        self.assertFalse(st.is_snapshot_dirty)
 
         # 5. 快照 TTL 超时失效：超过 60 秒自动失效重新提取
         self.fake_snapshot.timestamp = time.time() - 65
@@ -154,7 +177,8 @@ class TestPageHandler(unittest.TestCase):
             "3": {"ref": "3", "tag": "a", "text": "大图预览", "href": "https://example.com/view", "src": "https://example.com/thumb.png"},
             "4": {"ref": "4", "tag": "button", "text": "提交"},
         }
-        self.mock_context.ref_map = self.fake_snapshot.ref_map
+        self.mock_context.get_page_state(self.mock_page).ref_map = self.fake_snapshot.ref_map
+        self.mock_context.get_page_state(self.mock_page).current_snapshot = self.fake_snapshot
 
         # 1. 链接查询
         res_link = run_coro(self.handler.read_page("s1", "u1", ref="1"))
@@ -187,7 +211,8 @@ class TestPageHandler(unittest.TestCase):
             "e2": {"ref": "e2", "tag": "img", "role": "img", "text": "Logo", "alt": "Logo", "href": "", "src": "https://example.com/logo.png"},
             "e3": {"ref": "e3", "tag": "a", "role": "link", "text": "详情原图", "href": "https://example.com/detail", "src": "https://example.com/preview.png"},
         }
-        self.mock_context.ref_map = self.fake_snapshot.ref_map
+        self.mock_context.get_page_state(self.mock_page).ref_map = self.fake_snapshot.ref_map
+        self.mock_context.get_page_state(self.mock_page).current_snapshot = self.fake_snapshot
 
         res_link = run_coro(self.handler.read_page("s1", "u1", ref="e1"))
         self.assertIn("=== Ref 元素详情查询: [e1] ===", res_link)
@@ -227,6 +252,28 @@ class TestPageHandler(unittest.TestCase):
         run_coro(self.handler.read_page("s1", "u1", ref="  123  "))
         self.assertIn("ref", captured_input_args[-1])
         self.assertEqual(captured_input_args[-1]["ref"], "123")
+
+    def test_read_page_query_ref_across_tabs(self):
+        page2 = MagicMock()
+        page2.url = "https://tab2.example.com"
+        page2.is_closed = MagicMock(return_value=False)
+        page2.bring_to_front = AsyncMock()
+        page2.wait_for_load_state = AsyncMock()
+
+        self.mock_context.browser_context.pages = [self.mock_page, page2]
+        self.mock_context.pages = [self.mock_page, page2]
+        self.mock_context.current_page = page2
+
+        st1 = self.mock_context.get_page_state(self.mock_page)
+        st1.current_snapshot = self.fake_snapshot
+        st1.ref_map = {
+            "1": {"ref": "1", "tag": "a", "text": "旧标签页链接", "href": "https://example.com/old", "src": ""}
+        }
+
+        res = run_coro(self.handler.read_page("s1", "u1", ref="1"))
+        self.assertIs(self.mock_context.current_page, self.mock_page)
+        self.assertIn("旧标签页链接", res)
+        self.assertIn("https://example.com/old", res)
 
 
 if __name__ == "__main__":

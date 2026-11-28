@@ -15,6 +15,7 @@ if "astrbot" not in sys.modules:
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
+from astrbot_plugin_playwright_tools.core.context_manager import BrowserSessionContext
 from astrbot_plugin_playwright_tools.tools.handlers.media_handler import MediaHandler
 
 TEMP_DIR = Path(tempfile.gettempdir()) / "astrbot_test_media_v2"
@@ -38,15 +39,22 @@ class TestMediaHandler(unittest.TestCase):
 
         self.mock_page = MagicMock()
         self.mock_page.url = "https://example.com"
+        self.mock_page.is_closed = MagicMock(return_value=False)
+        self.mock_page.bring_to_front = AsyncMock()
         self.mock_page.wait_for_load_state = AsyncMock()
-        self.mock_context = MagicMock()
-        self.mock_context.owner_id = "u1"
-        self.mock_context.current_page = self.mock_page
-        self.mock_context.pages = [self.mock_page]
-        self.mock_context.ref_map = {
+        mock_bc = MagicMock()
+        mock_bc.pages = [self.mock_page]
+        self.mock_context = BrowserSessionContext(
+            session_id="s1",
+            owner_id="u1",
+            browser_context=mock_bc,
+            current_page=self.mock_page,
+            pages=[self.mock_page],
+        )
+        self.mock_context.get_page_state(self.mock_page).ref_map = {
             "1": {"tag": "a", "text": "download-file"},
             "e1": {"ref": "e1"},
-            1: {"tag": "a", "text": "download-file"}
+            "12": {"ref": "12", "aria_ref": "e2"},
         }
 
         async def mock_resolve(session_id, sender_id, **kwargs):

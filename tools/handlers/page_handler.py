@@ -93,9 +93,7 @@ class PageHandler(BaseActionHandler):
                 logger.debug(f"[PageHandler] 打开页面后提取标题异常: {e}")
                 title = ""
 
-            ctx.current_snapshot = None
-            ctx.is_snapshot_dirty = True
-            ctx.ref_map = {}
+            ctx.clear_page_state(page, reset_snapshot=True)
 
             return f"已成功打开网页: {url} (标题: {title})。\n[推荐操作: 请调用 pw_read() 查看页面内容与可操作元素]"
 
@@ -132,14 +130,15 @@ class PageHandler(BaseActionHandler):
             current_url = getattr(cur_page, "url", "")
             await self.wait_page_stable(cur_page)
 
-            snapshot_ts = getattr(ctx.current_snapshot, "timestamp", 0) or 0
-            snapshot_url = getattr(ctx.current_snapshot, "url", "") or ""
+            page_state = ctx.get_page_state(cur_page)
+            snapshot_ts = getattr(page_state.current_snapshot, "timestamp", 0) or 0
+            snapshot_url = getattr(page_state.current_snapshot, "url", "") or ""
             is_expired = (time.time() - snapshot_ts) > 60
             url_changed = current_url != snapshot_url
 
             if (
-                ctx.current_snapshot is None
-                or ctx.is_snapshot_dirty
+                page_state.current_snapshot is None
+                or page_state.is_snapshot_dirty
                 or url_changed
                 or is_expired
                 or refresh
@@ -159,9 +158,9 @@ class PageHandler(BaseActionHandler):
                         except TypeError:
                             snapshot = await self.reader.extract_snapshot(cur_page)
 
-                    ctx.current_snapshot = snapshot
-                    ctx.ref_map = getattr(snapshot, "ref_map", {})
-                    ctx.is_snapshot_dirty = False
+                    page_state.current_snapshot = snapshot
+                    page_state.ref_map = getattr(snapshot, "ref_map", {})
+                    page_state.is_snapshot_dirty = False
                     allocated = getattr(snapshot, "allocated_count", 0) or 0
                     next_ref = (start_ref + allocated) % 1_000_000
                     if next_ref == 0:
@@ -170,7 +169,7 @@ class PageHandler(BaseActionHandler):
 
             clean_ref = str(ref or kwargs.get("ref") or "").strip()
             if clean_ref:
-                ref_map = getattr(ctx, "ref_map", {}) or getattr(ctx.current_snapshot, "ref_map", {}) or {}
+                ref_map = page_state.ref_map or getattr(page_state.current_snapshot, "ref_map", {}) or {}
                 el = ref_map.get(clean_ref)
                 if not el:
                     return f"未在当前快照中找到 Ref ID 为 '{clean_ref}' 的元素。请确认编号是否正确，或调用 pw_read(refresh=True) 刷新快照。"
@@ -227,9 +226,9 @@ class PageHandler(BaseActionHandler):
                 return "\n".join(lines)
 
             if keyword and str(keyword).strip():
-                return self.reader.search(ctx.current_snapshot, str(keyword).strip())
+                return self.reader.search(page_state.current_snapshot, str(keyword).strip())
             else:
-                return self.reader.format_chunk(ctx.current_snapshot, page)
+                return self.reader.format_chunk(page_state.current_snapshot, page)
 
         read_input_args = {
             "page": page,
@@ -267,11 +266,8 @@ class PageHandler(BaseActionHandler):
             if tab_index < 1 or tab_index > len(pages):
                 return f"切换失败: 标签页索引 {tab_index} 超出范围 (当前共有 {len(pages)} 个标签页)"
 
-            ctx.current_page = pages[tab_index - 1]
-            ctx.pages = pages
-            ctx.ref_map = {}
-            ctx.current_snapshot = None
-            ctx.is_snapshot_dirty = True
+            target_page = pages[tab_index - 1]
+            await ctx.activate_page(target_page)
             return f"已成功切换至标签页 {tab_index} (URL: {ctx.current_page.url})。\n[推荐操作: 请调用 pw_read() 查看页面内容与可操作元素]"
 
         return await self.execute_action(
