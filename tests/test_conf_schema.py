@@ -44,10 +44,10 @@ class TestConfSchema(unittest.TestCase):
         self.assertEqual(rt["browser_idle_timeout_minutes"]["slider"]["min"], 0)
         self.assertEqual(rt["browser_idle_timeout_minutes"]["slider"]["max"], 120)
 
-        # 4. 长截图的高度限制和超时时间使用拉杆调节
+        # 4. 长截图高度限制为纯整数输入，长截图超时时间使用拉杆调节
         med = schema["media"]["items"]
         self.assertEqual(med["screenshot_max_height_px"]["type"], "int")
-        self.assertIn("slider", med["screenshot_max_height_px"])
+        self.assertNotIn("slider", med["screenshot_max_height_px"])
         self.assertEqual(med["screenshot_timeout_seconds"]["type"], "int")
         self.assertIn("slider", med["screenshot_timeout_seconds"])
 
@@ -149,6 +149,11 @@ class TestConfSchema(unittest.TestCase):
         self.assertIn("content_extraction_mode", schema["runtime"]["items"])
         self.assertIn("page_chunk_char_limit", schema["runtime"]["items"])
         self.assertEqual(schema["runtime"]["items"]["page_chunk_char_limit"]["default"], 2000)
+        self.assertNotIn("slider", schema["runtime"]["items"]["page_chunk_char_limit"])
+        self.assertNotIn("slider", schema["browser"]["items"]["browser_window_width"])
+        self.assertNotIn("slider", schema["browser"]["items"]["browser_window_height"])
+        self.assertNotIn("slider", schema["storage_audit"]["items"]["file_retention_days"])
+        self.assertNotIn("slider", schema["storage_audit"]["items"]["audit_retention_days"])
         self.assertTrue(schema["security"]["items"]["mask_password_inputs"]["default"])
 
     def test_history_cleanup_schema(self):
@@ -162,9 +167,12 @@ class TestConfSchema(unittest.TestCase):
         self.assertFalse(items["enable_cleanup"]["default"])
         self.assertEqual(items["high_watermark"]["default"], 8000)
         self.assertEqual(items["low_watermark"]["default"], 3000)
+        self.assertNotIn("slider", items["high_watermark"])
+        self.assertNotIn("slider", items["low_watermark"])
         self.assertEqual(items["cleanup_strategy"]["default"], "delete")
         self.assertEqual(items["cleanup_strategy"]["options"], ["delete", "compress"])
         self.assertEqual(items["compress_max_input_chars"]["default"], 0)
+        self.assertNotIn("slider", items["compress_max_input_chars"])
         self.assertEqual(items["compress_provider_id"]["_special"], "select_provider")
         self.assertEqual(items["compress_persona_id"]["_special"], "select_persona")
         self.assertFalse(items["compress_use_persona"]["default"])

@@ -2,7 +2,7 @@
 
 # PlaywrightTool 
 
-<img src="https://github.com/SmileYik/astrbot_plugin_playwright_tools/blob/master/logo.png?raw=true" alt="logo" width="25%" />
+<img src="https://raw.githubusercontent.com/SmileYik/astrbot_plugin_playwright_tools/refs/heads/master/logo.png" alt="logo" width="25%" />
 
 
 [![Moe Counter](https://count.getloli.com/@Playwright-Tool?theme=booru-touhoulat&padding=7&offset=0&align=top&scale=0.3&pixelated=1&darkmode=auto)](https://github.com/SmileYik/astrbot_plugin_playwright_tools)
@@ -15,7 +15,7 @@
 
 ## 🌟 特性亮点
 
-- **元素编号精准操控（Ref ID）**：自动为网页中的按钮、输入框等交互控件赋予编号（如 `[按钮: 登录][@r1]`），大模型按编号操作，降低 Token 消耗并提升点击准确率。
+- **元素编号精准操控**：自动为网页中的按钮、输入框等交互控件赋予编号，大模型按编号操作，降低 Token 消耗并提升点击准确率。
 - **多标签页独立状态与自动切换**：每个标签页独立维护元素编号映射，支持查看已打开标签页列表与自动切换活动页，新开或切换标签页时主动提示。
 - **结构化网页提炼与智能分页**：将长网页解析为保留排版、表格与控件的内联 Markdown 或无障碍语义树，支持长表格跨页排版与按页分批阅读。
 - **长对话 Token 自动消减**：多步网页浏览后自动检测并消减冗长历史记录；支持副 AI 结合用户提问生成意图聚焦摘要，避免超长网页撑爆上下文。
@@ -31,14 +31,14 @@
 ### 1. Web 审计控制台
 直观展示全部调用、今日调用、已允许、安全拦截与执行异常统计，支持按关键词、状态与工具类型实时检索：
 
-![网页工具审计控制台](./docs/images/audit.png)
+![网页工具审计控制台](https://raw.githubusercontent.com/SmileYik/astrbot_plugin_playwright_tools/refs/heads/master/docs/images/audit.png)
 
 ### 2. 详情审阅、快照与截图预览
 点击任意审计卡片即可展开右侧抽屉，查看完整入参、结构化正文快照或网页实景截图：
 
 | 内联 Markdown 快照效果 | 审计详情与网页截图预览 |
 | :---: | :---: |
-| ![内联 Markdown 快照效果](./docs/images/markdown-inline.png) | ![审计详情与网页截图预览](./docs/images/manual-screenshot.png) |
+| ![内联 Markdown 快照效果](https://raw.githubusercontent.com/SmileYik/astrbot_plugin_playwright_tools/refs/heads/master/docs/images/markdown-inline.png) | ![审计详情与网页截图预览](https://raw.githubusercontent.com/SmileYik/astrbot_plugin_playwright_tools/refs/heads/master/docs/images/manual-screenshot.png) |
 
 ---
 
@@ -109,7 +109,7 @@ playwright install chromium
 | `enable_close_tool` | bool | `true` | 注册关闭工具：是否向大模型注册主动关闭浏览器上下文的工具 |
 | `system_prompt_injection` | text | `""` | 系统提示词注入：在调用大模型前动态注入自定义系统提示词，留空则不注入 |
 | `content_extraction_mode` | string (select) | `"inline_markdown"` | 页面正文提炼模式：`inline_markdown` (内联交互 Markdown [推荐]) 或 `aria_snapshot` (无障碍语义树快照) |
-| `page_chunk_char_limit` | int (slider) | `2000` | 分页字符预算：单页正文提炼的最大字符预算 (500~8000)，超限自动平滑切分至下一页 |
+| `page_chunk_char_limit` | int | `2000` | 分页字符预算：单页正文提炼的最大字符预算（建议 1000 ~ 4000），超限自动平滑切分至下一页 |
 
 #### ③ 浏览器引擎 (`browser`)
 | 配置项 | 类型 | 默认值 | 作用描述 |
@@ -119,8 +119,8 @@ playwright install chromium
 | `browser_executable_path` | string | `""` | 浏览器执行路径：自定义浏览器二进制文件的完整绝对路径（仅当核心类型为 `custom` 时必填） |
 | `camoufox_geoip` | bool | `false` | GeoIP 定位防检：Camoufox 适配器是否根据 IP 自动模拟地理位置与时区 |
 | `browser_headless` | bool | `true` | 无头模式：是否以无头模式后台静默运行浏览器 |
-| `browser_window_width` | int (slider) | `1280` | 窗口宽度：浏览器初始视口宽度 (800~3840 像素) |
-| `browser_window_height` | int (slider) | `720` | 窗口高度：浏览器初始视口高度 (600~2160 像素) |
+| `browser_window_width` | int | `1280` | 窗口宽度：浏览器初始视口宽度 (像素) |
+| `browser_window_height` | int | `720` | 窗口高度：浏览器初始视口高度 (像素) |
 | `browser_user_agent` | string | `""` | 自定义 UA：自定义 User-Agent，留空使用内置默认值 |
 
 #### ④ 截图与交互输出 (`media`)
@@ -128,7 +128,7 @@ playwright install chromium
 |---|---|---|---|
 | `screenshot_format` | string (select) | `"png"` | 截图格式：`png` (无损高清) 或 `jpeg` (压缩优化) |
 | `screenshot_quality` | int (slider) | `80` | 截图质量：JPEG 格式时的压缩质量 (1~100) |
-| `screenshot_max_height_px` | int (slider) | `8000` | 长截图高度上限：全屏截取的最大像素高度 (1000~30000 像素)，超出自动截断 |
+| `screenshot_max_height_px` | int | `8000` | 长截图高度上限：全屏截取的最大像素高度，超出自动截断 |
 | `screenshot_timeout_seconds` | int (slider) | `15` | 长截图超时时长：长截图拼接渲染超时秒数 (5~120 秒)，超时降级为视口截图 |
 | `allow_screenshot_to_ai` | bool | `false` | 截图发送给 AI：是否允许将网页截图发送给大模型进行多模态视觉理解 |
 | `element_multiline_separator` | string | `" \| "` | 元素换行替换符：页面可操作元素提取时内部换行符的替换连接符 |
@@ -138,8 +138,8 @@ playwright install chromium
 |---|---|---|---|
 | `download_save_path` | string | `"data/downloads"` | 下载保存路径：浏览器下载文件保存的本地目录 |
 | `screenshot_save_path` | string | `"data/screenshots"` | 截图保存路径：截图文件保存的本地目录 |
-| `file_retention_days` | int (slider) | `7` | 文件保留天数：下载与截图文件保留天数 (1~90 天)，超期自动清理 |
-| `audit_retention_days` | int (slider) | `30` | 审计保留天数：审计记录保存天数 (1~365 天)，超期自动清理 |
+| `file_retention_days` | int | `7` | 文件保留天数：下载与截图文件保留天数，超期自动清理 |
+| `audit_retention_days` | int | `7` | 审计保留天数：审计记录保存天数，超期自动清理 |
 | `audit_max_output_chars` | int | `0` | 审计字符上限：单条工具输出最大字符上限 (0 表示不限长度) |
 | `audit_save_screenshots` | bool | `true` | 审计持久化截图：是否在审计数据库中关联保存截图文件 |
 
@@ -147,11 +147,11 @@ playwright install chromium
 | 配置项 | 类型 | 默认值 | 作用描述 |
 |---|---|---|---|
 | `enable_cleanup` | bool | `false` | 启用历史消减：开启后监控本插件工具调用字符并在超标时自动消减 |
-| `high_watermark` | int (slider) | `8000` | 高水位阈值：历史工具调用总字符超过此时触发清理 (2000~30000 字符) |
-| `low_watermark` | int (slider) | `3000` | 低水位目标：触发清理后消减到的目标字符数 (1000~15000 字符) |
+| `high_watermark` | int | `8000` | 高水位阈值：历史工具调用总字符超过此时触发清理（建议 5000 ~ 12000） |
+| `low_watermark` | int | `3000` | 低水位目标：触发清理后消减到的目标字符数（建议设为高水位的 30% ~ 50%） |
 | `cleanup_strategy` | string (select) | `"delete"` | 消减策略：`delete` (直接占位清空) 或 `compress` (副 AI 总结提炼) |
 | `compress_provider_id` | string | `""` | 压缩模型提供商：执行压缩提炼的 AI 提供商，留空使用会话默认模型 |
-| `compress_max_input_chars` | int (slider) | `0` | 副 AI 输入上限：最大输入字符预算，0 代表不限制，超长直接截断 (0~50000 字符) |
+| `compress_max_input_chars` | int | `0` | 副 AI 输入上限：最大输入字符预算，0 代表不限制，超长直接截断 |
 | `compress_prompt` | text | `"你是一个精炼的内容总结器..."` | 压缩提示词：副 AI 执行提炼时遵循的核心提示词，支持使用 `{{user_input}}` 动态占位符自动引入当前用户问题 |
 | `compress_use_persona` | bool | `false` | 启用人设面具：是否在压缩时注入人设设定 |
 | `compress_persona_id` | string | `""` | 指定人设面具：用于压缩的人设面具，留空使用系统默认人设 |
