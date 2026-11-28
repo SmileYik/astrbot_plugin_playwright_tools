@@ -86,7 +86,7 @@ flowchart TD
 - **`AuditLogger`**: SQLite 审计记录器。异步记录全量调用（起止时间、会话、上下文、目标域名、入参与结果），并在初始化与周期轮询中自动清理超期数据。
 - **`HistoryCleaner`**: 上下文历史清理器。基于高低双水位线在请求发送前自动消减已产生的工具调用记录，支持直接清理与副 AI 紧凑事实摘要压缩，配合 `AuditLogger` 实现工具调用与生命周期双重审计落盘。
 - **`readers/`（双阅读提炼器）**:
-  - **`InlineMarkdownReader`**: 将网页标题、段落、列表、表格、图片及带 Ref ID 的控件融合成语义清晰的 Markdown 文档；底层 DOM 提炼逻辑与 Python 完全解耦（独立为 `core/readers/markdown_extractor.js`），内联控件排版全面采用原生 Markdown 引用脚注风格（`[文本][Ref]`、`![图片: 描述][Ref]`），显著精简元素语法骨架并在密集链接区减少约 30% 字符冗余；引入表格感知智能分页，表格跨页时在后续切片首部自动补齐表头行与分隔行，并配合行级/切片级微切分兜底，确保单页总字符严格受控于 `page_chunk_char_limit` 预算。
+  - **`InlineMarkdownReader`**: 将网页标题、段落、列表、表格、图片及带 Ref ID 的控件融合成语义清晰的 Markdown 文档；底层 DOM 提炼逻辑与 Python 独立解耦（位于 `core/readers/markdown_extractor.js`），内联控件排版采用原生 Markdown 引用脚注风格（`[文本][Ref]`、`![图片: 描述][Ref]`），精简元素语法骨架并在密集链接区减少约 30% 字符冗余；引入表格感知智能分页，表格跨页时在后续切片首部自动补齐表头行与分隔行，并配合行级/切片级微切分兜底，确保单页总字符受控于 `page_chunk_char_limit` 预算。
   - **`AriaSnapshotReader`**: 原生调用 Playwright 官方 `page.locator(':root').aria_snapshot(mode='ai')` 生成标准化无障碍树快照，过滤并剥离 `- /url: <url>` 子行与末尾多余冒号，对超链接无障碍名称本身为 URL 的情况自动化简为 `link [ref=...]`；并发拉取图片元素的真实 `src` 并关联父级嵌套超链接，并按 `start_ref` 将原生 `aria-ref` 重映射为全局单调递增数字 `ref_id`（在 `ref_map` 中保留原始 `aria_ref` 字段），原生支持 `pw_read(ref=...)` 结构化查询。
 
 ### 1.3 处理器层 (`tools/handlers/`)

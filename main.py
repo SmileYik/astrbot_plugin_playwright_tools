@@ -8,7 +8,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
 
 PLUGIN_NAME = "astrbot_plugin_playwright_tools"
-__version__ = "v1.4.5"
+__version__ = "v1.5.0"
 
 from .api.audit_api import AuditApiHandler
 from .api.lifecycle_api import LifecycleApiHandler

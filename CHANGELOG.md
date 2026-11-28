@@ -4,7 +4,7 @@
 
 ---
 
-## [Unreleased]
+## [v1.5.0] - 2026-11-28
 
 ### 工具回复引导优化与标签页状态感知
 - **权限拒绝时列出可执行操作指引**：
@@ -48,7 +48,7 @@
   - 支持从当前上下文列表（`contexts`）中逆序检索最近一条 `role == "user"` 消息，自动解构多部件内容（兼容纯字符串 `str` 与 `TextPart` 列表）；
   - 若上下文中无用户消息，自动平滑回退至从当前事件（`event.message_str` / `event.get_message_str()`）提取；若均无则安全回退为 `""`，避免异常或残留占位符。
 - **100% 向后兼容与配置模式引导**：
-  - 未使用 `{{user_input}}` 的静态系统提示词保持原有行为完全不变；
+  - 未使用 `{{user_input}}` 的静态系统提示词保持原有行为不变；
   - 更新 `_conf_schema.json` 中 `compress_prompt` 的配置说明与提示，引导用户配置针对性提炼模板。
 
 ---
@@ -106,11 +106,11 @@
 
 ### 纯双水位线工具历史消减与副 AI 压缩 (Double Watermark Tool History Cleanup & Compression)
 - **纯高低双水位线上下文消减**：新增 `history_cleanup` 配置组（`high_watermark` 与 `low_watermark`），在 `@filter.on_llm_request` 请求前拦截，当本插件历史工具调用累计字符超过高水位时，从最旧记录按 FIFO 逐组消减直至回落至低水位以内，最新完成的工具调用自然位于队尾完整保留 100% 原始明文。
-- **严格 API 协议兼容（防 400 报错）**：绝不破坏 OpenAI/Gemini/Claude 等厂商要求的 `assistant(tool_calls)` 与 `tool(tool_call_id)` 结构配对，保留消息骨架并替换 `content` 内容，彻底消除孤立消息与丢失 ID 引发的 400 异常。
+- **严格 API 协议兼容（防 400 报错）**：保留 OpenAI/Gemini/Claude 等厂商要求的 `assistant(tool_calls)` 与 `tool(tool_call_id)` 结构配对，保留消息骨架并替换 `content` 内容，消除孤立消息与丢失 ID 引发的 400 异常。
 - **两种消减策略与智能折叠**：
   - **直接删除模式 (`delete`)**：将历史工具消息正文原位替换为精炼占位符 `"[该历史工具调用结果已按策略清理]"`，零额外 Token 开销。
   - **副 AI 压缩模式 (`compress`)**：通过 `_special: "select_provider"` 选取模型生成紧凑摘要，组内非末尾工具填入 `"[已并入本轮浏览摘要]"`，末尾工具写入结构化摘要，因果链清晰。
-- **副 AI 输入上限控制与直接截断**：新增 WebUI 配置项 `compress_max_input_chars`（默认为 0 代表不限制长度）；大于 0 时若超长直接截断并附加提示，杜绝副 AI 上下文爆炸。
+- **副 AI 输入上限控制与直接截断**：新增 WebUI 配置项 `compress_max_input_chars`（默认为 0 代表不限制长度）；大于 0 时若超长直接截断并附加提示，防止副 AI 上下文膨胀。
 - **人设面具融合与安全降级**：副 AI 支持配置人设面具注入（`compress_use_persona` 与 `_special: "select_persona"`，未指定时自动回退继承系统默认人设）；当副 AI 超时或抛出异常时，平滑降级为直接删除占位策略，保障主会话稳定。
 - **事件流自动回写持久化**：深度契合 AstrBot 内部 `context_observer("plugin")` 触发机制，在钩子完成时自动调用 `stage_history()` 将变更持久化回写至会话数据库，避免未来轮次重复计算。
 
@@ -120,7 +120,7 @@
 
 ### 阅读器 Ref 规范化与按需 URL 查询 (Reader Ref Standardization & On-Demand URL Query)
 - **普通图片 Ref ID 分配与 URL 隐藏**：`InlineMarkdownReader` 将页面上的普通图片（`<img>`）纳入统一的 Ref 编号管理，隐藏长图片 URL 并内联渲染为 `![图片: alt][Ref]`，防止 Token 膨胀并实现图片精准定位。
-- **内联控件 Markdown 引用风排版与 JS 独立脚本解耦**：将内联交互控件与超链接全面升级为原生 Markdown 引用脚注风格（`[文本][Ref]`、`![图片: 描述][Ref]`、`[按钮: 文本][Ref]`），显著精简元素语法骨架，密集链接区域字符冗余减少约 30%；将 300+ 行 JS DOM 提取逻辑完全解耦抽离为独立的 `core/readers/markdown_extractor.js` 脚本。
+- **内联控件 Markdown 引用风排版与 JS 独立脚本解耦**：将内联交互控件与超链接升级为原生 Markdown 引用脚注风格（`[文本][Ref]`、`![图片: 描述][Ref]`、`[按钮: 文本][Ref]`），精简元素语法骨架，密集链接区域字符冗余减少约 30%；将 300+ 行 JS DOM 提取逻辑解耦抽离为独立的 `core/readers/markdown_extractor.js` 脚本。
 - **表格感知智能跨页切分与表头自动回填**：`_chunk_blocks` 引入 Markdown 表格结构识别与逐行装箱机制，多行表格跨页时在后续切片首部自动注入表头行与分隔行，确保每个分页都是列语义清晰、语法自闭合的合法表格。
 - **单页字符预算防膨胀与行级兜底微切分**：对超大列表、代码块与极端长文本实施行级与字符级装箱微切分兜底，防范单页快照数万字符膨胀，确保单页总字符严格受控于 `page_chunk_char_limit`（默认 2000）。
 - **ARIA 语义树 URL 剥离与脱敏**：`AriaSnapshotReader` 过滤 YAML 语义树中的 `- /url: <url>` 子行与末尾多余冒号，对超链接无障碍名称本身为 URL 的情况自动化简为 `link [ref=...]`，正文大幅降低 Token 开销。
@@ -237,7 +237,7 @@
 
 ### 架构原生重构 (Playwright-Native Architecture Refactor)
 - **原生 Playwright 交互体系**：将 `InteractHandler` 中所有点击、表单输入、下拉选择、悬停、聚焦/失焦、拖拽动作重构为 Playwright 原生 Locator API 调用（`locator.click()`、`locator.fill()`、`locator.select_option()`、`locator.drag_to()` 等），全面享受框架自带的可操作性检查与受控组件事件分发，移除裸 JS 字符串注入。
-- **解耦浏览器后端适配器**：将 `CamoufoxAdapter` 与通用 `BrowserAdapterBase` 严格解耦，将其职责定位为单一的底层浏览器启动器，向上层完全输出标准的 Playwright `Browser` 与 `BrowserContext`，消除对 Camoufox 的专有强绑定。
+- **解耦浏览器后端适配器**：将 `CamoufoxAdapter` 与通用 `BrowserAdapterBase` 解耦，将其职责定位为单一的底层浏览器启动器，向上层输出标准的 Playwright `Browser` 与 `BrowserContext`，消除对 Camoufox 的专有强绑定。
 - **强类型与官方日志规范**：核心会话上下文与 Handlers 引入 `playwright.async_api` 强类型约束；日志全面采用 AstrBot 官方标准的 `from astrbot.api import logger`。
 - **精简测试架构**：移除冗余笨重的端到端集成测试，保留纯净快速的完整单元测试套件（89 项用例秒级通过）。
 
