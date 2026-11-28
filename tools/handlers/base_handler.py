@@ -31,11 +31,27 @@ ACTION_DESC_MAP = {
     "open_url": "打开",
     "read_page": "读取",
     "switch_tab": "切换",
+    "list_tabs": "查看",
     "handle_dialog": "配置",
     "close_browser": "关闭",
     "screenshot_viewport": "截图",
     "screenshot_full": "截图",
     "download_file": "下载",
+}
+
+ACTION_GUIDANCE_MAP: dict[str, str] = {
+    "read": "pw_read()",
+    "screenshot": "pw_media(action='screenshot_viewport')",
+    "click": "pw_interact(action='click')",
+    "fill": "pw_interact(action='fill')",
+    "select": "pw_interact(action='select')",
+    "hover": "pw_interact(action='hover')",
+    "focus": "pw_interact(action='focus')",
+    "drag": "pw_interact(action='drag')",
+    "press_key": "pw_interact(action='press_key')",
+    "scroll": "pw_interact(action='scroll')",
+    "download": "pw_media(action='download')",
+    "navigate": "pw_page(action='open')",
 }
 
 
@@ -148,6 +164,121 @@ class BaseActionHandler:
             if inspect.isawaitable(ret):
                 await ret
 
+    @staticmethod
+    def _get_alive_pages(ctx: BrowserSessionContext) -> list[Any]:
+        """获取上下文中所有未关闭的标签页列表。"""
+        bc = getattr(ctx, "browser_context", None)
+        bc_pages = getattr(bc, "pages", None) if bc is not None else None
+        raw_pages = bc_pages if isinstance(bc_pages, list) else (getattr(ctx, "pages", None) or [])
+        alive: list[Any] = []
+        for p in raw_pages:
+            if p is None:
+                continue
+            is_closed_fn = getattr(p, "is_closed", None)
+            if callable(is_closed_fn):
+                try:
+                    if is_closed_fn():
+                        continue
+                except Exception:
+                    pass
+            alive.append(p)
+        return alive
+
+    @staticmethod
+    async def _safe_page_title(page: Any) -> str:
+        """安全提取标签页标题（兼容同步与异步 title）。"""
+        if page is None:
+            return ""
+        try:
+            title_attr = getattr(page, "title", "")
+            if callable(title_attr):
+                t_val = title_attr()
+                if inspect.isawaitable(t_val):
+                    t_val = await t_val
+                return str(t_val or "").strip()
+            return str(title_attr or "").strip()
+        except Exception:
+            return ""
+
+    def _format_allowed_actions_guidance(
+        self,
+        ctx: BrowserSessionContext,
+        page: Page | None,
+        auth_user_id: str,
+        current_url: str,
+    ) -> str:
+        """汇总当前页面实际允许的操作集合并映射为具体工具调用指引。"""
+        allowed_actions: set[str] = set()
+        if hasattr(self.security_mgr, "get_allowed_actions"):
+            res = self.security_mgr.get_allowed_actions(auth_user_id, current_url)
+            if isinstance(res, (set, frozenset, list, tuple)):
+                allowed_actions.update(res)
+
+        nav_guard = getattr(ctx, "navigation_guard", None)
+        if nav_guard is not None and page is not None:
+            grants = getattr(nav_guard, "_page_grants", None)
+            if isinstance(grants, dict):
+                grant = grants.get(id(page))
+                if grant is not None and hasattr(grant, "allowed_actions"):
+                    for act in grant.allowed_actions:
+                        if hasattr(nav_guard, "check_single_hop_permission"):
+                            hop_ok, _ = nav_guard.check_single_hop_permission(page, current_url, act)
+                            if hop_ok:
+                                allowed_actions.add(act)
+                        else:
+                            allowed_actions.add(act)
+
+        suggestions = [
+            guide for act, guide in ACTION_GUIDANCE_MAP.items() if act in allowed_actions
+        ]
+        if suggestions:
+            return f"[当前页面可执行操作: {'、'.join(suggestions)}]"
+        return "[当前页面无可用操作权限，可调用 pw_page(action='list_tabs') 查看并切换其他标签页，或调用 pw_page(action='open') 访问允许的网址]"
+
+    async def _format_tab_change_notice(
+        self,
+        ctx: BrowserSessionContext,
+        before_page_ids: list[int],
+        before_active_page: Any,
+        action_name: str,
+    ) -> str:
+        """检测是否新开或切换了标签页，并生成简明状态通知。"""
+        if action_name == "list_tabs":
+            return ""
+
+        after_pages = self._get_alive_pages(ctx)
+        if not after_pages:
+            return ""
+
+        after_active = getattr(ctx, "current_page", None)
+        new_pages = [p for p in after_pages if id(p) not in before_page_ids]
+        active_switched = (
+            after_active is not None
+            and before_active_page is not None
+            and after_active is not before_active_page
+        )
+
+        if not new_pages and not active_switched:
+            return ""
+
+        total = len(after_pages)
+        target = after_active if after_active in after_pages else (new_pages[-1] if new_pages else after_pages[-1])
+        idx = after_pages.index(target) + 1
+        title = await self._safe_page_title(target)
+        url = str(getattr(target, "url", "") or "").strip()
+        title_part = f"标题: {title}, " if title else ""
+
+        if new_pages:
+            return (
+                f"[标签页通知: 检测到新标签页打开，当前共 {total} 个标签页，"
+                f"位于第 {idx}/{total} 个标签页 ({title_part}URL: {url})。"
+                f"可调用 pw_page(action='list_tabs') 查看全部标签页]"
+            )
+        return (
+            f"[标签页通知: 已切换至第 {idx}/{total} 个标签页 ({title_part}URL: {url})。"
+            f"可调用 pw_page(action='list_tabs') 查看全部标签页]"
+        )
+
     async def execute_action(
         self,
         session_id: str,
@@ -170,6 +301,8 @@ class BaseActionHandler:
             return "操作失败: 无法获取浏览器上下文"
 
         page = getattr(ctx, "current_page", None)
+        before_page_ids = [id(p) for p in self._get_alive_pages(ctx)]
+        before_active_page = page
 
         input_args = dict(input_args or {})
         audit_input_args = dict(input_args)
@@ -301,7 +434,10 @@ class BaseActionHandler:
                     session_name=session_name,
                     sender_name=sender_name,
                 )
-                return f"{action_desc}失败: {reason}"
+                guidance = self._format_allowed_actions_guidance(
+                    ctx, page, auth_user_id, current_url
+                )
+                return f"{action_desc}失败: {reason}\n{guidance}"
 
         # 页面稳定等待
         if wait_stabilize and page is not None:
@@ -328,6 +464,12 @@ class BaseActionHandler:
 
             if is_password and self.mask_password_inputs and secret_text:
                 res = res.replace(secret_text, "******")
+
+            tab_notice = await self._format_tab_change_notice(
+                ctx, before_page_ids, before_active_page, action_name
+            )
+            if tab_notice:
+                res = f"{res}\n{tab_notice}"
 
             await self._log_audit(
                 session_id=session_id,

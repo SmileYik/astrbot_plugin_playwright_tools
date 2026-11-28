@@ -27,6 +27,7 @@ class TestBaseActionHandler(unittest.IsolatedAsyncioTestCase):
 
         self.mock_page = MagicMock()
         self.mock_page.url = "https://example.com"
+        self.mock_page.title = AsyncMock(return_value="Example")
         self.mock_page.is_closed = MagicMock(return_value=False)
         self.mock_page.bring_to_front = AsyncMock()
         self.mock_locator = AsyncMock()
@@ -64,7 +65,7 @@ class TestBaseActionHandler(unittest.IsolatedAsyncioTestCase):
             action_desc="点击",
         )
 
-        self.assertEqual(res, "点击失败: 没有点击权限")
+        self.assertTrue(res.startswith("点击失败: 没有点击权限"))
         action_fn.assert_not_called()
         self.mock_audit.log_action.assert_awaited_once()
         call_kwargs = self.mock_audit.log_action.await_args.kwargs
@@ -83,7 +84,7 @@ class TestBaseActionHandler(unittest.IsolatedAsyncioTestCase):
             input_args={"ref": "1"},
             required_permission="click",
         )
-        self.assertEqual(res, "点击失败: 白名单限制")
+        self.assertTrue(res.startswith("点击失败: 白名单限制"))
 
     async def test_context_none_returns_error(self):
         self.mock_mgr.resolve_context = AsyncMock(return_value=(None, ""))
@@ -444,7 +445,8 @@ class TestBaseActionHandler(unittest.IsolatedAsyncioTestCase):
             input_args={"ref": "5"},
             required_permission="click",
         )
-        self.assertEqual(res, "ok")
+        self.assertTrue(res.startswith("ok"))
+        self.assertIn("已切换至第 1/2 个标签页", res)
         self.assertIs(self.mock_context.current_page, self.mock_page)
         self.assertEqual(received_pages, [self.mock_page])
         self.mock_sec.check_permission.assert_called_with("u1", "https://example.com", "click")
@@ -470,6 +472,123 @@ class TestBaseActionHandler(unittest.IsolatedAsyncioTestCase):
         self.mock_page.locator.assert_called_once_with("aria-ref=e3")
         logged_args = self.mock_audit.log_action.await_args.kwargs.get("input_args")
         self.assertEqual(logged_args.get("text"), "******")
+
+    async def test_permission_denied_lists_allowed_actions_guidance(self):
+        self.mock_sec.check_permission.return_value = (False, "拒绝操作：域名 'example.com' 未被授予 'click' 操作权限")
+        self.mock_sec.get_allowed_actions.return_value = {"read", "screenshot"}
+        res = await self.handler.execute_action(
+            session_id="s1",
+            sender_id="u1",
+            action_name="click",
+            target_resource="",
+            action_coro_fn=AsyncMock(),
+            input_args={"ref": "1"},
+            required_permission="click",
+        )
+        self.assertIn("当前页面可执行操作", res)
+        self.assertIn("pw_read()", res)
+        self.assertIn("pw_media(action='screenshot_viewport')", res)
+        self.assertNotIn("pw_interact", res)
+
+    async def test_permission_denied_single_hop_lists_hop_actions(self):
+        from astrbot_plugin_playwright_tools.core.navigation_guard import SingleHopGrant
+
+        self.mock_sec.check_permission.return_value = (False, "拒绝操作：域名 'hop.com' 未在白名单中")
+        self.mock_sec.get_allowed_actions.return_value = set()
+        self.mock_page.url = "https://hop.com/page"
+
+        nav_guard = MagicMock()
+        nav_guard.check_single_hop_permission.side_effect = (
+            lambda _p, _u, act: (act == "read", "" if act == "read" else "拒绝操作：单跳落地页未被授予 'click' 操作权限")
+        )
+        nav_guard._page_grants = {
+            id(self.mock_page): SingleHopGrant(
+                allowed_actions={"read"},
+                follow_redirects=True,
+                granted_url="https://hop.com/page",
+            )
+        }
+        self.mock_context.navigation_guard = nav_guard
+
+        res = await self.handler.execute_action(
+            session_id="s1",
+            sender_id="u1",
+            action_name="click",
+            target_resource="",
+            action_coro_fn=AsyncMock(),
+            input_args={"ref": "1"},
+            required_permission="click",
+        )
+        self.assertIn("当前页面可执行操作", res)
+        self.assertIn("pw_read()", res)
+        self.assertNotIn("pw_interact", res)
+
+    async def test_permission_denied_empty_actions_guides_list_tabs(self):
+        self.mock_sec.check_permission.return_value = (False, "拒绝操作：域名 'blocked.com' 未在白名单中")
+        self.mock_sec.get_allowed_actions.return_value = set()
+        res = await self.handler.execute_action(
+            session_id="s1",
+            sender_id="u1",
+            action_name="read_page",
+            target_resource="",
+            action_coro_fn=AsyncMock(),
+            input_args={},
+            required_permission="read",
+        )
+        self.assertIn("当前页面无可用操作权限", res)
+        self.assertIn("pw_page(action='list_tabs')", res)
+
+    async def test_execute_action_notifies_when_new_tab_opened(self):
+        page2 = MagicMock()
+        page2.url = "https://newtab.example.com"
+        page2.title = AsyncMock(return_value="New Tab")
+        page2.is_closed = MagicMock(return_value=False)
+
+        async def _action(ctx, page):
+            ctx.browser_context.pages = [self.mock_page, page2]
+            ctx.pages = [self.mock_page, page2]
+            ctx.current_page = page2
+            return "已成功点击 [1]"
+
+        res = await self.handler.execute_action(
+            session_id="s1",
+            sender_id="u1",
+            action_name="click",
+            target_resource="",
+            action_coro_fn=_action,
+            input_args={"ref": "1"},
+            required_permission="click",
+        )
+        self.assertIn("已成功点击 [1]", res)
+        self.assertIn("新标签页", res)
+        self.assertIn("2/2", res)
+        self.assertIn("New Tab", res)
+        self.assertIn("https://newtab.example.com", res)
+
+    async def test_execute_action_notifies_when_active_tab_switched_by_ref(self):
+        self.mock_page.title = AsyncMock(return_value="Tab 1")
+        page2 = MagicMock()
+        page2.url = "https://tab2.example.com"
+        page2.title = AsyncMock(return_value="Tab 2")
+        page2.is_closed = MagicMock(return_value=False)
+        page2.bring_to_front = AsyncMock()
+        self.mock_context.browser_context.pages = [self.mock_page, page2]
+        self.mock_context.pages = [self.mock_page, page2]
+        self.mock_context.current_page = page2
+        self.mock_context.get_page_state(self.mock_page).ref_map["5"] = {"ref": "5", "tag": "button"}
+
+        res = await self.handler.execute_action(
+            session_id="s1",
+            sender_id="u1",
+            action_name="click",
+            target_resource="",
+            action_coro_fn=AsyncMock(return_value="已成功点击 [5]"),
+            input_args={"ref": "5"},
+            required_permission="click",
+        )
+        self.assertIn("已切换至第 1/2 个标签页", res)
+        self.assertIn("Tab 1", res)
+        self.assertIn("https://example.com", res)
 
 
 if __name__ == "__main__":
