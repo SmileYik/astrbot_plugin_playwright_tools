@@ -11,7 +11,7 @@
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `action` | string | 是 | `'open'`（打开网址）、`'switch_tab'`（切换标签页）、`'list_tabs'`（列出当前活动及所有已打开标签页）、`'dialog'`（响应弹窗）、`'close'`（关闭当前浏览器上下文） |
+| `action` | string | 是 | `'open'`（打开网址；支持 HTML 网页、多模态图片直链、分页纯文本及二进制元信息分流）、`'switch_tab'`（切换标签页）、`'list_tabs'`（列出当前活动及所有已打开标签页）、`'dialog'`（响应弹窗）、`'close'`（关闭当前浏览器上下文） |
 | `url` | string | 条件 | 目标网页 URL（`action='open'` 时必填） |
 | `tab_index` | integer | 条件 | 目标标签页序号，从 1 开始（`action='switch_tab'` 时必填） |
 | `dialog_action` | string | 条件 | 弹窗处理策略：`'accept'`（确认）或 `'dismiss'`（取消）（`action='dialog'` 时必填） |
@@ -47,7 +47,7 @@
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `action` | string | 是 | `'screenshot_viewport'`（视口截图）、`'screenshot_full'`（整页长截图）、`'download'`（触发文件下载） |
-| `target` | string | 否 | 截图交付目标：`'chat'`（发送至会话）或 `'ai'`（返回 base64 供多模态识图，默认 `'chat'`） |
+| `target` | string | 否 | 截图交付目标：`'chat'`（发送至会话）或 `'ai'`（通过 `CallToolResult` 返回多模态 `ImageContent` 供 AI 识图，默认 `'chat'`） |
 | `ref` | string | 条件 | 触发下载的链接或按钮 Ref ID（`action='download'` 时必填） |
 
 ---

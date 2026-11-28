@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from ...core.context_manager import ContextManager, BrowserSessionContext
 from ...core.security_manager import SecurityManager
 from ...core.audit_logger import AuditLogger
-from .base_handler import BaseActionHandler
+from .base_handler import BaseActionHandler, CallToolResult, build_image_tool_result
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -29,7 +29,7 @@ class MediaHandler(BaseActionHandler):
         context_mgr: ContextManager,
         security_mgr: SecurityManager,
         audit_logger: AuditLogger,
-        allow_screenshot_to_ai: bool = False,
+        allow_image_to_ai: bool = False,
         download_dir: str = "data/plugin_data/astrbot_plugin_playwright_tools/downloads",
         audit_save_screenshots: bool = True,
         audit_screenshots_dir: str = "data/plugin_data/astrbot_plugin_playwright_tools/audit_screenshots",
@@ -46,7 +46,7 @@ class MediaHandler(BaseActionHandler):
             audit_logger,
             mask_password_inputs=mask_password_inputs,
         )
-        self.allow_screenshot_to_ai = allow_screenshot_to_ai
+        self.allow_image_to_ai = allow_image_to_ai
         self.download_dir = download_dir
         self.audit_save_screenshots = audit_save_screenshots
         self.audit_screenshots_dir = audit_screenshots_dir
@@ -85,12 +85,12 @@ class MediaHandler(BaseActionHandler):
             }
         return {"type": "png"}
 
-    def _save_or_encode(self, image_bytes: bytes, target: str, note: str = "") -> str:
+    def _save_or_encode(self, image_bytes: bytes, target: str, note: str = "") -> str | CallToolResult:
         is_jpeg = self._is_jpeg()
         if target.lower() == "ai":
             mime = "image/jpeg" if is_jpeg else "image/png"
-            b64_str = base64.b64encode(image_bytes).decode("utf-8")
-            return f"data:{mime};base64,{b64_str}"
+            text = note or "已截取当前页面图像，请直接分析。"
+            return build_image_tool_result(text=text, image_bytes=image_bytes, mime_type=mime)
         ext = ".jpg" if is_jpeg else ".png"
         file_name = f"screenshot_{int(time.time() * 1000)}{ext}"
         save_path = os.path.join(self.screenshot_dir, file_name)
@@ -160,8 +160,8 @@ class MediaHandler(BaseActionHandler):
         except Exception as clean_err:
             logger.warning(f"[PlaywrightTool] 被动清理过期文件失败: {clean_err}")
 
-        if target.lower() == "ai" and not self.allow_screenshot_to_ai:
-            deny_msg = "拒绝操作：管理员配置中未开启将截图发送给大模型（allow_screenshot_to_ai=False）。如需向用户展示，请使用 target='chat'。"
+        if target.lower() == "ai" and not self.allow_image_to_ai:
+            deny_msg = "拒绝操作：管理员配置中未开启允许 AI 直接查看图片（allow_image_to_ai=False）。如需向用户展示，请使用 target='chat'。"
             ctx, _ = await self._resolve_context(
                 session_id, sender_id, session_name=session_name, sender_name=sender_name
             )
@@ -234,8 +234,8 @@ class MediaHandler(BaseActionHandler):
         except Exception as clean_err:
             logger.warning(f"[PlaywrightTool] 被动清理过期文件失败: {clean_err}")
 
-        if target.lower() == "ai" and not self.allow_screenshot_to_ai:
-            deny_msg = "拒绝操作：管理员配置中未开启将截图发送给大模型（allow_screenshot_to_ai=False）。"
+        if target.lower() == "ai" and not self.allow_image_to_ai:
+            deny_msg = "拒绝操作：管理员配置中未开启允许 AI 直接查看图片（allow_image_to_ai=False）。"
             ctx, _ = await self._resolve_context(
                 session_id, sender_id, session_name=session_name, sender_name=sender_name
             )

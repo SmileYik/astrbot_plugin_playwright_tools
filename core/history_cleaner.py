@@ -233,6 +233,19 @@ class HistoryCleaner:
                     txt = part.get("text")
                     if txt is not None:
                         parts.append(str(txt))
+                elif (
+                    getattr(part, "type", "") in ("image", "image_url")
+                    or hasattr(part, "image_url")
+                    or (
+                        hasattr(part, "data")
+                        and str(getattr(part, "mimeType", "")).startswith("image/")
+                    )
+                    or (
+                        isinstance(part, dict)
+                        and (part.get("type") in ("image", "image_url") or "image_url" in part)
+                    )
+                ):
+                    parts.append("[图片]")
                 elif part is not None:
                     parts.append(str(part))
             return "".join(parts)

@@ -20,7 +20,7 @@
 - **结构化网页提炼与智能分页**：将长网页解析为保留排版、表格与控件的内联 Markdown 或无障碍语义树，支持长表格跨页排版与按页分批阅读。
 - **长对话 Token 自动消减**：多步网页浏览后自动检测并消减冗长历史记录；支持副 AI 结合用户提问生成意图聚焦摘要，避免超长网页撑爆上下文。
 - **拟真防反爬指纹伪装**：首选集成 Camoufox 防检测引擎，模拟真实人类浏览特征与时区地理位置，减少网站反爬拦截。
-- **全面键鼠与多模态交互**：支持点击、输入、下拉选择、悬停、按键、滚动，以及视口高清截图、全页长截图与文件下载。
+- **全面键鼠与多模态交互**：支持点击、输入、下拉选择、悬停、按键、滚动，以及视口高清截图、全页长截图、文件下载与图片直链多模态识图；非 HTML 纯文本/JSON 响应自动分页返回。
 - **多租户隔离与安全防护**：支持个人私密浏览与群聊共享会话；管理员可统一配置域名白名单、单跳放行与访问权限，敏感密码输入框自动脱敏；权限受限时自动提示当前页可执行的操作。
 - **内置可视化管理控制台**：提供基于 Material Design 3 的 Web 管理后台，直观检视历史浏览日志、网页快照与会话生命周期，支持一键导出与便捷维护。
 
@@ -44,25 +44,39 @@
 
 ## 📦 安装部署与环境依赖
 
-### 1. 环境要求
+### 1. 安装方式与版本差异
+
+本插件提供两个发布分支，功能差异仅在于是否包含“长对话 Token 自动消减 (`HistoryCleaner`)”模块：
+
+| 安装来源 | 对应分支 | 安装方式 | 功能说明 |
+|---|---|---|---|
+| **AstrBot 官方插件市场** | `release-market` | 在 AstrBot 管理后台的商店市场中直接搜索 `PlaywrightTool` 安装 | 不包含 `HistoryCleaner` 模块，启动时自动降级关闭历史压缩功能，保留其余全部浏览器自动化能力与网页工具 |
+| **GitHub 仓库安装** | `release` | 在 AstrBot 管理后台点击插件页面右下角的 **+** 按钮，选择“从链接安装”，填入 `https://github.com/SmileYik/astrbot_plugin_playwright_tools/tree/release` | 完整功能版本，包含 `HistoryCleaner` 长对话 Token 自动消减与副 AI 摘要压缩 |
+
+> **⚠️ 关于“长对话 Token 自动消减”功能的影响声明**  
+> 本插件的 `HistoryCleaner` 会在工具执行前直接原地改写大模型上下文中的历史 `tool` 消息内容（将其替换为占位符或副 AI 生成的摘要）。  
+> 根据 AstrBot 官方插件审核意见，原地改写已有历史消息会降低大模型服务端 KV Cache（Prompt 缓存）命中率，官方建议改用向后追加方式注入。  
+> **为何未采用向后追加方式**：`HistoryCleaner` 的核心目的是在多轮网页浏览时缩减已积累的冗长工具调用内容、释放上下文窗口空间并降低后续轮次的输入 Token 量；若仅向后追加摘要而不缩减原历史 `tool` 消息，原有大体积网页内容仍会保留在上下文中，无法解决上下文长度膨胀问题。因此本项目在设计上做了取舍：官方插件市场版本（`release-market`）移除该模块以优先保障 Prompt 缓存命中率；如果您更看重超长网页对话的上下文长度控制、不介意缓存命中率受影响，可从 GitHub `release` 分支安装完整版。
+
+### 2. 环境要求
 - Python 3.10+
 - AstrBot v3.4.0+
 - playwright v1.62.0
 
-### 2. 依赖安装
-推荐安装具备反反爬指纹伪装的 Camoufox 驱动：
+### 3. 依赖安装
+AstrBot 在安装插件时会自动安装 `requirements.txt` 中的 Python 依赖，但浏览器内核实例仍需手动拉取。
+
+推荐在 AstrBot 对应的 Python 环境中拉取具备反反爬指纹伪装的 Camoufox 浏览器实例：
 
 ```bash
-pip install "camoufox[geoip]"
 camoufox fetch
 ```
 
-可以前往文档查看 [Camoufox](https://camoufox.com/python/installation/) 的更多安装信息。
+可以前往文档查看 [Camoufox](https://camoufox.com/python/installation/) 的更多安装信息（若手动部署环境未自动安装依赖，可执行 `pip install "camoufox[geoip]"`）。
 
-若使用原生 Playwright 引擎（Chromium / Firefox / WebKit）：
+若使用原生 Playwright 引擎（Chromium / Firefox / WebKit），则拉取对应浏览器内核：
 
 ```bash
-pip install playwright
 playwright install chromium
 ```
 
@@ -130,7 +144,7 @@ playwright install chromium
 | `screenshot_quality` | int (slider) | `80` | 截图质量：JPEG 格式时的压缩质量 (1~100) |
 | `screenshot_max_height_px` | int | `8000` | 长截图高度上限：全屏截取的最大像素高度，超出自动截断 |
 | `screenshot_timeout_seconds` | int (slider) | `20` | 长截图超时时长：长截图拼接渲染超时秒数 (5~120 秒，建议 15~30 秒)，超时自动降级为视口截图 |
-| `allow_screenshot_to_ai` | bool | `false` | 截图发送给 AI：是否允许将网页截图发送给大模型进行多模态视觉理解 |
+| `allow_image_to_ai` | bool | `false` | 允许 AI 直接查看图片：开启后视为多模态 AI，访问图片链接或执行 `target='ai'` 截图时将直接把图片发送给 AI 进行视觉分析 |
 | `element_multiline_separator` | string | `" \| "` | 元素换行替换符：页面可操作元素提取时内部换行符的替换连接符 |
 
 #### ⑤ 存储与审计管理 (`storage_audit`, 默认折叠)
@@ -174,7 +188,7 @@ playwright install chromium
 
 | 工具名称 | 主要用途 |
 |---|---|
-| `pw_page` | 打开网页、查看与切换标签页、响应浏览器弹窗、关闭浏览器上下文 |
+| `pw_page` | 打开网页与直链资源（HTML / 图片多模态 / 分页纯文本 / 二进制提示）、查看与切换标签页、响应浏览器弹窗、关闭浏览器上下文 |
 | `pw_read` | 按页阅读结构化正文、关键词定位检索、查询元素真实链接与图片地址 |
 | `pw_interact` | 点击、填表、下拉选择、悬停、聚焦、拖拽、按键与页面滚动 |
 | `pw_media` | 视口截图、整页长截图（可发送至聊天或供 AI 识图）与文件下载 |

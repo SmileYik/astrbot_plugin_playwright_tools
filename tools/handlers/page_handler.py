@@ -1,12 +1,17 @@
+import asyncio
 import inspect
+from pathlib import Path
+import re
 import time
 from typing import TYPE_CHECKING, Any
+import uuid
 
 from ...core.context_manager import ContextManager, BrowserSessionContext
 from ...core.security_manager import SecurityManager
 from ...core.audit_logger import AuditLogger
 from ...core.readers.base import BasePageReader
-from .base_handler import BaseActionHandler
+from ...core.readers.plain_text_reader import PlainTextReader
+from .base_handler import BaseActionHandler, CallToolResult, build_image_tool_result
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -27,6 +32,11 @@ class PageHandler(BaseActionHandler):
         reader: BasePageReader | None = None,
         enable_close_tool: bool = True,
         mask_password_inputs: bool = True,
+        allow_image_to_ai: bool = False,
+        audit_save_screenshots: bool = True,
+        audit_screenshots_dir: str = "data/plugin_data/astrbot_plugin_playwright_tools/audit_screenshots",
+        commit_timeout_ms: int = 20000,
+        plain_text_reader: PlainTextReader | None = None,
         **kwargs,
     ):
         super().__init__(
@@ -37,6 +47,97 @@ class PageHandler(BaseActionHandler):
         )
         self.reader = reader
         self.enable_close_tool = enable_close_tool
+        self.allow_image_to_ai = allow_image_to_ai
+        self.audit_save_screenshots = audit_save_screenshots
+        self.audit_screenshots_dir = audit_screenshots_dir
+        self.commit_timeout_ms = max(5000, int(commit_timeout_ms or 20000))
+        chunk_limit = getattr(reader, "chunk_char_limit", 4000) if reader else 4000
+        self.plain_text_reader = plain_text_reader or PlainTextReader(
+            chunk_char_limit=int(chunk_limit or 4000),
+            mask_passwords=mask_password_inputs,
+        )
+
+    @staticmethod
+    def _parse_content_type(headers: Any) -> tuple[str, str]:
+        """从响应头解析主 MIME 类型与字符集。"""
+        if not isinstance(headers, dict):
+            return "", ""
+        raw_ct = ""
+        for k, v in headers.items():
+            if isinstance(k, str) and k.lower() == "content-type" and isinstance(v, str):
+                raw_ct = v
+                break
+        if not raw_ct:
+            return "", ""
+        parts = [p.strip() for p in raw_ct.split(";") if p.strip()]
+        mime = parts[0].lower() if parts else ""
+        charset = ""
+        for param in parts[1:]:
+            m = re.match(r"charset\s*=\s*['\"]?([^'\";\s]+)", param, flags=re.IGNORECASE)
+            if m:
+                charset = m.group(1).strip()
+                break
+        return mime, charset
+
+    @staticmethod
+    def _is_text_mime(mime: str) -> bool:
+        """判断 MIME 是否属于非 HTML 纯文本类型。"""
+        if not mime:
+            return False
+        if mime in ("text/html", "application/xhtml+xml"):
+            return False
+        if mime.startswith("text/"):
+            return True
+        if mime in (
+            "application/json",
+            "application/xml",
+            "application/javascript",
+            "application/ecmascript",
+            "application/x-javascript",
+            "application/x-yaml",
+            "application/yaml",
+            "application/x-ndjson",
+            "image/svg+xml",
+        ):
+            return True
+        return mime.endswith("+json") or mime.endswith("+xml")
+
+    @staticmethod
+    def _decode_text_body(body: bytes, charset: str = "") -> str:
+        """按响应头字符集解码字节流，失败时依次回退 utf-8 与 gb18030。"""
+        candidates = []
+        if charset:
+            candidates.append(charset)
+        for enc in ("utf-8", "gb18030"):
+            if enc not in [c.lower() for c in candidates]:
+                candidates.append(enc)
+        for enc in candidates:
+            try:
+                return body.decode(enc)
+            except (LookupError, UnicodeDecodeError):
+                continue
+        return body.decode("utf-8", errors="replace")
+
+    def _save_audit_image(self, image_bytes: bytes, mime_type: str) -> str:
+        """将图片响应字节保存至审计截图目录并返回相对/规范路径。"""
+        if not self.audit_save_screenshots or not image_bytes:
+            return ""
+        try:
+            audit_dir = Path(self.audit_screenshots_dir)
+            audit_dir.mkdir(parents=True, exist_ok=True)
+            ext = ".jpg" if "jpeg" in mime_type or "jpg" in mime_type else ".png"
+            if "webp" in mime_type:
+                ext = ".webp"
+            elif "gif" in mime_type:
+                ext = ".gif"
+            shot_name = f"img_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}{ext}"
+            shot_file = audit_dir / shot_name
+            with open(shot_file, "wb") as f:
+                f.write(image_bytes)
+            return str(Path(self.audit_screenshots_dir) / shot_name).replace("\\", "/")
+        except Exception as e:
+            logger.warning(f"[PageHandler] 保存图片审计文件失败: {e}")
+            return ""
 
     def _setup_page_listeners(self, context: BrowserSessionContext, page: Page) -> None:
         """为页面附加原生弹窗自动应答监听器。"""
@@ -72,35 +173,143 @@ class PageHandler(BaseActionHandler):
         url: str,
         session_name: str = "",
         sender_name: str = "",
-    ) -> str:
-        """打开目标网页。"""
+    ) -> str | CallToolResult:
+        """打开目标网页或直链资源（基于 commit 与 Content-Type 分流处理）。"""
 
-        async def _open(ctx: BrowserSessionContext, page: Page) -> str:
+        async def _open(ctx: BrowserSessionContext, page: Page):
             self._setup_page_listeners(ctx, page)
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-
-            title = ""
             try:
-                if hasattr(page, "title") and callable(page.title):
-                    t_val = page.title()
-                    if inspect.isawaitable(t_val):
-                        title = await t_val
-                    else:
-                        title = str(t_val)
-                else:
-                    title = str(getattr(page, "title", ""))
-            except Exception as e:
-                logger.debug(f"[PageHandler] 打开页面后提取标题异常: {e}")
-                title = ""
+                response = await page.goto(url, wait_until="commit", timeout=self.commit_timeout_ms)
+            except Exception as nav_err:
+                if "download is starting" in str(nav_err).lower():
+                    ctx.clear_page_state(page, reset_snapshot=True)
+                    return (
+                        f"目标链接触发了文件下载: {url}\n"
+                        f"[提示: 该链接为直接下载资源，未在标签页渲染；如需获取文件请通过其他下载方式或在页面点击触发 pw_media(action='download')]"
+                    )
+                raise
 
-            ctx.clear_page_state(page, reset_snapshot=True)
+            headers = getattr(response, "headers", None) if response is not None else None
+            mime, charset = self._parse_content_type(headers)
 
             alive_pages = self._get_alive_pages(ctx)
             total_tabs = len(alive_pages)
             tab_pos = (alive_pages.index(page) + 1) if page in alive_pages else 1
+
+            # 1. 图片直链分支（SVG 按文本处理，避免多模态模型无法解析）
+            if mime.startswith("image/") and mime != "image/svg+xml":
+                ctx.clear_page_state(page, reset_snapshot=True)
+                image_bytes = b""
+                if response is not None and hasattr(response, "body"):
+                    try:
+                        raw_body = response.body()
+                        image_bytes = await raw_body if inspect.isawaitable(raw_body) else raw_body
+                    except Exception as body_err:
+                        logger.debug(f"[PageHandler] 读取图片响应体失败，尝试降级截图: {body_err}")
+                if not image_bytes and hasattr(page, "screenshot"):
+                    try:
+                        if hasattr(page, "wait_for_load_state"):
+                            try:
+                                load_ret = page.wait_for_load_state("load", timeout=5000)
+                                if inspect.isawaitable(load_ret):
+                                    await load_ret
+                            except Exception as load_err:
+                                logger.debug(f"[PageHandler] 图片降级前等待 load 跳过: {load_err}")
+                        shot = page.screenshot(full_page=False)
+                        image_bytes = await shot if inspect.isawaitable(shot) else shot
+                        mime = "image/png"
+                    except Exception as shot_err:
+                        logger.debug(f"[PageHandler] 图片降级截图失败: {shot_err}")
+
+                screenshot_path = self._save_audit_image(image_bytes, mime) if image_bytes else ""
+                size_info = f"{len(image_bytes)} 字节" if image_bytes else "未知大小"
+                if self.allow_image_to_ai:
+                    if image_bytes:
+                        desc = (
+                            f"已打开图片资源: {url} (类型: {mime}, 大小: {size_info})。"
+                            f"当前位于第 {tab_pos}/{total_tabs} 个标签页，请直接分析下方图片内容。"
+                        )
+                        return build_image_tool_result(desc, image_bytes, mime), {"screenshot_path": screenshot_path}
+                    return (
+                        f"已打开图片资源: {url} (类型: {mime})，但未能获取图片内容。当前位于第 {tab_pos}/{total_tabs} 个标签页。\n"
+                        f"[推荐操作: 可稍后调用 pw_media(action='screenshot_viewport', target='ai') 尝试重新捕获页面图像]"
+                    ), {"screenshot_path": screenshot_path}
+
+                return (
+                    f"已打开图片资源: {url} (类型: {mime}, 大小: {size_info})。当前位于第 {tab_pos}/{total_tabs} 个标签页。\n"
+                    f"[提示: 当前未开启“允许 AI 直接查看图片”选项，无法直接将图片发送给 AI 分析；如需发给用户请调用 pw_media(action='screenshot_viewport', target='chat')]"
+                ), {"screenshot_path": screenshot_path}
+
+            # 2. 非 HTML 纯文本分支
+            if self._is_text_mime(mime):
+                text_content = ""
+                if response is not None and hasattr(response, "body"):
+                    try:
+                        raw_body = response.body()
+                        body_bytes = await raw_body if inspect.isawaitable(raw_body) else raw_body
+                        if isinstance(body_bytes, (bytes, bytearray)):
+                            text_content = self._decode_text_body(bytes(body_bytes), charset)
+                        else:
+                            text_content = str(body_bytes or "")
+                    except Exception as body_err:
+                        logger.debug(f"[PageHandler] 读取文本响应体失败: {body_err}")
+                if not text_content and response is not None and hasattr(response, "text"):
+                    try:
+                        raw_txt = response.text()
+                        text_content = await raw_txt if inspect.isawaitable(raw_txt) else str(raw_txt or "")
+                    except Exception as txt_err:
+                        logger.debug(f"[PageHandler] response.text() 降级失败: {txt_err}")
+
+                page_url = getattr(page, "url", "") or url
+                snapshot = self.plain_text_reader.build_snapshot(
+                    text=text_content,
+                    url=page_url,
+                    mime_type=mime,
+                )
+                page_state = ctx.get_page_state(page)
+                page_state.current_snapshot = snapshot
+                page_state.ref_map = {}
+                page_state.is_snapshot_dirty = False
+                return self.plain_text_reader.format_chunk(snapshot, 1)
+
+            # 3. HTML 或无响应头（如前端路由/about:blank）分支
+            if not mime or mime in ("text/html", "application/xhtml+xml"):
+                if hasattr(page, "wait_for_load_state"):
+                    try:
+                        ret = page.wait_for_load_state("domcontentloaded", timeout=10000)
+                        if inspect.isawaitable(ret):
+                            await ret
+                    except Exception as dom_err:
+                        logger.debug(f"[PageHandler] open_url 等待 domcontentloaded 跳过/超时: {dom_err}")
+
+                title = ""
+                try:
+                    if hasattr(page, "title") and callable(page.title):
+                        t_val = page.title()
+                        title = await t_val if inspect.isawaitable(t_val) else str(t_val)
+                    else:
+                        title = str(getattr(page, "title", ""))
+                except Exception as e:
+                    logger.debug(f"[PageHandler] 打开页面后提取标题异常: {e}")
+                    title = ""
+
+                ctx.clear_page_state(page, reset_snapshot=True)
+                return (
+                    f"已成功打开网页: {url} (标题: {title})。当前位于第 {tab_pos}/{total_tabs} 个标签页。\n"
+                    f"[推荐操作: 请调用 pw_read() 查看页面内容与可操作元素]"
+                )
+
+            # 4. 其他非网页二进制资源（PDF、压缩包、音视频等）
+            ctx.clear_page_state(page, reset_snapshot=True)
+            content_length = ""
+            if isinstance(headers, dict):
+                for k, v in headers.items():
+                    if isinstance(k, str) and k.lower() == "content-length" and v:
+                        content_length = f", 大小: {v} 字节"
+                        break
             return (
-                f"已成功打开网页: {url} (标题: {title})。当前位于第 {tab_pos}/{total_tabs} 个标签页。\n"
-                f"[推荐操作: 请调用 pw_read() 查看页面内容与可操作元素]"
+                f"已访问非网页二进制资源: {url} (类型: {mime}{content_length})。当前位于第 {tab_pos}/{total_tabs} 个标签页。\n"
+                f"[提示: 该资源不是 HTML 网页或纯文本，不建议调用 pw_read()]"
             )
 
         return await self.execute_action(
@@ -137,9 +346,11 @@ class PageHandler(BaseActionHandler):
             await self.wait_page_stable(cur_page)
 
             page_state = ctx.get_page_state(cur_page)
+            is_plain_text_snap = getattr(page_state.current_snapshot, "reader_mode", "") == "plain_text"
+            active_reader = self.plain_text_reader if is_plain_text_snap else self.reader
             snapshot_ts = getattr(page_state.current_snapshot, "timestamp", 0) or 0
             snapshot_url = getattr(page_state.current_snapshot, "url", "") or ""
-            is_expired = (time.time() - snapshot_ts) > 60
+            is_expired = False if is_plain_text_snap else (time.time() - snapshot_ts) > 60
             url_changed = current_url != snapshot_url
 
             if (
@@ -149,6 +360,8 @@ class PageHandler(BaseActionHandler):
                 or is_expired
                 or refresh
             ):
+                if url_changed:
+                    active_reader = self.reader
                 ref_lock = getattr(ctx, "ref_lock", None)
                 if ref_lock is None:
                     ref_lock = asyncio.Lock()
@@ -157,12 +370,12 @@ class PageHandler(BaseActionHandler):
                 async with ref_lock:
                     start_ref = getattr(ctx, "next_ref_id", 1) or 1
                     try:
-                        snapshot = await self.reader.extract_snapshot(cur_page, current_url, start_ref=start_ref)
+                        snapshot = await active_reader.extract_snapshot(cur_page, current_url, start_ref=start_ref)
                     except TypeError:
                         try:
-                            snapshot = await self.reader.extract_snapshot(cur_page, current_url)
+                            snapshot = await active_reader.extract_snapshot(cur_page, current_url)
                         except TypeError:
-                            snapshot = await self.reader.extract_snapshot(cur_page)
+                            snapshot = await active_reader.extract_snapshot(cur_page)
 
                     page_state.current_snapshot = snapshot
                     page_state.ref_map = getattr(snapshot, "ref_map", {})
@@ -232,9 +445,9 @@ class PageHandler(BaseActionHandler):
                 return "\n".join(lines)
 
             if keyword and str(keyword).strip():
-                return self.reader.search(page_state.current_snapshot, str(keyword).strip())
+                return active_reader.search(page_state.current_snapshot, str(keyword).strip())
             else:
-                return self.reader.format_chunk(page_state.current_snapshot, page)
+                return active_reader.format_chunk(page_state.current_snapshot, page)
 
         read_input_args = {
             "page": page,

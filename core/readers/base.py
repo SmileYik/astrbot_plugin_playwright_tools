@@ -15,6 +15,7 @@ class PageSnapshot:
     chunks: list[str]
     timestamp: float = field(default_factory=time.time)
     allocated_count: int = 0
+    reader_mode: str = ""
 
 
 class BasePageReader(ABC):

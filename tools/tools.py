@@ -25,9 +25,12 @@ except (ImportError, AttributeError):
             pass
 
 from .schemas import PW_PAGE_SCHEMA, PW_READ_SCHEMA, PW_INTERACT_SCHEMA, PW_MEDIA_SCHEMA
+from .handlers.base_handler import CallToolResult
 from .handlers.page_handler import PageHandler
 from .handlers.interact_handler import InteractHandler
 from .handlers.media_handler import MediaHandler
+
+ToolExecResult = str | CallToolResult
 
 
 def _extract_event_and_metadata(context: Any) -> tuple[Any, str, str, str, str]:
@@ -131,7 +134,7 @@ async def _invoke_handler(fn, *args, **kwargs):
     return await fn(*args, **kwargs)
 
 
-async def _execute_with_timeout(coro, timeout_seconds: int) -> str:
+async def _execute_with_timeout(coro, timeout_seconds: int) -> ToolExecResult:
     try:
         if timeout_seconds and timeout_seconds > 0:
             return await asyncio.wait_for(coro, timeout=float(timeout_seconds))
@@ -183,7 +186,7 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
             "close": self._action_close,
         }
 
-    async def _action_open(self, session_id: str, sender_id: str, session_name: str = "", sender_name: str = "", **kwargs) -> str:
+    async def _action_open(self, session_id: str, sender_id: str, session_name: str = "", sender_name: str = "", **kwargs) -> ToolExecResult:
         url = kwargs.get("url")
         if not url:
             return "参数错误: action='open' 时必须提供 url 参数"
@@ -228,7 +231,7 @@ class PwPageTool(FunctionTool[AstrAgentContext]):
             session_name=session_name, sender_name=sender_name
         )
 
-    async def call(self, context: AstrAgentContext, **kwargs) -> str:
+    async def call(self, context: AstrAgentContext, **kwargs) -> ToolExecResult:
         await _execute_history_cleaner(self.history_cleaner, context, self.name)
         event, session_id, sender_id, session_name, sender_name = _extract_event_and_metadata(context)
         action = kwargs.get("action")
@@ -277,7 +280,7 @@ class PwReadTool(FunctionTool[AstrAgentContext]):
         object.__setattr__(self, "timeout_seconds", timeout_seconds)
         object.__setattr__(self, "history_cleaner", history_cleaner)
 
-    async def call(self, context: AstrAgentContext, **kwargs) -> str:
+    async def call(self, context: AstrAgentContext, **kwargs) -> ToolExecResult:
         await _execute_history_cleaner(self.history_cleaner, context, self.name)
         event, session_id, sender_id, session_name, sender_name = _extract_event_and_metadata(context)
         raw_page = kwargs.get("page", 1)
@@ -438,7 +441,7 @@ class PwInteractTool(FunctionTool[AstrAgentContext]):
             session_name=session_name, sender_name=sender_name
         )
 
-    async def call(self, context: AstrAgentContext, **kwargs) -> str:
+    async def call(self, context: AstrAgentContext, **kwargs) -> ToolExecResult:
         await _execute_history_cleaner(self.history_cleaner, context, self.name)
         event, session_id, sender_id, session_name, sender_name = _extract_event_and_metadata(context)
         action = kwargs.get("action")
@@ -491,7 +494,7 @@ class PwMediaTool(FunctionTool[AstrAgentContext]):
             "download": self._action_download,
         }
 
-    async def _action_screenshot_viewport(self, session_id: str, sender_id: str, session_name: str = "", sender_name: str = "", **kwargs) -> str:
+    async def _action_screenshot_viewport(self, session_id: str, sender_id: str, session_name: str = "", sender_name: str = "", **kwargs) -> ToolExecResult:
         target = kwargs.get("target", "chat")
         return await _invoke_handler(
             self.media_handler.screenshot_viewport,
@@ -499,7 +502,7 @@ class PwMediaTool(FunctionTool[AstrAgentContext]):
             session_name=session_name, sender_name=sender_name
         )
 
-    async def _action_screenshot_full(self, session_id: str, sender_id: str, session_name: str = "", sender_name: str = "", **kwargs) -> str:
+    async def _action_screenshot_full(self, session_id: str, sender_id: str, session_name: str = "", sender_name: str = "", **kwargs) -> ToolExecResult:
         target = kwargs.get("target", "chat")
         return await _invoke_handler(
             self.media_handler.screenshot_full,
@@ -522,7 +525,7 @@ class PwMediaTool(FunctionTool[AstrAgentContext]):
             session_name=session_name, sender_name=sender_name
         )
 
-    async def call(self, context: AstrAgentContext, **kwargs) -> str:
+    async def call(self, context: AstrAgentContext, **kwargs) -> ToolExecResult:
         await _execute_history_cleaner(self.history_cleaner, context, self.name)
         event, session_id, sender_id, session_name, sender_name = _extract_event_and_metadata(context)
         action = kwargs.get("action")
@@ -536,7 +539,12 @@ class PwMediaTool(FunctionTool[AstrAgentContext]):
         )
 
         target = str(kwargs.get("target", "chat")).lower()
-        if action in ("screenshot_viewport", "screenshot_full") and target == "chat" and res.startswith("[IMAGE_PATH:"):
+        if (
+            action in ("screenshot_viewport", "screenshot_full")
+            and target == "chat"
+            and isinstance(res, str)
+            and res.startswith("[IMAGE_PATH:")
+        ):
             img_path = res.split("\n", 1)[0].strip()[len("[IMAGE_PATH:"):].rstrip("]")
             try:
                 if hasattr(event, "send") and callable(event.send):

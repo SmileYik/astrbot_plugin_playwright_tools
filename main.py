@@ -8,7 +8,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
 
 PLUGIN_NAME = "astrbot_plugin_playwright_tools"
-__version__ = "v1.5.0"
+__version__ = "v1.6.0"
 
 from .api.audit_api import AuditApiHandler
 from .api.lifecycle_api import LifecycleApiHandler
@@ -18,7 +18,10 @@ from .core.security_manager import SecurityManager
 from .core.readers import InlineMarkdownReader, AriaSnapshotReader
 from .core.context_manager import ContextManager
 from .core.service_api import PlaywrightServiceAPI
-from .core.history_cleaner import HistoryCleaner
+try:
+    from .core.history_cleaner import HistoryCleaner
+except (ImportError, AttributeError):
+    HistoryCleaner = None
 from .adapts.factory import AdapterFactory
 
 from .tools.handlers.page_handler import PageHandler
@@ -79,7 +82,7 @@ class PlaywrightToolPlugin(Star):
         screenshot_quality = int(med_cfg.get("screenshot_quality", self.config.get("screenshot_quality", 80)))
         screenshot_max_height = int(med_cfg.get("screenshot_max_height_px", self.config.get("screenshot_max_height_px", 8000)))
         screenshot_timeout = int(med_cfg.get("screenshot_timeout_seconds", self.config.get("screenshot_timeout_seconds", 20)))
-        allow_screenshot_to_ai = bool(med_cfg.get("allow_screenshot_to_ai", self.config.get("allow_screenshot_to_ai", False)))
+        allow_image_to_ai = bool(med_cfg.get("allow_image_to_ai", self.config.get("allow_image_to_ai", False)))
         element_multiline_separator = str(med_cfg.get("element_multiline_separator", self.config.get("element_multiline_separator", " | ")))
 
         # 存储与审计
@@ -133,6 +136,9 @@ class PlaywrightToolPlugin(Star):
             reader=self.reader,
             enable_close_tool=enable_close_tool,
             mask_password_inputs=self.mask_password_inputs,
+            allow_image_to_ai=allow_image_to_ai,
+            audit_save_screenshots=audit_save_screenshots,
+            commit_timeout_ms=max(5000, (tool_timeout - 5) * 1000),
         )
         self.interact_handler = InteractHandler(
             self.context_manager,
@@ -144,7 +150,7 @@ class PlaywrightToolPlugin(Star):
             self.context_manager,
             self.security_manager,
             self.audit_logger,
-            allow_screenshot_to_ai=allow_screenshot_to_ai,
+            allow_image_to_ai=allow_image_to_ai,
             download_dir=self.download_save_path,
             audit_save_screenshots=audit_save_screenshots,
             screenshot_format=screenshot_format,
@@ -155,7 +161,14 @@ class PlaywrightToolPlugin(Star):
         )
 
         # 4. 初始化上下文历史消减器与复合 FunctionTool
-        self.history_cleaner = HistoryCleaner(self.context, self.config, audit_logger=self.audit_logger)
+        if HistoryCleaner is None:
+            # AstrBot 官方插件市场在插件审核过程中对于原地修改上下文的方式并不赞同
+            # 故官方插件市场源中无法使用上下文压缩功能.
+            # 若不在意上下文的修改对缓存的影响, 可以去 GITHUB 仓库下载原始版本.
+            self.history_cleaner = None
+            logger.warning(f"[PlaywrightTool] 当前插件来源为 AstrBot 官方市场源, 因为官方插件市场在插件审核过程中对于原地修改上下文的方式并不赞同, 故官方插件市场源中无法使用上下文压缩功能. 若不在意上下文的修改对缓存的影响, 可以去 GITHUB 仓库下载原始版本.")
+        else:
+            self.history_cleaner = HistoryCleaner(self.context, self.config, audit_logger=self.audit_logger)
 
         self.pw_page_tool = PwPageTool(
             page_handler=self.page_handler,
