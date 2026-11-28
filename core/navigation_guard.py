@@ -82,6 +82,7 @@ class NavigationGuard:
         self,
         page: Any,
         on_main_frame_navigated: Callable[[Any], None] | None = None,
+        on_page_closed: Callable[[Any], None] | None = None,
     ) -> None:
         """为页面挂载主帧导航、弹窗来源记录与关闭清理监听器。"""
         if not hasattr(page, "on"):
@@ -117,6 +118,11 @@ class NavigationGuard:
         def _on_close(*_args: Any, **_kwargs: Any) -> None:
             self._page_grants.pop(id(page), None)
             self._page_openers.pop(id(page), None)
+            if on_page_closed is not None:
+                try:
+                    on_page_closed(page)
+                except Exception as e:
+                    logger.debug(f"[NavigationGuard] 页面关闭回调异常: {e}")
 
         try:
             page.on("framenavigated", _on_frame_nav)
@@ -275,6 +281,7 @@ class NavigationGuard:
         initial_page: Any,
         on_new_page: Callable[[Any], None] | None = None,
         on_main_frame_navigated: Callable[[Any], None] | None = None,
+        on_page_closed: Callable[[Any], None] | None = None,
     ) -> None:
         """为 BrowserContext 挂载路由守卫与页面/弹窗生命周期监听。"""
         if hasattr(browser_ctx, "route"):
@@ -285,7 +292,7 @@ class NavigationGuard:
             except Exception as e:
                 logger.warning(f"[NavigationGuard] 挂载全局路由拦截守卫失败: {e}")
 
-        self._setup_page_listeners(initial_page, on_main_frame_navigated)
+        self._setup_page_listeners(initial_page, on_main_frame_navigated, on_page_closed)
 
         if hasattr(browser_ctx, "on"):
             def _on_popup(new_page: Any) -> None:
@@ -296,7 +303,7 @@ class NavigationGuard:
                         self._page_openers[id(new_page)] = opener_attr
                     if on_new_page is not None:
                         on_new_page(new_page)
-                    self._setup_page_listeners(new_page, on_main_frame_navigated)
+                    self._setup_page_listeners(new_page, on_main_frame_navigated, on_page_closed)
                 except Exception as e:
                     logger.debug(f"[NavigationGuard] 弹窗新页面注册监听异常: {e}")
 

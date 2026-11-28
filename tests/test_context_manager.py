@@ -314,25 +314,26 @@ class TestContextManager(unittest.IsolatedAsyncioTestCase):
         on_frame_nav = callbacks["framenavigated"]
 
         # set some snapshot and ref_map
-        ctx.is_snapshot_dirty = False
-        ctx.current_snapshot = "fake_snapshot"
-        ctx.ref_map = {"1": {}}
+        st = ctx.get_page_state(mock_page)
+        st.is_snapshot_dirty = False
+        st.current_snapshot = "fake_snapshot"
+        st.ref_map = {"1": {}}
 
         # subframe navigation should not invalidate
         sub_frame = MagicMock()
         sub_frame.parent_frame = MagicMock()
         on_frame_nav(sub_frame)
-        self.assertFalse(ctx.is_snapshot_dirty)
-        self.assertEqual(ctx.current_snapshot, "fake_snapshot")
-        self.assertEqual(ctx.ref_map, {"1": {}})
+        self.assertFalse(st.is_snapshot_dirty)
+        self.assertEqual(st.current_snapshot, "fake_snapshot")
+        self.assertEqual(st.ref_map, {"1": {}})
 
         # main frame navigation should invalidate
         main_frame = MagicMock()
         main_frame.parent_frame = None
         on_frame_nav(main_frame)
-        self.assertTrue(ctx.is_snapshot_dirty)
-        self.assertIsNone(ctx.current_snapshot)
-        self.assertEqual(ctx.ref_map, {})
+        self.assertTrue(st.is_snapshot_dirty)
+        self.assertIsNone(st.current_snapshot)
+        self.assertEqual(st.ref_map, {})
 
     async def test_popup_page_frame_navigation_listener(self):
         mock_adapter = MagicMock()
@@ -359,17 +360,27 @@ class TestContextManager(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.current_page, popup_page)
         self.assertIn("framenavigated", popup_callbacks)
 
-        # Main frame nav on popup invalidates
-        ctx.is_snapshot_dirty = False
-        ctx.current_snapshot = "popup_snapshot"
-        ctx.ref_map = {"1": {}}
+        # Keep state on initial page, and set state on popup page
+        init_st = ctx.get_page_state(mock_page)
+        init_st.is_snapshot_dirty = False
+        init_st.current_snapshot = "init_snapshot"
+        init_st.ref_map = {"10": {"ref": "10"}}
+
+        # Main frame nav on popup invalidates only popup, not initial page
+        popup_st = ctx.get_page_state(popup_page)
+        popup_st.is_snapshot_dirty = False
+        popup_st.current_snapshot = "popup_snapshot"
+        popup_st.ref_map = {"1": {}}
 
         main_frame = MagicMock()
         main_frame.parent_frame = None
         popup_callbacks["framenavigated"](main_frame)
-        self.assertTrue(ctx.is_snapshot_dirty)
-        self.assertIsNone(ctx.current_snapshot)
-        self.assertEqual(ctx.ref_map, {})
+        self.assertTrue(popup_st.is_snapshot_dirty)
+        self.assertIsNone(popup_st.current_snapshot)
+        self.assertEqual(popup_st.ref_map, {})
+        self.assertFalse(init_st.is_snapshot_dirty)
+        self.assertEqual(init_st.current_snapshot, "init_snapshot")
+        self.assertEqual(init_st.ref_map, {"10": {"ref": "10"}})
 
     async def test_contexts_with_different_idle_timeouts_cleaned_properly(self):
         import time
@@ -505,6 +516,70 @@ class TestContextManager(unittest.IsolatedAsyncioTestCase):
         from astrbot_plugin_playwright_tools.core.navigation_guard import NavigationGuard
         ctx = await self.mgr._create_new_context("s_nav", "u_nav")
         self.assertIsInstance(ctx.navigation_guard, NavigationGuard)
+
+    async def test_per_page_state_isolation_and_resolve_ref(self):
+        from astrbot_plugin_playwright_tools.core.context_manager import BrowserSessionContext, PageState
+
+        p1 = MagicMock()
+        p1.url = "https://page1.example.com"
+        p1.is_closed = MagicMock(return_value=False)
+        p1.bring_to_front = AsyncMock()
+        p2 = MagicMock()
+        p2.url = "https://page2.example.com"
+        p2.is_closed = MagicMock(return_value=False)
+        p2.bring_to_front = AsyncMock()
+
+        bc = MagicMock()
+        bc.pages = [p1, p2]
+        ctx = BrowserSessionContext(
+            session_id="s1",
+            owner_id="u1",
+            browser_context=bc,
+            current_page=p2,
+            pages=[p1, p2],
+        )
+
+        st1 = ctx.get_page_state(p1)
+        st2 = ctx.get_page_state(p2)
+        self.assertIsInstance(st1, PageState)
+        self.assertIsNot(st1, st2)
+
+        st1.ref_map["1"] = {"ref": "1", "tag": "button", "text": "P1 Btn"}
+        st2.ref_map["2"] = {"ref": "2", "tag": "a", "text": "P2 Link"}
+
+        resolved_page, info = ctx.resolve_ref("1")
+        self.assertIs(resolved_page, p1)
+        self.assertEqual(info["text"], "P1 Btn")
+
+        await ctx.activate_page(p1)
+        self.assertIs(ctx.current_page, p1)
+        p1.bring_to_front.assert_awaited_once()
+
+    async def test_remove_page_state_fallback_current_page(self):
+        from astrbot_plugin_playwright_tools.core.context_manager import BrowserSessionContext
+
+        p1 = MagicMock()
+        p1.is_closed = MagicMock(return_value=False)
+        p2 = MagicMock()
+        p2.is_closed = MagicMock(return_value=False)
+
+        bc = MagicMock()
+        bc.pages = [p1]
+        ctx = BrowserSessionContext(
+            session_id="s1",
+            owner_id="u1",
+            browser_context=bc,
+            current_page=p2,
+            pages=[p1, p2],
+        )
+        ctx.get_page_state(p1).ref_map["1"] = {"ref": "1"}
+        ctx.get_page_state(p2).ref_map["2"] = {"ref": "2"}
+
+        ctx.remove_page_state(p2)
+        self.assertNotIn(id(p2), ctx.page_states)
+        self.assertNotIn(p2, ctx.pages)
+        self.assertIs(ctx.current_page, p1)
+        self.assertIn(id(p1), ctx.page_states)
 
 
 if __name__ == "__main__":

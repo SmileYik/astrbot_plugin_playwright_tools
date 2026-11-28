@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -18,6 +19,14 @@ else:
         Page = Any
 
 @dataclass
+class PageState:
+    """单个标签页独立的 Ref 映射与快照状态。"""
+    ref_map: dict[str, dict] = field(default_factory=dict)
+    current_snapshot: Any = None
+    is_snapshot_dirty: bool = False
+
+
+@dataclass
 class BrowserSessionContext:
     """单个浏览器上下文会话数据结构。"""
     session_id: str
@@ -34,11 +43,9 @@ class BrowserSessionContext:
     current_operator_id: str = ""
     session_name: str = ""
     owner_name: str = ""
-    ref_map: dict[Any, dict] = field(default_factory=dict)
+    page_states: dict[int, PageState] = field(default_factory=dict)
     dialog_action: dict | None = None
     last_dialog_message: str | None = None
-    current_snapshot: Any = None
-    is_snapshot_dirty: bool = False
     ref_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     next_ref_id: int = 1
     navigation_guard: Any = None
@@ -55,6 +62,114 @@ class BrowserSessionContext:
         else:
             self.next_ref_id += 1
         return str(current)
+
+    def get_page_state(self, page: "Page | None" = None) -> PageState:
+        """获取指定页面（默认 current_page）的独立状态，不存在时初始化。"""
+        target = page if page is not None else self.current_page
+        if target is None:
+            return PageState()
+        pid = id(target)
+        state = self.page_states.get(pid)
+        if state is None:
+            state = PageState()
+            self.page_states[pid] = state
+        return state
+
+    def clear_page_state(self, page: "Page | None", reset_snapshot: bool = True) -> None:
+        """清空指定页面的 ref_map，并按需重置快照与脏标记。"""
+        target = page if page is not None else self.current_page
+        if target is None:
+            return
+        state = self.page_states.get(id(target))
+        if state is None:
+            if reset_snapshot:
+                self.page_states[id(target)] = PageState(is_snapshot_dirty=True)
+            return
+        state.ref_map = {}
+        if reset_snapshot:
+            state.current_snapshot = None
+            state.is_snapshot_dirty = True
+
+    def remove_page_state(self, page: "Page | None") -> None:
+        """在页面关闭时移除其状态并维护活跃页面回退。"""
+        if page is None:
+            return
+        self.page_states.pop(id(page), None)
+        if page in self.pages:
+            self.pages = [p for p in self.pages if p is not page]
+        if self.current_page is page:
+            alive: list[Any] = []
+            bc_pages = getattr(self.browser_context, "pages", None)
+            candidates = bc_pages if isinstance(bc_pages, list) else self.pages
+            for p in candidates:
+                if p is page:
+                    continue
+                is_closed_fn = getattr(p, "is_closed", None)
+                if callable(is_closed_fn):
+                    try:
+                        if is_closed_fn():
+                            continue
+                    except Exception:
+                        pass
+                alive.append(p)
+            self.current_page = alive[-1] if alive else None
+
+    @staticmethod
+    def _is_page_closed(page: Any) -> bool:
+        is_closed_fn = getattr(page, "is_closed", None)
+        if callable(is_closed_fn):
+            try:
+                return bool(is_closed_fn())
+            except Exception:
+                return False
+        return False
+
+    def resolve_ref(self, ref: str | int) -> tuple["Page | None", dict | None]:
+        """按 ref_id 查找所属标签页与元素信息，优先当前活动页，未命中时遍历其他存活页。"""
+        ref_str = str(ref).strip() if ref is not None else ""
+        if not ref_str:
+            return None, None
+
+        if self.current_page is not None and not self._is_page_closed(self.current_page):
+            cur_state = self.page_states.get(id(self.current_page))
+            if cur_state is not None and ref_str in cur_state.ref_map:
+                return self.current_page, cur_state.ref_map[ref_str]
+
+        candidates: list[Any] = []
+        bc_pages = getattr(self.browser_context, "pages", None)
+        if isinstance(bc_pages, list):
+            candidates.extend(bc_pages)
+        for p in self.pages:
+            if p not in candidates:
+                candidates.append(p)
+
+        for p in candidates:
+            if p is None or p is self.current_page or self._is_page_closed(p):
+                continue
+            state = self.page_states.get(id(p))
+            if state is not None and ref_str in state.ref_map:
+                return p, state.ref_map[ref_str]
+
+        return None, None
+
+    async def activate_page(self, page: "Page") -> None:
+        """将指定标签页设为当前活动页面，并尝试将其置前。"""
+        if page is None:
+            return
+        self.current_page = page
+        bc_pages = getattr(self.browser_context, "pages", None)
+        if isinstance(bc_pages, list):
+            self.pages = list(bc_pages)
+        elif page not in self.pages:
+            self.pages.append(page)
+
+        if not self._is_page_closed(page) and hasattr(page, "bring_to_front"):
+            try:
+                res = page.bring_to_front()
+                if inspect.isawaitable(res):
+                    await res
+            except Exception as e:
+                logger.debug(f"[BrowserSessionContext] 置前标签页异常: {e}")
 
 # 别名
 ManagedContext = BrowserSessionContext
@@ -446,10 +561,8 @@ class ContextManager:
                         ctx.pages.append(new_page)
                         ctx.current_page = new_page
 
-                def _on_main_frame_nav(_page) -> None:
-                    ctx.is_snapshot_dirty = True
-                    ctx.current_snapshot = None
-                    ctx.ref_map = {}
+                def _on_main_frame_nav(nav_page) -> None:
+                    ctx.clear_page_state(nav_page, reset_snapshot=True)
 
                 nav_guard = NavigationGuard(
                     security=self.security,
@@ -461,6 +574,7 @@ class ContextManager:
                     first_page,
                     on_new_page=_on_new_page,
                     on_main_frame_navigated=_on_main_frame_nav,
+                    on_page_closed=ctx.remove_page_state,
                 )
                 ctx.navigation_guard = nav_guard
 

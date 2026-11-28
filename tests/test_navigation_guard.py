@@ -367,6 +367,18 @@ class TestNavigationGuard(unittest.IsolatedAsyncioTestCase):
         await route_guard(r3, _make_mock_request("https://other.com/", popup_page))
         r3.abort.assert_awaited_once()
 
+    async def test_on_page_closed_callback_invoked(self):
+        page = _make_mock_page("https://example.com")
+        browser_ctx = MagicMock()
+        browser_ctx.route = AsyncMock()
+        browser_ctx.on = MagicMock()
+        closed_pages = []
+
+        guard = NavigationGuard(security=self.sec, get_user_id=lambda: "user_1")
+        await guard.attach(browser_ctx, page, on_page_closed=lambda p: closed_pages.append(p))
+        page._callbacks["close"]()
+        self.assertEqual(closed_pages, [page])
+
 
 if __name__ == "__main__":
     unittest.main()
