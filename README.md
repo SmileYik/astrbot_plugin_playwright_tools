@@ -60,7 +60,8 @@ git clone -b release https://github.com/SmileYik/astrbot_plugin_playwright_tools
 
 > **⚠️ 关于“长对话 Token 自动消减”功能的影响声明**  
 > 本插件的 `HistoryCleaner`（位于 `core/history_cleaner.py`）会在工具执行前直接原地改写大模型上下文（`run_context.messages`）中的历史 `tool` 消息内容（将其替换为占位符或副 AI 生成的摘要）。  
-> 根据 AstrBot 官方插件审核意见，原地改写已有历史消息会破坏大模型服务端 KV Cache（Prompt 缓存）命中率（官方建议若需注入信息应采用向后追加方式而非改写已有消息）。因此，官方插件市场版本（`release-market`）已移除该模块；如果您不介意对 Prompt 缓存命中率的影响、仍希望启用超长网页对话压缩，请从 GitHub `release` 分支安装完整版。
+> 根据 AstrBot 官方插件审核意见，原地改写已有历史消息会降低大模型服务端 KV Cache（Prompt 缓存）命中率，官方建议改用 `append`、`req.extra_user_content_parts` 或 `conversation_manager.append_message_pair()` 等向后追加方式注入。  
+> **为何未采用向后追加方式**：`HistoryCleaner` 的核心目的是在多轮网页浏览时缩减已积累的冗长工具调用内容、释放上下文窗口空间并降低后续轮次的输入 Token 量；若仅向后追加摘要而不缩减原历史 `tool` 消息，原有大体积网页内容仍会保留在上下文中，无法解决上下文长度膨胀问题。因此本项目在设计上做了取舍：官方插件市场版本（`release-market`）移除该模块以优先保障 Prompt 缓存命中率；如果您更看重超长网页对话的上下文长度控制、不介意缓存命中率受影响，可从 GitHub `release` 分支安装完整版。
 
 ### 2. 环境要求
 - Python 3.10+
