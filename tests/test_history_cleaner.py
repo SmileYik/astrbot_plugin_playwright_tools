@@ -1125,6 +1125,27 @@ class TestHistoryCleaner(unittest.IsolatedAsyncioTestCase):
         call_kwargs = mock_provider.text_chat.await_args.kwargs
         self.assertIn("用户意图为【明天北京天气怎么样？】，请据此总结：", call_kwargs["system_prompt"])
 
+    def test_get_content_replaces_image_parts_with_placeholder(self):
+        from types import SimpleNamespace
+        from astrbot_plugin_playwright_tools.core.history_cleaner import HistoryCleaner
+
+        cleaner = HistoryCleaner(context=MagicMock(), config={})
+        img_obj = SimpleNamespace(type="image", data="A" * 5000, mimeType="image/png")
+        img_dict = {"type": "image_url", "image_url": {"url": "data:image/png;base64," + "B" * 5000}}
+        msg = {
+            "role": "tool",
+            "content": [
+                SimpleNamespace(type="text", text="已打开图片资源"),
+                img_obj,
+                img_dict,
+            ],
+        }
+        extracted = cleaner._get_content(msg)
+        self.assertIn("已打开图片资源", extracted)
+        self.assertIn("[图片]", extracted)
+        self.assertNotIn("A" * 100, extracted)
+        self.assertNotIn("B" * 100, extracted)
+
 
 if __name__ == "__main__":
     unittest.main()

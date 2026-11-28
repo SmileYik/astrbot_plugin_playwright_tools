@@ -797,6 +797,19 @@ class TestPlainTextReader(unittest.IsolatedAsyncioTestCase):
         empty_kw = reader.search(snap, "")
         self.assertIn("检索失败", empty_kw)
 
+    def test_plain_text_reader_search_centers_long_single_line_match(self):
+        from astrbot_plugin_playwright_tools.core.readers.plain_text_reader import PlainTextReader
+
+        reader = PlainTextReader(chunk_char_limit=500)
+        long_line = ("x" * 350) + "NEEDLE_TOKEN_HERE" + ("y" * 200)
+        snap = reader.build_snapshot(text=long_line, url="https://example.com/min.json")
+
+        found = reader.search(snap, "NEEDLE_TOKEN_HERE")
+        self.assertIn("找到 1 处匹配", found)
+        match_lines = [ln for ln in found.splitlines() if ln.startswith("[第 1 行]")]
+        self.assertEqual(len(match_lines), 1)
+        self.assertIn("NEEDLE_TOKEN_HERE", match_lines[0])
+
 
 if __name__ == "__main__":
     unittest.main()

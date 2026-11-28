@@ -419,6 +419,53 @@ class TestPageHandler(unittest.TestCase):
         self.assertIn("已成功打开网页", res)
         self.assertIn("pw_read()", res)
 
+    def test_read_page_plain_text_snapshot_does_not_expire_after_60s(self):
+        import time
+        from astrbot_plugin_playwright_tools.core.readers.plain_text_reader import PlainTextReader
+
+        pt_reader = PlainTextReader(chunk_char_limit=220)
+        lines = "\n".join(f"row {i}: sample text content for pagination" for i in range(1, 20))
+        snap = pt_reader.build_snapshot(text=lines, url="https://example.com/data.json", mime_type="application/json")
+        snap.timestamp = time.time() - 120
+
+        st = self.mock_context.get_page_state(self.mock_page)
+        st.current_snapshot = snap
+        st.is_snapshot_dirty = False
+        self.mock_page.url = "https://example.com/data.json"
+        self.mock_page.inner_text = AsyncMock()
+
+        handler = PageHandler(
+            self.mock_mgr,
+            self.mock_sec,
+            self.mock_audit,
+            reader=self.mock_reader,
+            plain_text_reader=pt_reader,
+        )
+        res = run_coro(handler.read_page("s1", "u1", page=2))
+        self.assertIn("第 2/", res)
+        self.mock_page.inner_text.assert_not_called()
+
+    def test_open_url_image_empty_body_when_multimodal_enabled_reports_failure(self):
+        mock_resp = MagicMock()
+        mock_resp.headers = {"content-type": "image/png"}
+        mock_resp.body = AsyncMock(return_value=b"")
+        self.mock_page.goto = AsyncMock(return_value=mock_resp)
+        self.mock_page.wait_for_load_state = AsyncMock()
+        self.mock_page.screenshot = AsyncMock(return_value=b"")
+
+        handler = PageHandler(
+            self.mock_mgr,
+            self.mock_sec,
+            self.mock_audit,
+            reader=self.mock_reader,
+            allow_image_to_ai=True,
+        )
+        res = run_coro(handler.open_url("s1", "u1", "https://example.com/empty.png"))
+        self.mock_page.wait_for_load_state.assert_any_await("load", timeout=5000)
+        self.assertIsInstance(res, str)
+        self.assertNotIn("未开启", res)
+        self.assertIn("未能获取", res)
+
 
 if __name__ == "__main__":
     unittest.main()

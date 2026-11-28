@@ -208,6 +208,13 @@ class PageHandler(BaseActionHandler):
                         logger.debug(f"[PageHandler] 读取图片响应体失败，尝试降级截图: {body_err}")
                 if not image_bytes and hasattr(page, "screenshot"):
                     try:
+                        if hasattr(page, "wait_for_load_state"):
+                            try:
+                                load_ret = page.wait_for_load_state("load", timeout=5000)
+                                if inspect.isawaitable(load_ret):
+                                    await load_ret
+                            except Exception as load_err:
+                                logger.debug(f"[PageHandler] 图片降级前等待 load 跳过: {load_err}")
                         shot = page.screenshot(full_page=False)
                         image_bytes = await shot if inspect.isawaitable(shot) else shot
                         mime = "image/png"
@@ -216,12 +223,17 @@ class PageHandler(BaseActionHandler):
 
                 screenshot_path = self._save_audit_image(image_bytes, mime) if image_bytes else ""
                 size_info = f"{len(image_bytes)} 字节" if image_bytes else "未知大小"
-                if self.allow_image_to_ai and image_bytes:
-                    desc = (
-                        f"已打开图片资源: {url} (类型: {mime}, 大小: {size_info})。"
-                        f"当前位于第 {tab_pos}/{total_tabs} 个标签页，请直接分析下方图片内容。"
-                    )
-                    return build_image_tool_result(desc, image_bytes, mime), {"screenshot_path": screenshot_path}
+                if self.allow_image_to_ai:
+                    if image_bytes:
+                        desc = (
+                            f"已打开图片资源: {url} (类型: {mime}, 大小: {size_info})。"
+                            f"当前位于第 {tab_pos}/{total_tabs} 个标签页，请直接分析下方图片内容。"
+                        )
+                        return build_image_tool_result(desc, image_bytes, mime), {"screenshot_path": screenshot_path}
+                    return (
+                        f"已打开图片资源: {url} (类型: {mime})，但未能获取图片内容。当前位于第 {tab_pos}/{total_tabs} 个标签页。\n"
+                        f"[推荐操作: 可稍后调用 pw_media(action='screenshot_viewport', target='ai') 尝试重新捕获页面图像]"
+                    ), {"screenshot_path": screenshot_path}
 
                 return (
                     f"已打开图片资源: {url} (类型: {mime}, 大小: {size_info})。当前位于第 {tab_pos}/{total_tabs} 个标签页。\n"
@@ -338,7 +350,7 @@ class PageHandler(BaseActionHandler):
             active_reader = self.plain_text_reader if is_plain_text_snap else self.reader
             snapshot_ts = getattr(page_state.current_snapshot, "timestamp", 0) or 0
             snapshot_url = getattr(page_state.current_snapshot, "url", "") or ""
-            is_expired = (time.time() - snapshot_ts) > 60
+            is_expired = False if is_plain_text_snap else (time.time() - snapshot_ts) > 60
             url_changed = current_url != snapshot_url
 
             if (

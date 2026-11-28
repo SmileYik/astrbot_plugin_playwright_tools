@@ -1,6 +1,8 @@
 import inspect
 from typing import Any
 
+from astrbot.api import logger
+
 from .base import BasePageReader, PageSnapshot
 
 
@@ -112,13 +114,15 @@ class PlainTextReader(BasePageReader):
             try:
                 res = page.inner_text("body")
                 text = await res if inspect.isawaitable(res) else str(res)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[PlainTextReader] inner_text 提取异常: {e}")
                 text = ""
         if not text and page is not None and hasattr(page, "content"):
             try:
                 res = page.content()
                 text = await res if inspect.isawaitable(res) else str(res)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[PlainTextReader] page.content 提取异常: {e}")
                 text = ""
         return self.build_snapshot(text=text, url=page_url)
 
@@ -144,8 +148,16 @@ class PlainTextReader(BasePageReader):
         kw_lower = kw.lower()
         matches: list[str] = []
         for idx, line in enumerate(lines, start=1):
-            if kw_lower in line.lower():
-                snippet = line if len(line) <= 200 else line[:200] + "..."
+            pos = line.lower().find(kw_lower)
+            if pos != -1:
+                if len(line) <= 200:
+                    snippet = line
+                else:
+                    start = max(0, pos - 80)
+                    end = min(len(line), pos + len(kw) + 120)
+                    prefix = "..." if start > 0 else ""
+                    suffix = "..." if end < len(line) else ""
+                    snippet = f"{prefix}{line[start:end]}{suffix}"
                 matches.append(f"[第 {idx} 行] {snippet}")
                 if len(matches) >= 20:
                     break
