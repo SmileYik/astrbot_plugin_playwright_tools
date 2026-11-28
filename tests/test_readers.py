@@ -437,6 +437,12 @@ console.log(JSON.stringify({
         self.assertIn("keyword", meta["parameters"]["properties"])
         self.assertIn("refresh", meta["parameters"]["properties"])
 
+    def test_inline_markdown_reader_tool_metadata_ref_example(self):
+        reader = InlineMarkdownReader()
+        meta = reader.get_tool_metadata()
+        ref_desc = meta["parameters"]["properties"]["ref"]["description"]
+        self.assertIn("@r1", ref_desc)
+
 
 class TestAriaSnapshotReader(unittest.IsolatedAsyncioTestCase):
     def test_aria_reader_tool_metadata(self):

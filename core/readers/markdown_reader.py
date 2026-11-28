@@ -393,7 +393,7 @@ class InlineMarkdownReader(BasePageReader):
                     },
                     "ref": {
                         "type": "string",
-                        "description": "要查询详细信息或目标 URL 的元素 Ref 编号（如 '1', '2'） (可选)",
+                        "description": "要查询详细信息或目标 URL 的元素 Ref 编号（如 '@r1', '@r2'） (可选)",
                         "default": "",
                     },
                     "refresh": {
