@@ -3,6 +3,21 @@ from urllib.parse import urlparse
 
 from astrbot.api import logger
 
+ALL_KNOWN_ACTIONS: frozenset[str] = frozenset({
+    "read",
+    "click",
+    "fill",
+    "select",
+    "hover",
+    "focus",
+    "drag",
+    "press_key",
+    "scroll",
+    "screenshot",
+    "download",
+    "navigate",
+})
+
 class SecurityManager:
     """权限与白名单守卫管理器，负责鉴权、通配符域名匹配及顶层页面导航保护。"""
 
@@ -157,3 +172,24 @@ class SecurityManager:
             return False, f"拒绝操作：域名 '{host}' 未被授予 '{action}' 操作权限"
 
         return True, ""
+
+    def get_allowed_actions(self, user_id: str, url: str) -> set[str]:
+        """获取指定用户在目标 URL 上被允许执行的操作集合。"""
+        if self.admin_bypass and self.is_admin(user_id):
+            return set(ALL_KNOWN_ACTIONS)
+
+        if self.admin_only:
+            return set(ALL_KNOWN_ACTIONS) if self.is_admin(user_id) else set()
+
+        parsed = urlparse(url)
+        if parsed.scheme.lower() not in ("http", "https"):
+            return set()
+
+        if not self._extract_hostname(url):
+            return set()
+
+        matched_rule = self.get_matched_rule(url)
+        if not matched_rule:
+            return set()
+
+        return set(matched_rule.get("allowed_actions", []))

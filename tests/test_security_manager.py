@@ -138,5 +138,26 @@ class TestSecurityManager(unittest.TestCase):
         nav_ok, _ = mgr.is_url_allowed_navigation("user1", "https://example.com")
         self.assertFalse(nav_ok)
 
+    def test_get_allowed_actions(self):
+        from astrbot_plugin_playwright_tools.core.security_manager import ALL_KNOWN_ACTIONS
+
+        rules = [
+            {"domains": ["docs.example.com"], "allowed_actions": ["read", "screenshot"]},
+        ]
+        mgr = SecurityManager(
+            admin_only=False,
+            admin_uids=["admin1"],
+            admin_bypass=True,
+            whitelist_rules=rules,
+        )
+        self.assertEqual(mgr.get_allowed_actions("u1", "https://docs.example.com/guide"), {"read", "screenshot"})
+        self.assertEqual(mgr.get_allowed_actions("u1", "https://other.example.com"), set())
+        self.assertEqual(mgr.get_allowed_actions("u1", "file:///etc/passwd"), set())
+        self.assertEqual(mgr.get_allowed_actions("admin1", "https://other.example.com"), set(ALL_KNOWN_ACTIONS))
+
+        mgr_admin_only = SecurityManager(admin_only=True, admin_uids=["admin1"], admin_bypass=False)
+        self.assertEqual(mgr_admin_only.get_allowed_actions("u1", "https://docs.example.com"), set())
+        self.assertEqual(mgr_admin_only.get_allowed_actions("admin1", "https://docs.example.com"), set(ALL_KNOWN_ACTIONS))
+
 if __name__ == "__main__":
     unittest.main()
