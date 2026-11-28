@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+### 按页面隔离 `ref_map` 与跨标签页自动寻址
+- **按标签页独立维护状态 (`PageState`)**：
+  - 在 `BrowserSessionContext` 中移除全局 `ref_map`、`current_snapshot` 与 `is_snapshot_dirty`，改为按 `id(page)` 为每个标签页独立维护 `PageState`；`switch_tab` 不再清空原标签页快照与引用映射，主帧导航及页面关闭仅精准清理对应标签页状态。
+- **`AriaSnapshotReader` 全局单调递增 `ref_id` 映射**：
+  - `AriaSnapshotReader` 按上下文 `start_ref` 将原生 `aria-ref` 重映射为全局单调递增数字 `ref_id`，并在 `ref_map` 中保留 `aria_ref` 字段供底层 Locator 定位，消除多标签页重号冲突。
+- **跨标签页 `ref_id` 自动寻址与激活**：
+  - 在 `BaseActionHandler.execute_action` 中统一按 `ref` 优先检索当前活动页并支持跨标签页反查；命中其他标签页时自动将其切换为当前活动页并执行鉴权与操作。
+
 ### Markdown 阅读器 `@r` Ref 前缀与行内排版优化
 - **Ref ID `@r` 前缀规范**：
   - `InlineMarkdownReader` 提取的 Ref ID 统一采用 `@r` 前缀（如 `@r1`、`@r2`），同步写入 `data-astr-ref` 与 `ref_map`，下游工具调用保持精确匹配（需传入完整 `@rN`）。

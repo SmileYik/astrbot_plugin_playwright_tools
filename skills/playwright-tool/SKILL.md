@@ -43,7 +43,7 @@ description: 指导 AI 使用 pw_page、pw_read、pw_interact 与 pw_media 工�
 4. **强制刷新**：`pw_read(refresh=True)`
    - 当完成交互操作（如点击提交、加载更多）或等待异步数据加载后，强制重新提取页面最新快照。
 
-> **Ref ID 说明**：所有 Ref 均为由阅读器分配的字符串标识符（Markdown 模式为 `@r` 前缀如 `'@r1'`、`'@r12'`，ARIA 模式为 `'e1'`）。后续工具交互传参时必须传入完整字符串（如 `'@r12'`）以精确匹配。
+> **Ref ID 说明**：所有 Ref 均为由阅读器分配的全局唯一字符串标识符（Markdown 模式为 `@r` 前缀如 `'@r1'`、`'@r12'`，ARIA 模式为单调递增数字如 `'1'`、`'12'`）。后续工具交互传参时必须传入完整字符串以精确匹配。每个标签页独立保留各自的 Ref 映射，直接传入历史标签页的 `ref` 即可自动切回并操作对应页面。
 
 ### 步骤三：元素定位与交互 (`pw_interact`)
 依据快照中获取到的 Ref 编号执行键鼠交互：
@@ -63,7 +63,7 @@ description: 指导 AI 使用 pw_page、pw_read、pw_interact 与 pw_media 工�
 - **文件下载**：定位到下载链接或按钮的 Ref 编号后，调用 `pw_media(action='download', ref='@r25')`
 
 ### 步骤五：多标签页、弹窗与资源释放 (`pw_page`)
-- **切换标签页**：当点击链接导致外部新窗口打开时，调用 `pw_page(action='switch_tab', tab_index=2)`
+- **切换标签页**：当需要显式切换视图或读取其他标签页内容时，调用 `pw_page(action='switch_tab', tab_index=2)`；若已知原标签页元素的 `ref`，也可直接调用 `pw_interact` / `pw_read(ref=...)` 自动切回操作
 - **响应弹窗**：页面触发原生 JavaScript Alert/Confirm 时，调用 `pw_page(action='dialog', dialog_action='accept'|'dismiss')` 预设处理
 - **关闭浏览器**：任务全部完成或用户明确要求结束时，调用 `pw_page(action='close')` 释放资源
 
