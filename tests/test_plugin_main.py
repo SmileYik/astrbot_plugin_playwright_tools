@@ -154,7 +154,7 @@ class TestPluginMain(unittest.TestCase):
         self.assertTrue(plugin.interact_handler.mask_password_inputs)
         self.assertTrue(plugin.media_handler.mask_password_inputs)
         self.assertEqual(plugin.content_extraction_mode, "inline_markdown")
-        self.assertEqual(plugin.page_chunk_char_limit, 2000)
+        self.assertEqual(plugin.page_chunk_char_limit, 4000)
         from astrbot_plugin_playwright_tools.core.readers import InlineMarkdownReader
         self.assertIsInstance(plugin.reader, InlineMarkdownReader)
         mock_ctx.add_llm_tools.assert_called_once()

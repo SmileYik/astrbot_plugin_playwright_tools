@@ -6,6 +6,13 @@
 
 ## [v1.5.0] - 2026-11-28
 
+### 配置体验与文档体系完善
+- **现代大上下文默认值调优与控件精简**：
+  - 将 `page_chunk_char_limit`、`browser_window_width/height`、`screenshot_max_height_px`、`file_retention_days`、`audit_retention_days`、`high_watermark`、`low_watermark`、`compress_max_input_chars` 从滑块改为直接数值输入；
+  - 将默认值调优为均衡大上下文配置（`tool_execution_timeout_seconds=45`、`page_chunk_char_limit=4000`、`browser_window_height=800`、`screenshot_timeout_seconds=20`、`audit_retention_days=14`、`high_watermark=24000`、`low_watermark=10000`），并将副 AI 默认 `compress_prompt` 长度上限放宽至 `1000` 字，同步对齐 `main.py` 与 `core/history_cleaner.py` 兜底值。
+- **文档分层与新版 README**：
+  - 新增面向项目整体工具能力与技术约定的 [docs/AI_TOOLS.md](docs/AI_TOOLS.md)，并结合控制台截图重新排版 [README.md](README.md)。
+
 ### 工具回复引导优化与标签页状态感知
 - **权限拒绝时列出可执行操作指引**：
   - 在 `SecurityManager` 新增 `get_allowed_actions(user_id, url)`，结合 `NavigationGuard` 单跳授权，在 `BaseActionHandler.execute_action` 鉴权失败时将当前页面允许的动作直接映射为具体 `pw_*` 工具调用指引（无可用权限时引导调用 `pw_page(action='list_tabs')` 或 `open`）。

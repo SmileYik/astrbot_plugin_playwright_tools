@@ -105,11 +105,11 @@ playwright install chromium
 | `context_mode` | string (select) | `"personal"` | 隔离模式：`personal` (个人隔离，每用户独享独立上下文) 或 `session` (会话共享，群聊/私聊共用) |
 | `idle_timeout_minutes` | int (slider) | `10` | 空闲销毁时长：上下文无交互超过此时长后自动关闭以释放内存 (1~120 分钟) |
 | `browser_idle_timeout_minutes` | int (slider) | `5` | 浏览器进程空闲退出：所有上下文关闭后，底层浏览器进程保持等待的最长空闲分钟数 (0~120 分钟，设为 0 表示常驻不退出) |
-| `tool_execution_timeout_seconds` | int (slider) | `30` | 执行超时时长：单个工具执行的最长等待时间 (5~180 秒) |
+| `tool_execution_timeout_seconds` | int (slider) | `45` | 执行超时时长：单个工具执行的最长等待时间 (5~180 秒，建议 30~90 秒，避免慢站点临界超时) |
 | `enable_close_tool` | bool | `true` | 注册关闭工具：是否向大模型注册主动关闭浏览器上下文的工具 |
 | `system_prompt_injection` | text | `""` | 系统提示词注入：在调用大模型前动态注入自定义系统提示词，留空则不注入 |
 | `content_extraction_mode` | string (select) | `"inline_markdown"` | 页面正文提炼模式：`inline_markdown` (内联交互 Markdown [推荐]) 或 `aria_snapshot` (无障碍语义树快照) |
-| `page_chunk_char_limit` | int | `2000` | 分页字符预算：单页正文提炼的最大字符预算（建议 1000 ~ 4000），超限自动平滑切分至下一页 |
+| `page_chunk_char_limit` | int | `4000` | 分页字符预算：单页正文提炼的最大字符预算（建议 3000 ~ 6000，最小 500），增大预算可减少翻页次数 |
 
 #### ③ 浏览器引擎 (`browser`)
 | 配置项 | 类型 | 默认值 | 作用描述 |
@@ -119,8 +119,8 @@ playwright install chromium
 | `browser_executable_path` | string | `""` | 浏览器执行路径：自定义浏览器二进制文件的完整绝对路径（仅当核心类型为 `custom` 时必填） |
 | `camoufox_geoip` | bool | `false` | GeoIP 定位防检：Camoufox 适配器是否根据 IP 自动模拟地理位置与时区 |
 | `browser_headless` | bool | `true` | 无头模式：是否以无头模式后台静默运行浏览器 |
-| `browser_window_width` | int | `1280` | 窗口宽度：浏览器初始视口宽度 (像素) |
-| `browser_window_height` | int | `720` | 窗口高度：浏览器初始视口高度 (像素) |
+| `browser_window_width` | int | `1280` | 窗口宽度：浏览器初始视口宽度 (像素，常用桌面宽度建议 1280 或 1920) |
+| `browser_window_height` | int | `800` | 窗口高度：浏览器初始视口高度 (像素，建议 720 ~ 1080，适当增高可减少首屏内容截断) |
 | `browser_user_agent` | string | `""` | 自定义 UA：自定义 User-Agent，留空使用内置默认值 |
 
 #### ④ 截图与交互输出 (`media`)
@@ -129,17 +129,17 @@ playwright install chromium
 | `screenshot_format` | string (select) | `"png"` | 截图格式：`png` (无损高清) 或 `jpeg` (压缩优化) |
 | `screenshot_quality` | int (slider) | `80` | 截图质量：JPEG 格式时的压缩质量 (1~100) |
 | `screenshot_max_height_px` | int | `8000` | 长截图高度上限：全屏截取的最大像素高度，超出自动截断 |
-| `screenshot_timeout_seconds` | int (slider) | `15` | 长截图超时时长：长截图拼接渲染超时秒数 (5~120 秒)，超时降级为视口截图 |
+| `screenshot_timeout_seconds` | int (slider) | `20` | 长截图超时时长：长截图拼接渲染超时秒数 (5~120 秒，建议 15~30 秒)，超时自动降级为视口截图 |
 | `allow_screenshot_to_ai` | bool | `false` | 截图发送给 AI：是否允许将网页截图发送给大模型进行多模态视觉理解 |
 | `element_multiline_separator` | string | `" \| "` | 元素换行替换符：页面可操作元素提取时内部换行符的替换连接符 |
 
 #### ⑤ 存储与审计管理 (`storage_audit`, 默认折叠)
 | 配置项 | 类型 | 默认值 | 作用描述 |
 |---|---|---|---|
-| `download_save_path` | string | `"data/downloads"` | 下载保存路径：浏览器下载文件保存的本地目录 |
-| `screenshot_save_path` | string | `"data/screenshots"` | 截图保存路径：截图文件保存的本地目录 |
+| `download_save_path` | string | `"data/plugin_data/astrbot_plugin_playwright_tools/downloads"` | 下载保存路径：浏览器下载文件保存的本地目录 |
+| `screenshot_save_path` | string | `"data/plugin_data/astrbot_plugin_playwright_tools/screenshots"` | 截图保存路径：截图文件保存的本地目录 |
 | `file_retention_days` | int | `7` | 文件保留天数：下载与截图文件保留天数，超期自动清理 |
-| `audit_retention_days` | int | `7` | 审计保留天数：审计记录保存天数，超期自动清理 |
+| `audit_retention_days` | int | `14` | 审计保留天数：审计记录保存天数（建议 7 ~ 30），超期自动清理 |
 | `audit_max_output_chars` | int | `0` | 审计字符上限：单条工具输出最大字符上限 (0 表示不限长度) |
 | `audit_save_screenshots` | bool | `true` | 审计持久化截图：是否在审计数据库中关联保存截图文件 |
 
@@ -147,12 +147,12 @@ playwright install chromium
 | 配置项 | 类型 | 默认值 | 作用描述 |
 |---|---|---|---|
 | `enable_cleanup` | bool | `false` | 启用历史消减：开启后监控本插件工具调用字符并在超标时自动消减 |
-| `high_watermark` | int | `8000` | 高水位阈值：历史工具调用总字符超过此时触发清理（建议 5000 ~ 12000） |
-| `low_watermark` | int | `3000` | 低水位目标：触发清理后消减到的目标字符数（建议设为高水位的 30% ~ 50%） |
+| `high_watermark` | int | `24000` | 高水位阈值：历史工具调用总字符超过此时触发清理（建议 16000 ~ 40000） |
+| `low_watermark` | int | `10000` | 低水位目标：触发清理后消减到的目标字符数（建议设为高水位的 30% ~ 50%） |
 | `cleanup_strategy` | string (select) | `"delete"` | 消减策略：`delete` (直接占位清空) 或 `compress` (副 AI 总结提炼) |
 | `compress_provider_id` | string | `""` | 压缩模型提供商：执行压缩提炼的 AI 提供商，留空使用会话默认模型 |
-| `compress_max_input_chars` | int | `0` | 副 AI 输入上限：最大输入字符预算，0 代表不限制，超长直接截断 |
-| `compress_prompt` | text | `"你是一个精炼的内容总结器..."` | 压缩提示词：副 AI 执行提炼时遵循的核心提示词，支持使用 `{{user_input}}` 动态占位符自动引入当前用户问题 |
+| `compress_max_input_chars` | int | `0` | 副 AI 输入上限：最大输入字符预算，0 代表不限制，如需截断建议 30000 ~ 60000 |
+| `compress_prompt` | text | `"你是一个精炼的内容总结器..."` | 压缩提示词：副 AI 执行提炼时遵循的指导原则（默认输出不超过 1000 字的结构化摘要），支持 `{{user_input}}` 动态占位符 |
 | `compress_use_persona` | bool | `false` | 启用人设面具：是否在压缩时注入人设设定 |
 | `compress_persona_id` | string | `""` | 指定人设面具：用于压缩的人设面具，留空使用系统默认人设 |
 | `include_compressed_in_watermark` | bool | `false` | 历史摘要计入水位：开启后此前已生成的历史摘要计入水位统计并参与滚动重压缩；关闭后不计入且不重复压缩 |
